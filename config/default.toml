@@ -1,0 +1,15 @@
+[auth]
+browser_auth_path = "~/.config/ytmusic-tui/browser.json"
+
+[player]
+backend = "mpv"
+volume = 80
+audio_quality = "high"  # low / normal / high
+
+[ui]
+theme = "synthwave"
+vim_keys = true
+
+[keybinds]
+# Default keybindings (spotify_player-compatible)
+# Override in ~/.config/ytmusic-tui/config.toml

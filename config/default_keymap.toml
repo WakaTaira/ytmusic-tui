@@ -1,0 +1,32 @@
+# Default keybindings for ytmusic-tui (spotify_player-compatible).
+#
+# Copy this file to ~/.config/ytmusic-tui/keymap.toml and
+# customise the bindings you want to change.  Only the actions
+# listed here will be overridden; any action you omit keeps its
+# compiled-in default.
+#
+# Key names follow Textual conventions:
+#   - Single characters: "n", "p", "q", "Q" (Shift+Q)
+#   - Modifiers: "ctrl+q", "ctrl+shift+s"
+#   - Special keys: "space", "escape", "tab", "enter",
+#     "plus", "minus", "equal", "slash", "full_stop"
+#   - Multiple keys for one action: "plus,equal" (comma-separated)
+
+[keybinds]
+toggle_pause = "space"
+next_track = "n"
+previous_track = "p"
+toggle_shuffle = "s"
+cycle_repeat = "r"
+volume_up = "plus,equal"
+volume_down = "minus"
+focus_search = "slash"
+switch_home = "g"
+switch_library = "l"
+switch_queue = "q"
+quit = "Q"
+open_current_artist = "a"
+open_current_album = "A"
+go_back = "escape"
+open_action_popup = "full_stop"
+open_theme_popup = "T"

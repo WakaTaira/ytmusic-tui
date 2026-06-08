@@ -1,0 +1,15 @@
+/* ytmusic-tui base stylesheet */
+
+Screen {
+    background: $surface;
+    layers: default overlay;
+}
+
+Header {
+    dock: top;
+}
+
+ContentSwitcher {
+    width: 1fr;
+    height: 1fr;
+}
