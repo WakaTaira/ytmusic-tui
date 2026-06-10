@@ -47,3 +47,7 @@ initial-prompt.md
 loop-prompt.md
 runner.sh
 .claude/
+
+# Rust
+rust/target/
+rust/spikes/*/target/

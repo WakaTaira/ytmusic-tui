@@ -1,0 +1,12 @@
+[workspace]
+members = ["ytmusic-tui"]
+exclude = ["spikes"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/WakaTaira/ytmusic-tui"
+
+[workspace.lints.rust]
+unsafe_code = "warn"
