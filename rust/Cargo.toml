@@ -1,5 +1,5 @@
 [workspace]
-members = ["ytmusic-tui"]
+members = ["ytmusic-api", "ytmusic-tui"]
 exclude = ["spikes"]
 resolver = "3"
 
