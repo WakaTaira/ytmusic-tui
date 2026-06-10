@@ -237,6 +237,73 @@ class TestKeyBindings:
             binding_keys = [b.key for b in app.BINDINGS]
             assert "q" in binding_keys
 
+    @pytest.mark.asyncio
+    async def test_seek_bindings_exist(self) -> None:
+        """> / < should be bound to seek actions (spotify_player style)."""
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            actions = {b.key: b.action for b in app.BINDINGS}
+            assert actions.get("greater_than_sign") == "seek_forward"
+            assert actions.get("less_than_sign") == "seek_backward"
+
+    def test_seek_actions_remappable_via_keymap(self) -> None:
+        """seek_forward / seek_backward must be exposed to keymap.toml."""
+        from ytmusic_tui.app import YtMusicTui
+
+        assert YtMusicTui._ACTION_TO_TEXTUAL["seek_forward"] == "seek_forward"
+        assert YtMusicTui._ACTION_TO_TEXTUAL["seek_backward"] == "seek_backward"
+
+
+# ===================================================================
+# Seek actions
+# ===================================================================
+
+
+class TestSeekActions:
+    @pytest.mark.asyncio
+    async def test_seek_forward_seeks_5s(self) -> None:
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            app.player.get_state.return_value = PlayerState(video_id="active")
+            app.action_seek_forward()
+            app.player.seek.assert_called_once_with(5.0)
+
+    @pytest.mark.asyncio
+    async def test_seek_backward_seeks_minus_5s(self) -> None:
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            app.player.get_state.return_value = PlayerState(video_id="active")
+            app.action_seek_backward()
+            app.player.seek.assert_called_once_with(-5.0)
+
+    @pytest.mark.asyncio
+    async def test_seek_ignored_when_nothing_loaded(self) -> None:
+        """Seeking with no track loaded must be a no-op, not a crash."""
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            app.player.get_state.return_value = PlayerState()
+            app.action_seek_forward()
+            app.action_seek_backward()
+            app.player.seek.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_seek_error_is_swallowed(self) -> None:
+        """A not-yet-seekable stream (ytdl still resolving) must not crash."""
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            app.player.get_state.return_value = PlayerState(video_id="active")
+            app.player.seek.side_effect = SystemError("seek failed")
+            app.action_seek_forward()  # must not raise
+
+    @pytest.mark.asyncio
+    async def test_seek_works_while_paused(self) -> None:
+        """Seeking while paused (video loaded, not playing) is allowed."""
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            app.player.get_state.return_value = PlayerState(is_playing=False, video_id="active")
+            app.action_seek_forward()
+            app.player.seek.assert_called_once_with(5.0)
+
 
 # ===================================================================
 # Duration display (Bug 1)

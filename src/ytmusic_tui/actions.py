@@ -50,9 +50,12 @@ else:
 # Volume adjustment step size
 _VOLUME_STEP = 5
 
+# Seek step in seconds (spotify_player compatible)
+_SEEK_STEP = 5.0
+
 
 class PlaybackActions(_Base):
-    """Transport control: play/pause, track skip, shuffle, volume."""
+    """Transport control: play/pause, track skip, seek, shuffle, volume."""
 
     if TYPE_CHECKING:
         player: Player
@@ -99,6 +102,20 @@ class PlaybackActions(_Base):
 
     def action_volume_down(self) -> None:
         self.player.adjust_volume(-_VOLUME_STEP)
+
+    def action_seek_forward(self) -> None:
+        self._seek_relative(_SEEK_STEP)
+
+    def action_seek_backward(self) -> None:
+        self._seek_relative(-_SEEK_STEP)
+
+    def _seek_relative(self, seconds: float) -> None:
+        if not self.player.get_state().video_id:
+            return
+        # The stream may not be seekable yet while the ytdl-hook is still
+        # resolving the URL; a failed seek is a harmless no-op.
+        with contextlib.suppress(Exception):
+            self.player.seek(seconds)
 
     def _queue_and_play(self, tracks: list[Track]) -> None:
         self.queue_manager.set_playlist(tracks, start_index=0)
