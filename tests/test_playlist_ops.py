@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from helpers import capture_notifications as _capture_notifications
 from helpers import make_app
 from helpers import make_track as _make_track
 
@@ -210,17 +211,6 @@ class TestPlaylistPickerPopup:
 # ---------------------------------------------------------------------------
 # User feedback for playlist operations (worker -> notify)
 # ---------------------------------------------------------------------------
-
-
-def _capture_notifications(app) -> list[tuple[str, str]]:
-    """Replace app.notify with a recorder; returns the capture list."""
-    captured: list[tuple[str, str]] = []
-
-    def _notify(message: str, *, severity: str = "information", **kwargs) -> None:
-        captured.append((message, severity))
-
-    app.notify = _notify
-    return captured
 
 
 class TestPlaylistOpsFeedback:

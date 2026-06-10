@@ -6,6 +6,7 @@ import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
+from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import ContentSwitcher, Header, Static
@@ -216,6 +217,8 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
         auth_warning = validate_auth_file(self._auth_path)
         if auth_warning:
             self.notify(auth_warning, severity="warning", timeout=8)
+        else:
+            self._probe_session()
 
         try:
             from ytmusic_tui.mpris import MprisService
@@ -231,6 +234,24 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
             )
         except Exception:
             self._mpris = None
+
+    @work(thread=True)
+    def _probe_session(self) -> None:
+        """Warn when the cookies look signed out.
+
+        Stale browser cookies do not raise auth errors: YouTube serves
+        logged-out pages (HTTP 200) and library views silently come back
+        empty. Probe once at startup so the user gets an actionable hint
+        instead of a mysteriously empty library.
+        """
+        if self.music_api.is_session_valid():
+            return
+        self.call_from_thread(
+            self.notify,
+            "YouTube session looks signed out — library will be empty. Run: ytmusic-tui auth",
+            severity="warning",
+            timeout=10,
+        )
 
     # -----------------------------------------------------------------
     # Navigation

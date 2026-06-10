@@ -269,6 +269,28 @@ class MusicAPI:
         self._client = YTMusic(str(auth_path))
 
     # ------------------------------------------------------------------
+    # Session
+    # ------------------------------------------------------------------
+
+    def is_session_valid(self) -> bool:
+        """Best-effort check that the cookies still carry a signed-in session.
+
+        When browser cookies go stale, YouTube serves logged-out pages
+        with HTTP 200 instead of raising auth errors: library endpoints
+        silently come back empty. Requesting the account info is a cheap
+        canary because it only parses for a signed-in session.
+        """
+        try:
+            self._client.get_account_info()
+        except (KeyError, TypeError):
+            # Signed-out responses lack the account header structure.
+            return False
+        except Exception:
+            # Network or transient errors: cannot verify, assume valid.
+            return True
+        return True
+
+    # ------------------------------------------------------------------
     # Search
     # ------------------------------------------------------------------
 

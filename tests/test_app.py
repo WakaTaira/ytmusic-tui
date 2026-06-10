@@ -255,6 +255,43 @@ class TestKeyBindings:
 
 
 # ===================================================================
+# Session probe (stale cookies served as logged-out pages)
+# ===================================================================
+
+
+class TestSessionProbe:
+    @pytest.mark.asyncio
+    async def test_probe_warns_when_signed_out(self) -> None:
+        from helpers import capture_notifications
+
+        app = _make_app()
+        app.music_api.is_session_valid.return_value = False
+        async with app.run_test(size=(120, 40)) as pilot:
+            captured = capture_notifications(app)
+            app._probe_session()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+        assert any(
+            "signed out" in message and severity == "warning" for message, severity in captured
+        )
+
+    @pytest.mark.asyncio
+    async def test_probe_silent_when_session_valid(self) -> None:
+        from helpers import capture_notifications
+
+        app = _make_app()
+        app.music_api.is_session_valid.return_value = True
+        async with app.run_test(size=(120, 40)) as pilot:
+            captured = capture_notifications(app)
+            app._probe_session()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+        assert captured == []
+
+
+# ===================================================================
 # Seek actions
 # ===================================================================
 

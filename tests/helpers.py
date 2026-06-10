@@ -39,6 +39,17 @@ def make_tracks(count: int) -> list[Track]:
     return [make_track(i) for i in range(1, count + 1)]
 
 
+def capture_notifications(app: YtMusicTui) -> list[tuple[str, str]]:
+    """Replace app.notify with a recorder; returns the capture list."""
+    captured: list[tuple[str, str]] = []
+
+    def _notify(message: str, *, severity: str = "information", **kwargs: object) -> None:
+        captured.append((message, severity))
+
+    app.notify = _notify  # type: ignore[method-assign]
+    return captured
+
+
 def make_app(
     keymap_path: Path | None = None,
     *,

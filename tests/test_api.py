@@ -183,6 +183,36 @@ def _make_home_section(
 # ---------------------------------------------------------------------------
 
 
+class TestSessionValidity:
+    """is_session_valid: stale cookies are served as logged-out pages."""
+
+    @patch("ytmusic_tui.api.YTMusic")
+    def test_valid_when_account_info_parses(self, mock_ytmusic_cls: MagicMock) -> None:
+        mock_client = MagicMock()
+        mock_client.get_account_info.return_value = {"accountName": "taira"}
+        mock_ytmusic_cls.return_value = mock_client
+
+        assert MusicAPI("/fake/path").is_session_valid() is True
+
+    @patch("ytmusic_tui.api.YTMusic")
+    def test_signed_out_response_is_invalid(self, mock_ytmusic_cls: MagicMock) -> None:
+        mock_client = MagicMock()
+        # ytmusicapi raises KeyError when the signed-out page lacks the
+        # account header structure.
+        mock_client.get_account_info.side_effect = KeyError("header")
+        mock_ytmusic_cls.return_value = mock_client
+
+        assert MusicAPI("/fake/path").is_session_valid() is False
+
+    @patch("ytmusic_tui.api.YTMusic")
+    def test_network_error_assumed_valid(self, mock_ytmusic_cls: MagicMock) -> None:
+        mock_client = MagicMock()
+        mock_client.get_account_info.side_effect = OSError("connection refused")
+        mock_ytmusic_cls.return_value = mock_client
+
+        assert MusicAPI("/fake/path").is_session_valid() is True
+
+
 class TestMusicAPIInit:
     """Test client construction."""
 
