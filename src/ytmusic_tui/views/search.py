@@ -19,6 +19,7 @@ from ytmusic_tui.formatting import format_duration as _format_duration
 from ytmusic_tui.layout import Orientation
 from ytmusic_tui.views.filter_bar import FilterBar
 from ytmusic_tui.views.guards import teardown_safe
+from ytmusic_tui.views.playlist import PlaylistView
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -432,12 +433,7 @@ class SearchView(Static):
         if switch is not None:
             switch("playlist")
 
-        from ytmusic_tui.views.playlist import PlaylistView
-
-        playlist_view = self.app.query_one(PlaylistView)
-        load = getattr(playlist_view, "load_playlist", None)
-        if load is not None:
-            load(playlist.playlist_id)
+        self.app.query_one(PlaylistView).show_track_list(playlist)
 
     # -----------------------------------------------------------------
     # Public API
