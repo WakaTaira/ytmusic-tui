@@ -97,6 +97,7 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
         Binding("less_than_sign", "seek_backward", "Seek -5s", show=False, id="seek_backward"),
         Binding("circumflex_accent", "seek_start", "Seek 0:00", show=False, id="seek_start"),
         Binding("underscore", "toggle_mute", "Mute", show=False, id="toggle_mute"),
+        Binding("b", "cycle_audio_quality", "Quality", show=False, id="cycle_audio_quality"),
         Binding("f", "toggle_like", "Like", show=True, id="toggle_like"),
         Binding("R", "start_radio", "Radio", show=True, key_display="R", id="start_radio"),
         Binding(
@@ -163,7 +164,7 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
 
         self._auth_path = resolved_path
         self.music_api = MusicAPI(resolved_path)
-        self.player = Player()
+        self.player = Player(audio_quality=self.config.player.audio_quality)
         self.queue_manager = QueueManager()
         self.nav = NavigationManager(PageState(page_type="home"))
 

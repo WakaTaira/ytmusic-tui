@@ -873,6 +873,79 @@ class TestPlayerBarLayout:
 
 
 # ===================================================================
+# Audio quality
+# ===================================================================
+
+
+class TestAudioQuality:
+    @pytest.mark.asyncio
+    async def test_cycle_audio_quality_notifies(self) -> None:
+        """Pressing b fires a notification that contains the new quality level."""
+        from helpers import capture_notifications
+
+        app = _make_app()
+        app.player.cycle_audio_quality.return_value = "low"
+        async with app.run_test(size=(120, 40)) as _pilot:
+            captured = capture_notifications(app)
+            app.action_cycle_audio_quality()
+
+        assert any("low" in message for message, _ in captured)
+
+    @pytest.mark.asyncio
+    async def test_cycle_audio_quality_notification_mentions_next_track(self) -> None:
+        """The notification must mention that the change applies from the next track."""
+        from helpers import capture_notifications
+
+        app = _make_app()
+        app.player.cycle_audio_quality.return_value = "normal"
+        async with app.run_test(size=(120, 40)) as _pilot:
+            captured = capture_notifications(app)
+            app.action_cycle_audio_quality()
+
+        assert any("next track" in message for message, _ in captured)
+
+    def test_cycle_audio_quality_binding_id_present(self) -> None:
+        """Binding id 'cycle_audio_quality' must exist for keymap.toml remapping."""
+        from textual.binding import Binding
+
+        from ytmusic_tui.app import YtMusicTui
+
+        binding_ids = {b.id for b in YtMusicTui.BINDINGS if isinstance(b, Binding)}
+        assert "cycle_audio_quality" in binding_ids
+
+    def test_cycle_audio_quality_in_default_keymap(self) -> None:
+        """cycle_audio_quality must appear in DEFAULT_KEYMAP with key 'b'."""
+        from ytmusic_tui.config import DEFAULT_KEYMAP
+
+        assert DEFAULT_KEYMAP.get("cycle_audio_quality") == "b"
+
+    @pytest.mark.asyncio
+    async def test_b_key_triggers_cycle(self) -> None:
+        """Pressing b in the running app calls cycle_audio_quality on the player."""
+        app = _make_app()
+        app.player.cycle_audio_quality.return_value = "low"
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("b")
+
+        app.player.cycle_audio_quality.assert_called_once()
+
+    def test_app_passes_audio_quality_to_player(self) -> None:
+        """YtMusicTui forwards config.player.audio_quality to Player.__init__."""
+        from ytmusic_tui.config import AppConfig, PlayerConfig
+
+        config = AppConfig(player=PlayerConfig(audio_quality="low"))
+        # Patch Player directly so we can spy on the constructor call.
+        with patch("ytmusic_tui.app.Player") as mock_player_cls:
+            mock_player_cls.return_value.get_state.return_value = PlayerState()
+            from ytmusic_tui.app import YtMusicTui
+
+            with patch("ytmusic_tui.app.MusicAPI"):
+                YtMusicTui(auth_path="/fake/auth.json", config=config)
+
+        mock_player_cls.assert_called_once_with(audio_quality="low")
+
+
+# ===================================================================
 # CLI entry point dispatch
 # ===================================================================
 

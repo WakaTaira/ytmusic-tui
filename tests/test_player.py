@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
-from ytmusic_tui.player import Player, PlayerState
+from ytmusic_tui.player import AUDIO_QUALITY_FORMATS, Player, PlayerState
 
 
 class TestPlayerState:
@@ -37,6 +37,7 @@ class TestPlayer:
             ytdl=True,
             video=False,
             terminal=False,
+            ytdl_format=AUDIO_QUALITY_FORMATS["high"],
         )
         player.shutdown()
 
@@ -282,4 +283,96 @@ class TestEndFileHandling:
         player = Player()
         player.on_track_end = None
         player._handle_end_file(self._event(mpv_mod.MpvEventEndFile.EOF))
+        player.shutdown()
+
+
+class TestAudioQuality:
+    """Player init passes the right ytdl_format and quality controls work."""
+
+    @patch("ytmusic_tui.player.mpv.MPV")
+    def test_init_high_quality(self, mock_mpv_cls: MagicMock) -> None:
+        Player(audio_quality="high")
+        mock_mpv_cls.assert_called_once_with(
+            ytdl=True,
+            video=False,
+            terminal=False,
+            ytdl_format=AUDIO_QUALITY_FORMATS["high"],
+        )
+
+    @patch("ytmusic_tui.player.mpv.MPV")
+    def test_init_normal_quality(self, mock_mpv_cls: MagicMock) -> None:
+        Player(audio_quality="normal")
+        mock_mpv_cls.assert_called_once_with(
+            ytdl=True,
+            video=False,
+            terminal=False,
+            ytdl_format=AUDIO_QUALITY_FORMATS["normal"],
+        )
+
+    @patch("ytmusic_tui.player.mpv.MPV")
+    def test_init_low_quality(self, mock_mpv_cls: MagicMock) -> None:
+        Player(audio_quality="low")
+        mock_mpv_cls.assert_called_once_with(
+            ytdl=True,
+            video=False,
+            terminal=False,
+            ytdl_format=AUDIO_QUALITY_FORMATS["low"],
+        )
+
+    @patch("ytmusic_tui.player.mpv.MPV")
+    def test_unknown_quality_normalises_to_high(self, mock_mpv_cls: MagicMock) -> None:
+        """Config typos ("lossless", "ultra", etc.) degrade to "high"."""
+        player = Player(audio_quality="lossless")
+        assert player.audio_quality == "high"
+        mock_mpv_cls.assert_called_once_with(
+            ytdl=True,
+            video=False,
+            terminal=False,
+            ytdl_format=AUDIO_QUALITY_FORMATS["high"],
+        )
+        player.shutdown()
+
+    @patch("ytmusic_tui.player.mpv.MPV")
+    def test_audio_quality_property(self, mock_mpv_cls: MagicMock) -> None:
+        player = Player(audio_quality="normal")
+        assert player.audio_quality == "normal"
+        player.shutdown()
+
+    @patch("ytmusic_tui.player.mpv.MPV")
+    def test_set_audio_quality_writes_format_to_mpv(self, mock_mpv_cls: MagicMock) -> None:
+        """set_audio_quality stores the new level and writes the option to mpv."""
+        mock_mpv = mock_mpv_cls.return_value
+        player = Player(audio_quality="high")
+
+        player.set_audio_quality("low")
+
+        assert player.audio_quality == "low"
+        mock_mpv.__setitem__.assert_called_with("ytdl-format", AUDIO_QUALITY_FORMATS["low"])
+        player.shutdown()
+
+    @patch("ytmusic_tui.player.mpv.MPV")
+    def test_set_audio_quality_unknown_normalises_to_high(self, mock_mpv_cls: MagicMock) -> None:
+        mock_mpv = mock_mpv_cls.return_value
+        player = Player(audio_quality="normal")
+
+        player.set_audio_quality("ultra")
+
+        assert player.audio_quality == "high"
+        mock_mpv.__setitem__.assert_called_with("ytdl-format", AUDIO_QUALITY_FORMATS["high"])
+        player.shutdown()
+
+    @patch("ytmusic_tui.player.mpv.MPV")
+    def test_cycle_quality_order(self, mock_mpv_cls: MagicMock) -> None:
+        """Default "high" → cycle → low → normal → high."""
+        player = Player(audio_quality="high")
+
+        assert player.cycle_audio_quality() == "low"
+        assert player.audio_quality == "low"
+
+        assert player.cycle_audio_quality() == "normal"
+        assert player.audio_quality == "normal"
+
+        assert player.cycle_audio_quality() == "high"
+        assert player.audio_quality == "high"
+
         player.shutdown()

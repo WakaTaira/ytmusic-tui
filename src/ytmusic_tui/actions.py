@@ -152,6 +152,10 @@ class PlaybackActions(_Base):
     def action_toggle_mute(self) -> None:
         self.player.toggle_mute()
 
+    def action_cycle_audio_quality(self) -> None:
+        quality = self.player.cycle_audio_quality()
+        self.notify(f"Audio quality: {quality} (applies from the next track)")
+
     def _queue_and_play(self, tracks: list[Track]) -> None:
         self.queue_manager.set_playlist(tracks, start_index=0)
         self.player.play(tracks[0].video_id)

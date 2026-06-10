@@ -83,6 +83,7 @@ ytmusic-tui
 | `>` / `<` | Seek +5s / -5s                     |
 | `^`       | Seek to start                      |
 | `_`       | Mute toggle                        |
+| `b`       | Cycle audio quality (low/normal/high) |
 | `f`       | Like / unlike current track        |
 | `R`       | Start radio from current track     |
 | `H`       | Recently played (history)          |

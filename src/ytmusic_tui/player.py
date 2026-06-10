@@ -18,6 +18,25 @@ _YTM_URL = "https://music.youtube.com/watch?v={video_id}"
 _VOL_MIN = 0
 _VOL_MAX = 100
 
+# yt-dlp format selectors for each audio quality level.
+#
+# YouTube Music serves:
+#   - opus 251 ~160 kbps
+#   - opus 250 ~70 kbps
+#   - opus 249 ~50 kbps
+#   - AAC 140 ~128 kbps
+#
+# Every entry falls back to "bestaudio/best" so an over-narrow filter
+# can never yield "no formats" (the ytdl-hook would fail silently).
+AUDIO_QUALITY_FORMATS: dict[str, str] = {
+    "low": "bestaudio[abr<=70]/bestaudio/best",
+    "normal": "bestaudio[abr<=131]/bestaudio/best",
+    "high": "bestaudio/best",
+}
+
+# Ordered cycle used by cycle_audio_quality.
+_QUALITY_CYCLE = ["low", "normal", "high"]
+
 
 @dataclass
 class PlayerState:
@@ -45,16 +64,29 @@ class Player:
 
     mpv plays YouTube URLs directly via its built-in ytdl-hook,
     so no external yt-dlp subprocess is needed.
+
+    Args:
+        audio_quality: Initial quality level — "low", "normal", or "high".
+            Unknown values are silently normalised to "high" (config typos
+            degrade gracefully to the default; the ``b`` key in the TUI
+            reveals the active value).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, audio_quality: str = "high") -> None:
         import locale
 
         locale.setlocale(locale.LC_NUMERIC, "C")
+        # Normalise unknown values to the safe default.
+        quality = audio_quality if audio_quality in AUDIO_QUALITY_FORMATS else "high"
+        self._audio_quality: str = quality
+
+        # python-mpv translates constructor kwargs: underscores → dashes
+        # (e.g. ytdl_format → ytdl-format).  See mpv.MPV.__init__.
         self._mpv: mpv.MPV = mpv.MPV(
             ytdl=True,
             video=False,
             terminal=False,
+            ytdl_format=AUDIO_QUALITY_FORMATS[quality],
         )
         self._video_id: str = ""
         self.on_track_end: Callable[[], None] | None = None
@@ -154,6 +186,35 @@ class Player:
     def seek_absolute(self, position: float) -> None:
         """Seek to an absolute *position* in seconds."""
         self._mpv.seek(position, "absolute")
+
+    # -- Audio quality ------------------------------------------------------
+
+    @property
+    def audio_quality(self) -> str:
+        """Current audio quality level ("low", "normal", or "high")."""
+        return self._audio_quality
+
+    def set_audio_quality(self, quality: str) -> None:
+        """Set the yt-dlp format selector for a new quality level.
+
+        Unknown values are normalised to "high".  The change applies from
+        the *next* track: ytdl-format is evaluated by the ytdl-hook at
+        loadfile time, so the currently-playing stream is unaffected.
+
+        Uses dict-style option write (``self._mpv["ytdl-format"] = ...``),
+        which maps to mpv's ``options/`` property namespace — the same
+        mechanism as MPV.__setitem__ in python-mpv 1.0.8.
+        """
+        quality = quality if quality in AUDIO_QUALITY_FORMATS else "high"
+        self._audio_quality = quality
+        self._mpv["ytdl-format"] = AUDIO_QUALITY_FORMATS[quality]
+
+    def cycle_audio_quality(self) -> str:
+        """Advance quality low → normal → high → low and return the new value."""
+        idx = _QUALITY_CYCLE.index(self._audio_quality)
+        new_quality = _QUALITY_CYCLE[(idx + 1) % len(_QUALITY_CYCLE)]
+        self.set_audio_quality(new_quality)
+        return self._audio_quality
 
     # -- State introspection ------------------------------------------------
 
