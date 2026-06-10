@@ -251,8 +251,19 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
                 on_previous=lambda: self.call_from_thread(self.action_previous_track),
                 on_stop=lambda: self.call_from_thread(self.player.stop),
             )
-        except Exception:
+        except ImportError:
+            # dbus-fast not installed (non-Linux environment) — expected,
+            # silently skip MPRIS setup.
             self._mpris = None
+        except Exception:
+            # Unexpected startup error (D-Bus misconfigured, session bus
+            # unavailable, etc.) — tell the user desktop controls are off.
+            self._mpris = None
+            self.notify(
+                "MPRIS unavailable — desktop controls disabled",
+                severity="warning",
+                timeout=8,
+            )
 
     @work(thread=True)
     def _probe_session(self) -> None:

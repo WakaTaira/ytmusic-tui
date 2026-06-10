@@ -136,6 +136,12 @@ class PlayerBar(Static):
 
     _current_state: reactive[PlayerState] = reactive(PlayerState, init=False)
 
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        # Ensures the MPRIS connection-lost warning is shown at most once per
+        # session regardless of how many 1 Hz poll ticks fire.
+        self._mpris_error_notified: bool = False
+
     def compose(self) -> ComposeResult:
         """Build the player bar layout."""
         # Row 1: play icon | track - artist | modes | volume
@@ -265,7 +271,18 @@ class PlayerBar(Static):
                 # Push state to MPRIS if available
                 mpris = getattr(app, "_mpris", None)
                 if mpris is not None:
+                    # One-shot warning when the runtime D-Bus connection dies
+                    # (connection_error is set by MprisService._record_error).
+                    if mpris.connection_error is not None and not self._mpris_error_notified:
+                        self._mpris_error_notified = True
+                        self.app.notify(
+                            "MPRIS connection lost — desktop controls disabled",
+                            severity="warning",
+                            timeout=8,
+                        )
                     current_track = queue.current_track if queue else None
+                    # update() is a no-op when the D-Bus loop is gone, so
+                    # calling it after connection_error is set is safe.
                     mpris.update(
                         state,
                         track=current_track,
@@ -273,5 +290,8 @@ class PlayerBar(Static):
                         repeat_mode=repeat_mode,
                     )
         except Exception:
-            # Swallow errors during polling to avoid crashing the timer
+            # Suppress all exceptions so the 1 Hz timer never stops.
+            # Real throw sources: mpv property reads racing against
+            # shutdown teardown (SystemError / ValueError from libmpv)
+            # and transient Textual widget-not-found during view switches.
             pass

@@ -1408,3 +1408,103 @@ class TestQueueViewRefreshOnTrackChange:
 
             # Should not crash; queue advances normally
             assert app.queue_manager.current_track == tracks[1]
+
+
+# ===================================================================
+# PlayerBar: MPRIS connection-lost notification (Task 1b)
+# ===================================================================
+
+
+class TestPlayerBarMprisErrorNotify:
+    """_poll_player_state should fire a one-shot warning when the MPRIS
+    D-Bus connection dies at runtime (connection_error becomes non-None)."""
+
+    @pytest.mark.asyncio
+    async def test_connection_error_emits_warning_once(self) -> None:
+        """When mpris.connection_error is set, a warning notification is emitted
+        exactly once no matter how many poll ticks follow."""
+        from unittest.mock import MagicMock
+
+        from helpers import capture_notifications, make_app
+
+        from ytmusic_tui.mpris import MprisService
+        from ytmusic_tui.views.player import PlayerBar
+
+        app = make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            captured = capture_notifications(app)
+
+            # Install a fake MprisService whose connection_error is already set.
+            fake_mpris = MagicMock(spec=MprisService)
+            fake_mpris.connection_error = "OSError: disconnected"
+            app._mpris = fake_mpris
+
+            bar = app.query_one(PlayerBar)
+            assert not bar._mpris_error_notified
+
+            # First poll tick — should emit warning
+            bar._poll_player_state()
+            await _pilot.pause()
+
+            mpris_warnings = [
+                (msg, sev) for msg, sev in captured if "MPRIS" in msg and sev == "warning"
+            ]
+            assert len(mpris_warnings) == 1, f"Expected 1 warning, got: {captured}"
+            assert bar._mpris_error_notified
+
+            # Second poll tick — must NOT emit a second notification
+            bar._poll_player_state()
+            await _pilot.pause()
+
+            mpris_warnings_after = [
+                (msg, sev) for msg, sev in captured if "MPRIS" in msg and sev == "warning"
+            ]
+            assert len(mpris_warnings_after) == 1, "Duplicate MPRIS warning emitted"
+
+    @pytest.mark.asyncio
+    async def test_no_notification_when_mpris_healthy(self) -> None:
+        """No notification when mpris.connection_error is None."""
+        from unittest.mock import MagicMock
+
+        from helpers import capture_notifications, make_app
+
+        from ytmusic_tui.mpris import MprisService
+        from ytmusic_tui.views.player import PlayerBar
+
+        app = make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            captured = capture_notifications(app)
+
+            fake_mpris = MagicMock(spec=MprisService)
+            fake_mpris.connection_error = None
+            app._mpris = fake_mpris
+
+            bar = app.query_one(PlayerBar)
+            bar._poll_player_state()
+            await _pilot.pause()
+
+            mpris_warnings = [
+                (msg, sev) for msg, sev in captured if "MPRIS" in msg and sev == "warning"
+            ]
+            assert mpris_warnings == []
+
+    @pytest.mark.asyncio
+    async def test_no_notification_when_mpris_absent(self) -> None:
+        """No MPRIS-related notification when _mpris is None (not installed)."""
+        from helpers import capture_notifications, make_app
+
+        from ytmusic_tui.views.player import PlayerBar
+
+        app = make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            captured = capture_notifications(app)
+            app._mpris = None
+
+            bar = app.query_one(PlayerBar)
+            bar._poll_player_state()
+            await _pilot.pause()
+
+            mpris_warnings = [
+                (msg, sev) for msg, sev in captured if "MPRIS" in msg and sev == "warning"
+            ]
+            assert mpris_warnings == []
