@@ -9,7 +9,9 @@
 #   - Single characters: "n", "p", "q", "Q" (Shift+Q)
 #   - Modifiers: "ctrl+q", "ctrl+shift+s"
 #   - Special keys: "space", "escape", "tab", "enter",
-#     "plus", "minus", "equal", "slash", "full_stop"
+#     "plus", "minus", "equal", "slash", "full_stop",
+#     "greater_than_sign", "less_than_sign", "circumflex_accent",
+#     "underscore"
 #   - Multiple keys for one action: "plus,equal" (comma-separated)
 
 [keybinds]
@@ -30,3 +32,11 @@ open_current_album = "A"
 go_back = "escape"
 open_action_popup = "full_stop"
 open_theme_popup = "T"
+open_lyrics = "L"
+seek_forward = "greater_than_sign"
+seek_backward = "less_than_sign"
+seek_start = "circumflex_accent"
+toggle_mute = "underscore"
+toggle_like = "f"
+start_radio = "R"
+switch_history = "H"

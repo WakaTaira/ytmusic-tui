@@ -32,7 +32,7 @@ sudo pacman -S mpv yt-dlp python
 ```bash
 ruff format src/ tests/
 ruff check src/ tests/
-mypy src/
+mypy src/ytmusic_tui/
 ```
 
 ## Testing
@@ -41,11 +41,11 @@ mypy src/
 # Unit tests only
 pytest tests/ -m "not integration"
 
-# All tests (requires valid OAuth token)
+# All tests (requires browser credentials + network)
 pytest tests/
 ```
 
-Integration tests that hit the YouTube Music API are marked with `@pytest.mark.integration`. These require a valid OAuth token at `~/.config/ytmusic-tui/oauth.json`.
+Integration tests that hit the YouTube Music API are marked with `@pytest.mark.integration`. These require valid browser credentials at `~/.config/ytmusic-tui/browser.json` (set up via `ytmusic-tui auth`) and network access.
 
 ## Pull Request Process
 
@@ -59,7 +59,7 @@ Integration tests that hit the YouTube Music API are marked with `@pytest.mark.i
 
 ```
 feat: add shuffle toggle to queue
-fix: handle expired OAuth token gracefully
+fix: surface expired cookies in the status bar
 refactor: extract mpv IPC into separate module
 ```
 

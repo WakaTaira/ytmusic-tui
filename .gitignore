@@ -40,6 +40,8 @@ client_secret.json
 CLAUDE.md
 DESIGN.md
 HANDOFF.md
+REFACTOR_DIRECTIVE.md
+RUST_MIGRATION_DIRECTIVE.md
 initial-prompt.md
 loop-prompt.md
 runner.sh

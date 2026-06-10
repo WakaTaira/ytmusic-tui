@@ -4,7 +4,15 @@ A terminal music player for YouTube Music, built for keyboard-driven workflows.
 
 > **Status:** Beta. Playback, search, library, history, lyrics, radio, likes, MPRIS, theming, and custom keymaps are functional. A Rust rewrite is planned once the Python version stabilizes.
 
-![screenshot placeholder](https://via.placeholder.com/800x450?text=screenshot+coming+soon)
+![Home view](screenshots/home.svg)
+
+<details>
+<summary>More screenshots</summary>
+
+![Library view](screenshots/library.svg)
+![Queue view](screenshots/queue.svg)
+
+</details>
 
 ## What is this?
 
@@ -150,25 +158,31 @@ open_theme_popup = "T"
 
 ```
 src/ytmusic_tui/
-  app.py          # Textual Application, keybindings, keymap wiring
+  app.py          # Application skeleton: bindings, keymap, compose, navigation
+  actions.py      # Action handler mixins (playback / browse / popup follow-ups)
   api.py          # YouTube Music API wrapper (ytmusicapi)
-  player.py       # mpv IPC playback controller
+  auth.py         # Auth validation, error classification, `ytmusic-tui auth` CLI
+  player.py       # mpv playback controller
   queue.py        # Playback queue with shuffle/repeat
   config.py       # TOML config loading, theme system, keymap loader
   navigation.py   # Page-stack navigation history (back with Esc)
   layout.py       # Responsive orientation detection
-  keys.py         # Keybinding definitions
+  formatting.py   # Shared formatting helpers
+  mpris.py        # MPRIS2 media controls (Linux)
   views/
     home.py       # Recommendations with interactive section tables
-    search.py     # Multi-category search (songs/albums/artists grid)
+    search.py     # 4-pane multi-category search with #category: filters
     library.py    # 3-pane library (Playlists/Albums/Artists)
     playlist.py   # Playlist browser (list -> tracks drill-down)
     album.py      # Album detail view
     artist.py     # Artist detail view
+    history.py    # Recently played
+    lyrics.py     # Lyrics page
     queue.py      # Queue display with remove support
     player.py     # Player bar (now playing, progress, volume)
-    popup.py      # Action popup + theme switcher popup
+    popup.py      # Action / theme / playlist-picker popups
     filter_bar.py # Live filter bar for DataTable views
+    guards.py     # Teardown-safety for worker UI callbacks
 ```
 
 ## Contributing
