@@ -24,8 +24,16 @@ mod auth;
 mod client;
 mod context;
 mod error;
+pub mod models;
+pub mod parse;
 
 pub use auth::{BrowserAuth, YTM_ORIGIN, sapisid_authorization};
 pub use client::{AccountInfo, InnerTubeClient};
 pub use context::{CLIENT_NAME, build_context};
 pub use error::{ApiError, AuthLoadError};
+
+// Re-export domain types at the crate root for ergonomic imports.
+pub use models::{
+    AlbumInfo, ArtistInfo, HomeSection, HomeSectionItem, PlaylistInfo, RelatedArtist,
+    SearchResults, Track,
+};

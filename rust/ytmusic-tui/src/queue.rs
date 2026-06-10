@@ -1,8 +1,18 @@
 //! Playback queue management.
 //!
 //! This module is a 1-to-1 port of `ytmusic_tui/queue.py`.
+//!
+//! `Track` is defined in `ytmusic_api::models` so that the api crate owns all
+//! domain types and the dependency flows app → api.  It is re-exported here so
+//! that `ytmusic_tui::queue::Track` continues to exist and all M1 tests pass
+//! unchanged.
 
 use rand::seq::SliceRandom;
+
+// Re-export so external code (and the M1 tests) can still write
+// `use ytmusic_tui::queue::Track`.
+#[doc(inline)]
+pub use ytmusic_api::models::Track;
 
 // ---------------------------------------------------------------------------
 // RepeatMode
@@ -18,82 +28,6 @@ pub enum RepeatMode {
     All,
     /// Loop the current track indefinitely.
     One,
-}
-
-// ---------------------------------------------------------------------------
-// Track
-// ---------------------------------------------------------------------------
-
-/// Immutable representation of a single music track.
-///
-/// `PartialEq`, `Eq`, and `Hash` are implemented manually so that `f64` fields
-/// are compared and hashed bit-for-bit, which mirrors the Python dataclass
-/// frozen equality semantics for the values used in tests.
-/// Rationale: Python's frozen dataclass is hashable; Eq-without-Hash violates
-/// the std contract (equal values must have equal hashes).
-#[derive(Debug, Clone)]
-pub struct Track {
-    pub video_id: String,
-    pub title: String,
-    pub artist: String,
-    pub album: String,
-    /// Duration in seconds (mirrors Python `float`).
-    pub duration_seconds: f64,
-    pub thumbnail_url: String,
-}
-
-impl PartialEq for Track {
-    fn eq(&self, other: &Self) -> bool {
-        self.video_id == other.video_id
-            && self.title == other.title
-            && self.artist == other.artist
-            && self.album == other.album
-            && self.duration_seconds.to_bits() == other.duration_seconds.to_bits()
-            && self.thumbnail_url == other.thumbnail_url
-    }
-}
-
-impl Eq for Track {}
-
-impl std::hash::Hash for Track {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.video_id.hash(state);
-        self.title.hash(state);
-        self.artist.hash(state);
-        self.album.hash(state);
-        self.duration_seconds.to_bits().hash(state);
-        self.thumbnail_url.hash(state);
-    }
-}
-
-impl Track {
-    /// Construct a [`Track`] with all fields.
-    pub fn new(
-        video_id: impl Into<String>,
-        title: impl Into<String>,
-        artist: impl Into<String>,
-        album: impl Into<String>,
-        duration_seconds: f64,
-        thumbnail_url: impl Into<String>,
-    ) -> Self {
-        Self {
-            video_id: video_id.into(),
-            title: title.into(),
-            artist: artist.into(),
-            album: album.into(),
-            duration_seconds,
-            thumbnail_url: thumbnail_url.into(),
-        }
-    }
-
-    /// Construct a [`Track`] with only the required fields; optional fields use their defaults.
-    pub fn new_minimal(
-        video_id: impl Into<String>,
-        title: impl Into<String>,
-        artist: impl Into<String>,
-    ) -> Self {
-        Self::new(video_id, title, artist, "", 0.0, "")
-    }
 }
 
 // ---------------------------------------------------------------------------

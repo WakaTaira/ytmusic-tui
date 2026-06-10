@@ -1619,6 +1619,7 @@ dependencies = [
  "libmpv2-sys",
  "rand",
  "thiserror",
+ "ytmusic-api",
 ]
 
 [[package]]
