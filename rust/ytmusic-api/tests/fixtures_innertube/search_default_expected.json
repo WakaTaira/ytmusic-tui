@@ -1,0 +1,66 @@
+{
+  "_note": "ytmusicapi-shaped STAGE-1 output of search(filter=None). The list parse_search_results yields; subset = the fields stage-2 categorize_search_results reads. FAITHFUL: matches ytmusicapi 1.12.1 search() against search_default.json (the per-artist 'id' sub-fields, which stage-2 ignores, are dropped). The videoId=null 'video' item is kept here but dropped by stage-2 dict_to_track.",
+  "items": [
+    {
+      "resultType": "song",
+      "videoId": "hVJcHYs2LgA",
+      "title": "Morning Coffee Lo-Fi Chillhop Beats for Focus",
+      "artists": [
+        {
+          "name": "LO-FI BEATS"
+        },
+        {
+          "name": "Lofi Chillhop"
+        }
+      ],
+      "duration": null,
+      "duration_seconds": null,
+      "album": null
+    },
+    {
+      "resultType": "song",
+      "videoId": "tnlBctBzH1g",
+      "title": "The Japanese Town Lofi",
+      "artists": [
+        {
+          "name": "LO-FI BEATS"
+        },
+        {
+          "name": "HIP-HOP LOFI"
+        },
+        {
+          "name": "Lofi Anime"
+        }
+      ],
+      "duration": null,
+      "duration_seconds": null,
+      "album": null
+    },
+    {
+      "resultType": "video",
+      "videoId": null,
+      "title": "Lofi Girl",
+      "artists": [
+        {
+          "name": "5.28M monthly audience"
+        }
+      ],
+      "duration": null,
+      "duration_seconds": null,
+      "album": null
+    },
+    {
+      "resultType": "song",
+      "videoId": "ZSzwxyTuDw0",
+      "title": "Chilling out at night - Night drive, LOFI lo-fi hip hop",
+      "artists": [
+        {
+          "name": "Lofi Jazz Terrace"
+        }
+      ],
+      "duration": null,
+      "duration_seconds": null,
+      "album": null
+    }
+  ]
+}
