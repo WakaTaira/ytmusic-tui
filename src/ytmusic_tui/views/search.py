@@ -88,6 +88,14 @@ _PANE_TITLES: dict[Pane, str] = {
     Pane.PLAYLISTS: "Playlists",
 }
 
+# Column headers for each pane's DataTable
+_PANE_COLUMNS: dict[Pane, tuple[str, ...]] = {
+    Pane.TRACKS: ("Title", "Artist", "Album", "Duration"),
+    Pane.ALBUMS: ("Title", "Artist", "Year"),
+    Pane.ARTISTS: ("Name",),
+    Pane.PLAYLISTS: ("Title", "Tracks"),
+}
+
 
 # ---------------------------------------------------------------------------
 # Search result pane widget
@@ -184,38 +192,18 @@ class SearchView(FetchView):
         yield Input(placeholder="Search YouTube Music...", id="search-input")
         yield Label("", id="search-status")
         with Vertical(id="search-grid"):
-            with Horizontal(classes="search-row"):
-                # Top-left: Tracks
-                with _SearchPane(Pane.TRACKS):
-                    yield Label("Tracks", classes="pane-title")
-                    table: DataTable[Any] = DataTable(id=_TABLE_IDS[Pane.TRACKS])
-                    table.cursor_type = "row"
-                    table.add_columns("Title", "Artist", "Album", "Duration")
-                    yield table
-                # Top-right: Albums
-                with _SearchPane(Pane.ALBUMS):
-                    yield Label("Albums", classes="pane-title")
-                    table = DataTable(id=_TABLE_IDS[Pane.ALBUMS])
-                    table.cursor_type = "row"
-                    table.add_columns("Title", "Artist", "Year")
-                    yield table
-            with Horizontal(classes="search-row"):
-                # Bottom-left: Artists
-                with _SearchPane(Pane.ARTISTS):
-                    yield Label("Artists", classes="pane-title")
-                    table = DataTable(id=_TABLE_IDS[Pane.ARTISTS])
-                    table.cursor_type = "row"
-                    table.add_columns(
-                        "Name",
-                    )
-                    yield table
-                # Bottom-right: Playlists
-                with _SearchPane(Pane.PLAYLISTS):
-                    yield Label("Playlists", classes="pane-title")
-                    table = DataTable(id=_TABLE_IDS[Pane.PLAYLISTS])
-                    table.cursor_type = "row"
-                    table.add_columns("Title", "Tracks")
-                    yield table
+            for row_panes in (
+                (Pane.TRACKS, Pane.ALBUMS),
+                (Pane.ARTISTS, Pane.PLAYLISTS),
+            ):
+                with Horizontal(classes="search-row"):
+                    for pane in row_panes:
+                        with _SearchPane(pane):
+                            yield Label(_PANE_TITLES[pane], classes="pane-title")
+                            table: DataTable[Any] = DataTable(id=_TABLE_IDS[pane])
+                            table.cursor_type = "row"
+                            table.add_columns(*_PANE_COLUMNS[pane])
+                            yield table
         yield FilterBar(_TABLE_IDS[Pane.TRACKS], id="search-filter")
 
     # -----------------------------------------------------------------
