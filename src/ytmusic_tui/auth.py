@@ -1,9 +1,13 @@
-"""Authentication helpers and error classification."""
+"""Authentication helpers, error classification, and the auth CLI flow."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import TextIO
 
 _AUTH_ERROR_PATTERNS = (
     "Login Required",
@@ -44,6 +48,68 @@ def classify_api_error(exc: Exception) -> str:
     if len(text) > 80:
         text = text[:77] + "..."
     return f"Error: {text}"
+
+
+def run_auth_setup(
+    auth_path: str | Path | None = None,
+    *,
+    input_stream: TextIO | None = None,
+) -> int:
+    """Interactive browser-auth setup (the ``ytmusic-tui auth`` subcommand).
+
+    Guides the user through copying request headers from
+    music.youtube.com and writes the ytmusicapi browser-auth JSON to the
+    configured path. Returns a process exit code.
+    """
+    import sys
+
+    from ytmusicapi import setup as ytmusicapi_setup
+
+    if auth_path is None:
+        # Local import: config is only needed for the CLI flow.
+        from ytmusic_tui.config import load_config
+
+        auth_path = load_config().auth.browser_auth_path
+    path = Path(auth_path).expanduser()
+
+    stream = input_stream if input_stream is not None else sys.stdin
+
+    print("ytmusic-tui browser authentication setup")
+    print("----------------------------------------")
+    print("1. Open https://music.youtube.com in your browser and sign in.")
+    print("2. Open DevTools (F12) -> Network tab, then click any request")
+    print("   to music.youtube.com (e.g. 'browse').")
+    print("3. Copy the raw *Request Headers* block.")
+    print("4. Paste it below, then finish with Ctrl-D on an empty line.")
+    print(f"   Credentials will be written to: {path}")
+    print()
+
+    try:
+        headers_raw = stream.read()
+    except KeyboardInterrupt:
+        print("\nAborted.")
+        return 1
+
+    if not headers_raw.strip():
+        print("No headers received — aborted.")
+        return 1
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        ytmusicapi_setup(filepath=str(path), headers_raw=headers_raw)
+    except Exception as exc:
+        print(f"Setup failed: {exc}")
+        print("Make sure you copied the complete request headers (including Cookie).")
+        return 1
+
+    problem = validate_auth_file(path)
+    if problem:
+        print(f"Setup wrote a file, but it does not look valid: {problem}")
+        return 1
+
+    print(f"Success — credentials saved to {path}")
+    print("Restart ytmusic-tui to use the new session.")
+    return 0
 
 
 def validate_auth_file(path: str | Path) -> str | None:

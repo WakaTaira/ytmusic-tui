@@ -347,6 +347,17 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
 
 
 def main() -> None:
-    """Entry point for ytmusic-tui."""
+    """Entry point for ytmusic-tui.
+
+    ``ytmusic-tui auth`` runs the interactive browser-auth setup
+    instead of starting the TUI.
+    """
+    import sys
+
+    if len(sys.argv) > 1 and sys.argv[1] == "auth":
+        from ytmusic_tui.auth import run_auth_setup
+
+        raise SystemExit(run_auth_setup())
+
     app = YtMusicTui()
     app.run()

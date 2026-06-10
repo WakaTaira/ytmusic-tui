@@ -45,12 +45,13 @@ sudo pacman -S mpv yt-dlp python
 # Install ytmusic-tui
 pip install -e ".[dev]"
 
-# Authenticate with YouTube Music
-# 1. Open music.youtube.com and log in
-# 2. Open DevTools (F12) -> Network tab
-# 3. Click any request to music.youtube.com -> copy Request Headers
-ytmusicapi browser --file ~/.config/ytmusic-tui/browser.json
+# Authenticate with YouTube Music (interactive, guides you through
+# copying request headers from music.youtube.com)
+ytmusic-tui auth
 ```
+
+Cookies expire after a while; if your library suddenly shows up empty,
+just run `ytmusic-tui auth` again.
 
 ## Usage
 
@@ -66,6 +67,7 @@ ytmusic-tui
 | `Enter`   | Play / Select                      |
 | `Space`   | Play / Pause                       |
 | `n` / `p` | Next / Previous                    |
+| `>` / `<` | Seek +5s / -5s                     |
 | `/`       | Filter current list                |
 | `.`       | Action popup (context menu)        |
 | `T`       | Theme switcher                     |

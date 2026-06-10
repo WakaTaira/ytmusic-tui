@@ -725,3 +725,25 @@ class TestPlayerBarLayout:
             row_middle = bar.query_one("#player-row-middle")
             album = row_middle.query_one("#player-album", Static)
             assert album is not None
+
+
+# ===================================================================
+# CLI entry point dispatch
+# ===================================================================
+
+
+class TestMainDispatch:
+    def test_auth_subcommand_runs_setup_not_tui(self) -> None:
+        from ytmusic_tui import app as app_module
+
+        with (
+            patch.object(app_module, "YtMusicTui") as mock_app_cls,
+            patch("ytmusic_tui.auth.run_auth_setup", return_value=0) as mock_setup,
+            patch("sys.argv", ["ytmusic-tui", "auth"]),
+            pytest.raises(SystemExit) as excinfo,
+        ):
+            app_module.main()
+
+        assert excinfo.value.code == 0
+        mock_setup.assert_called_once_with()
+        mock_app_cls.assert_not_called()
