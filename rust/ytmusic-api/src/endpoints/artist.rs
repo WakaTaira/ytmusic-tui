@@ -12,7 +12,7 @@
 
 use serde_json::{Value, json};
 
-use super::playlist::parse_playlist_items;
+use super::stage1::parse_playlist_items;
 use crate::models::{AlbumInfo, ArtistInfo, RelatedArtist, Track};
 use crate::nav::{
     MTRIR, NAVIGATION_BROWSE_ID, Step, THUMBNAIL_RENDERER, THUMBNAILS, TITLE_TEXT, nav, nav_array,
@@ -36,9 +36,9 @@ pub(crate) fn parse_artist(response: &Value, channel_id: &str) -> ArtistInfo {
 
     let sections = section_list(response);
 
-    // description: api.py reads raw["description"], built from the description
-    // shelf. Absent in the common case → "". (M3d keeps this minimal; the
-    // description shelf parse can be added when a fixture exercises it.)
+    // description: api.py reads raw["description"], which ytmusicapi builds from
+    // the description shelf (`parse_description_runs`). Empty string when the
+    // shelf is absent (parity with api.py's `description or ""`).
     let description = description_text(sections);
 
     let top_songs = parse_top_songs(sections);
@@ -230,10 +230,25 @@ fn subtitle_year(card: &Value) -> String {
     .to_owned()
 }
 
-/// description text: the description shelf is absent in the minimal artist
-/// response, so this returns "". (Parity with `api.py`'s `description or ""`.)
-fn description_text(_sections: &[Value]) -> String {
-    String::new()
+/// The artist description, mirroring `get_artist`'s description-shelf parse.
+///
+/// `find_object_by_key(results, "musicDescriptionShelfRenderer")` then
+/// `parse_description_runs(shelf.description.runs)` — which for plain text simply
+/// concatenates each run's `text`. Returns "" when no description shelf is
+/// present (parity with `api.py`'s `description or ""`).
+fn description_text(sections: &[Value]) -> String {
+    let Some(shelf) = sections
+        .iter()
+        .find_map(|s| s.get("musicDescriptionShelfRenderer"))
+    else {
+        return String::new();
+    };
+    let Some(runs) = nav_array(shelf, &[Step::Key("description"), Step::Key("runs")]) else {
+        return String::new();
+    };
+    runs.iter()
+        .filter_map(|r| r.get("text").and_then(Value::as_str))
+        .collect()
 }
 
 /// `["title", "runs", 0, "navigationEndpoint", "browseEndpoint", "browseId"]` —
@@ -246,3 +261,34 @@ const TITLE_RUN0_BROWSE_ID: &[Step] = &[
     Step::Key("browseEndpoint"),
     Step::Key("browseId"),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// The committed artist fixture has no description shelf; cover the shelf
+    /// parse (gotcha M3d-2/f) directly. Mirrors `parse_description_runs`, which
+    /// concatenates every run's text (plain and hyperlink runs alike).
+    #[test]
+    fn description_shelf_concatenates_runs() {
+        let sections = [
+            json!({ "musicShelfRenderer": { "contents": [] } }),
+            json!({ "musicDescriptionShelfRenderer": { "description": { "runs": [
+                { "text": "Oasis were a " },
+                { "text": "rock band", "navigationEndpoint": { "urlEndpoint": { "url": "http://x" } } },
+                { "text": " from Manchester." }
+            ] } } }),
+        ];
+        assert_eq!(
+            description_text(&sections),
+            "Oasis were a rock band from Manchester."
+        );
+    }
+
+    #[test]
+    fn description_absent_is_empty_string() {
+        let sections = [json!({ "musicCarouselShelfRenderer": { "contents": [] } })];
+        assert_eq!(description_text(&sections), "");
+    }
+}

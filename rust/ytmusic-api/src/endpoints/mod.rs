@@ -28,9 +28,15 @@
 
 mod album;
 mod artist;
+mod history;
+mod home;
+mod library;
+mod lyrics;
 mod playlist;
+mod radio;
 mod search;
 mod songruns;
+mod stage1;
 
 #[cfg(test)]
 mod tests;
@@ -39,7 +45,7 @@ use serde_json::{Value, json};
 
 use crate::client::InnerTubeClient;
 use crate::error::ApiError;
-use crate::models::{AlbumInfo, ArtistInfo, SearchResults, Track};
+use crate::models::{AlbumInfo, ArtistInfo, HomeSection, PlaylistInfo, SearchResults, Track};
 use crate::parse;
 
 /// The transport abstraction the endpoint flows depend on.
@@ -131,6 +137,107 @@ pub(crate) async fn get_playlist_tracks(
     Ok(raw_tracks.iter().filter_map(parse::dict_to_track).collect())
 }
 
+/// Get the user's liked ("thumbs up") songs.
+///
+/// Mirrors `api.py::get_liked_songs`, which delegates to ytmusicapi's
+/// `get_liked_songs(limit)` = `get_playlist("LM", limit)`. The `"LM"` playlist
+/// uses the identical track-shelf layout as any playlist, so this reuses the
+/// playlist machinery verbatim (the flow prefixes `"LM"` with `VL` → `"VLLM"`).
+///
+/// `limit` bounds the returned list to match the wrapper contract (ytmusicapi
+/// pages to `limit`; the trimmed single page is capped here).
+pub(crate) async fn get_liked_songs(
+    client: &impl PostRequest,
+    limit: usize,
+) -> Result<Vec<Track>, ApiError> {
+    let mut tracks = get_playlist_tracks(client, "LM").await?;
+    tracks.truncate(limit);
+    Ok(tracks)
+}
+
+/// Get the user's library playlists.
+///
+/// Mirrors `api.py::get_library_playlists`: POST `browse FEmusic_liked_playlists`,
+/// run the stage-1 GRID parser (skipping the "New playlist" pseudo-item), then
+/// convert via `dict_to_playlist_info`. `limit` caps the trimmed single page.
+pub(crate) async fn get_library_playlists(
+    client: &impl PostRequest,
+    limit: usize,
+) -> Result<Vec<PlaylistInfo>, ApiError> {
+    let response = client
+        .post_request("browse", json!({ "browseId": "FEmusic_liked_playlists" }))
+        .await?;
+    let mut playlists = library::parse_library_playlists(&response);
+    playlists.truncate(limit);
+    Ok(playlists)
+}
+
+/// Get the user's library albums.
+///
+/// Mirrors `api.py::get_library_albums`: POST `browse FEmusic_liked_albums`, run
+/// the stage-1 GRID album parser, then convert via `dict_to_album_info`.
+pub(crate) async fn get_library_albums(
+    client: &impl PostRequest,
+    limit: usize,
+) -> Result<Vec<AlbumInfo>, ApiError> {
+    let response = client
+        .post_request("browse", json!({ "browseId": "FEmusic_liked_albums" }))
+        .await?;
+    let mut albums = library::parse_library_albums(&response);
+    albums.truncate(limit);
+    Ok(albums)
+}
+
+/// Get the user's library artists.
+///
+/// Mirrors `api.py::get_library_artists`: POST
+/// `browse FEmusic_library_corpus_track_artists`, run the stage-1 MUSIC_SHELF
+/// parser, building [`ArtistInfo`]s straight from the `artist`/`browseId` row
+/// keys (no `dict_to_related_artist` — gotcha M3d-2/4).
+pub(crate) async fn get_library_artists(
+    client: &impl PostRequest,
+    limit: usize,
+) -> Result<Vec<ArtistInfo>, ApiError> {
+    let response = client
+        .post_request(
+            "browse",
+            json!({ "browseId": "FEmusic_library_corpus_track_artists" }),
+        )
+        .await?;
+    let mut artists = library::parse_library_artists(&response);
+    artists.truncate(limit);
+    Ok(artists)
+}
+
+/// Get the home page recommendations as a list of titled sections.
+///
+/// Mirrors `api.py::get_home`: POST `browse FEmusic_home`, run the stage-1
+/// `parse_mixed_content` port to build the raw `[{title, contents}]` sections,
+/// then convert via `parse::parse_home_sections` (which routes each item to a
+/// [`Track`] or [`PlaylistInfo`] by its `videoId`/`playlistId`/`browseId` shape).
+pub(crate) async fn get_home(client: &impl PostRequest) -> Result<Vec<HomeSection>, ApiError> {
+    let response = client
+        .post_request("browse", json!({ "browseId": "FEmusic_home" }))
+        .await?;
+    let raw_sections = home::parse_home(&response);
+    Ok(parse::parse_home_sections(&raw_sections))
+}
+
+/// Get the play history (newest first), flattened across dated shelves.
+///
+/// Mirrors `api.py::get_history`: POST `browse FEmusic_history`, flatten the
+/// dated `musicShelfRenderer` shelves into one list (stage 1), then convert each
+/// via `dict_to_track`, skipping unavailable items. (`api.py` ignores the
+/// per-item `played` shelf label, so the flow does too.) No `limit`: history
+/// returns whatever the single page holds, matching the Python wrapper.
+pub(crate) async fn get_history(client: &impl PostRequest) -> Result<Vec<Track>, ApiError> {
+    let response = client
+        .post_request("browse", json!({ "browseId": "FEmusic_history" }))
+        .await?;
+    let raw_tracks = history::parse_history(&response);
+    Ok(raw_tracks.iter().filter_map(parse::dict_to_track).collect())
+}
+
 /// Get album metadata and tracks.
 ///
 /// Mirrors `api.py::get_album`: POST `browse` with the `MPRE` browse id, run
@@ -162,6 +269,78 @@ pub(crate) async fn get_artist(
         .post_request("browse", json!({ "browseId": request_id }))
         .await?;
     Ok(artist::parse_artist(&response, channel_id))
+}
+
+/// Get a radio queue seeded by `video_id` (the seed track first).
+///
+/// Mirrors `api.py::get_radio`, which calls ytmusicapi's
+/// `get_watch_playlist(videoId, radio=True, limit)`: POST `next` with the
+/// persistent-panel body and the `"wAEB"` radio params, walk the
+/// `playlistPanelRenderer` queue (stage 1), then convert each via
+/// `watch_item_to_track`. `limit` caps the trimmed single page.
+pub(crate) async fn get_radio(
+    client: &impl PostRequest,
+    video_id: &str,
+    limit: usize,
+) -> Result<Vec<Track>, ApiError> {
+    // ytmusicapi defaults playlistId to "RDAMVM" + videoId for a video seed and
+    // sets params="wAEB" when radio=True. The persistent-panel flags match
+    // `get_watch_playlist`'s base body.
+    let body = json!({
+        "enablePersistentPlaylistPanel": true,
+        "isAudioOnly": true,
+        "tunerSettingValue": "AUTOMIX_SETTING_NORMAL",
+        "videoId": video_id,
+        "playlistId": format!("RDAMVM{video_id}"),
+        "params": "wAEB",
+    });
+    let response = client.post_request("next", body).await?;
+    let raw_tracks = radio::parse_radio(&response);
+    let mut tracks: Vec<Track> = raw_tracks
+        .iter()
+        .filter_map(parse::watch_item_to_track)
+        .collect();
+    tracks.truncate(limit);
+    Ok(tracks)
+}
+
+/// Fetch a track's lyrics, or `None` when the track has no lyrics.
+///
+/// Mirrors `api.py::get_lyrics`: first `get_watch_playlist(video_id)` (a `next`
+/// request) to read the lyrics browse id from the watch panel's tabs, then — only
+/// if present — a `browse` for the lyrics text.
+///
+/// `None` means exactly "this track has no lyrics" — a value, not an error
+/// (battle lesson). Transport / HTTP failures still propagate as [`ApiError`] so
+/// callers can tell "no lyrics" from "could not reach YouTube Music".
+pub(crate) async fn get_lyrics(
+    client: &impl PostRequest,
+    video_id: &str,
+) -> Result<Option<String>, ApiError> {
+    // get_watch_playlist(video_id) base body: persistent panel + the ATV music
+    // config (non-radio) + the default RDAMVM playlist seed.
+    let watch_body = json!({
+        "enablePersistentPlaylistPanel": true,
+        "isAudioOnly": true,
+        "tunerSettingValue": "AUTOMIX_SETTING_NORMAL",
+        "videoId": video_id,
+        "playlistId": format!("RDAMVM{video_id}"),
+        "watchEndpointMusicSupportedConfigs": {
+            "watchEndpointMusicConfig": {
+                "hasPersistentPlaylistPanel": true,
+                "musicVideoType": "MUSIC_VIDEO_TYPE_ATV",
+            }
+        },
+    });
+    let watch = client.post_request("next", watch_body).await?;
+    let Some(browse_id) = lyrics::lyrics_browse_id(&watch).map(str::to_owned) else {
+        return Ok(None); // no lyrics tab → the track simply has no lyrics
+    };
+
+    let lyrics_response = client
+        .post_request("browse", json!({ "browseId": browse_id }))
+        .await?;
+    Ok(lyrics::lyrics_text(&lyrics_response))
 }
 
 /// The InnerTube `params` blob for a search filter, mirroring the non-spelling
@@ -202,6 +381,49 @@ impl InnerTubeClient {
     /// Get all tracks in a playlist. See [`get_playlist_tracks`].
     pub async fn get_playlist_tracks(&self, playlist_id: &str) -> Result<Vec<Track>, ApiError> {
         get_playlist_tracks(self, playlist_id).await
+    }
+
+    /// Get the user's liked songs. See [`get_liked_songs`].
+    pub async fn get_liked_songs(&self, limit: usize) -> Result<Vec<Track>, ApiError> {
+        get_liked_songs(self, limit).await
+    }
+
+    /// Get the user's library playlists. See [`get_library_playlists`].
+    pub async fn get_library_playlists(&self, limit: usize) -> Result<Vec<PlaylistInfo>, ApiError> {
+        get_library_playlists(self, limit).await
+    }
+
+    /// Get the user's library albums. See [`get_library_albums`].
+    pub async fn get_library_albums(&self, limit: usize) -> Result<Vec<AlbumInfo>, ApiError> {
+        get_library_albums(self, limit).await
+    }
+
+    /// Get the user's library artists. See [`get_library_artists`].
+    pub async fn get_library_artists(&self, limit: usize) -> Result<Vec<ArtistInfo>, ApiError> {
+        get_library_artists(self, limit).await
+    }
+
+    /// Get the play history (newest first). See [`get_history`].
+    ///
+    /// Deliberately takes no `limit` (unlike the other list endpoints): the
+    /// Python wrapper returns whatever the single history page holds.
+    pub async fn get_history(&self) -> Result<Vec<Track>, ApiError> {
+        get_history(self).await
+    }
+
+    /// Get the home page sections. See [`get_home`].
+    pub async fn get_home(&self) -> Result<Vec<HomeSection>, ApiError> {
+        get_home(self).await
+    }
+
+    /// Get a radio queue seeded by `video_id`. See [`get_radio`].
+    pub async fn get_radio(&self, video_id: &str, limit: usize) -> Result<Vec<Track>, ApiError> {
+        get_radio(self, video_id, limit).await
+    }
+
+    /// Fetch a track's lyrics (`None` = no lyrics). See [`get_lyrics`].
+    pub async fn get_lyrics(&self, video_id: &str) -> Result<Option<String>, ApiError> {
+        get_lyrics(self, video_id).await
     }
 
     /// Get album metadata and tracks. See [`get_album`].

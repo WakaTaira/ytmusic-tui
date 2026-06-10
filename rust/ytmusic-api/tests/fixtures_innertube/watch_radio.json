@@ -1,0 +1,693 @@
+{
+  "responseContext": {
+    "serviceTrackingParams": [
+      {
+        "service": "CSI",
+        "params": [
+          {
+            "key": "c",
+            "value": "WEB_REMIX"
+          },
+          {
+            "key": "cver",
+            "value": "1.20260610.01.00"
+          },
+          {
+            "key": "yt_li",
+            "value": "1"
+          },
+          {
+            "key": "GetWatchPage_rid",
+            "value": "0x05398b587069d4b5"
+          }
+        ]
+      },
+      {
+        "service": "GFEEDBACK",
+        "params": [
+          {
+            "key": "logged_in",
+            "value": "1"
+          }
+        ]
+      },
+      {
+        "service": "ECATCHER",
+        "params": [
+          {
+            "key": "client.version",
+            "value": "1.20000101"
+          },
+          {
+            "key": "client.name",
+            "value": "WEB_REMIX"
+          }
+        ]
+      }
+    ],
+    "innertubeTokenJar": {
+      "appTokens": [
+        {
+          "type": 2,
+          "value": "EicKI1FQOVBKNUNtZjRveVNpSlRzVEt4SGdQa3J0Y1ItM1R2U0NWEAA=",
+          "maxAgeSeconds": 86400,
+          "creationTimeUsec": "1781123692486920"
+        }
+      ]
+    },
+    "responseId": "IhMI2Jn358L9lAMVk0ODCB3MMxpd"
+  },
+  "contents": {
+    "singleColumnMusicWatchNextResultsRenderer": {
+      "tabbedRenderer": {
+        "watchNextTabbedResultsRenderer": {
+          "tabs": [
+            {
+              "tabRenderer": {
+                "title": "Up next",
+                "content": {
+                  "musicQueueRenderer": {
+                    "content": {
+                      "playlistPanelRenderer": {
+                        "contents": [
+                          {
+                            "playlistPanelVideoWrapperRenderer": {
+                              "primaryRenderer": {
+                                "playlistPanelVideoRenderer": {
+                                  "videoId": "dQw4w9WgXcQ",
+                                  "title": {
+                                    "runs": [
+                                      {
+                                        "text": "Never Gonna Give You Up (7'' Mix)"
+                                      }
+                                    ]
+                                  },
+                                  "lengthText": {
+                                    "runs": [
+                                      {
+                                        "text": "3:34"
+                                      }
+                                    ]
+                                  },
+                                  "thumbnail": {
+                                    "thumbnails": [
+                                      {
+                                        "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hq720.jpg?sqp=-oaymwEXCNUGEOADIAQqCwjVARCqCBh4INgESFo&rs=AMzJL3mV_pzB5jVPqR7u_tjsiVvZv3SMoA",
+                                        "width": 853,
+                                        "height": 480
+                                      }
+                                    ]
+                                  },
+                                  "longBylineText": {
+                                    "runs": [
+                                      {
+                                        "text": "Rick Astley",
+                                        "navigationEndpoint": {
+                                          "browseEndpoint": {
+                                            "browseId": "UCwZEU0wAwIyZb4x5G_KJp2w",
+                                            "browseEndpointContextSupportedConfigs": {
+                                              "browseEndpointContextMusicConfig": {
+                                                "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "text": " • "
+                                      },
+                                      {
+                                        "text": "1.7B views"
+                                      },
+                                      {
+                                        "text": " • "
+                                      },
+                                      {
+                                        "text": "19M likes"
+                                      }
+                                    ]
+                                  },
+                                  "menu": {
+                                    "menuRenderer": {
+                                      "items": []
+                                    }
+                                  }
+                                }
+                              },
+                              "counterpart": [
+                                {
+                                  "counterpartRenderer": {
+                                    "playlistPanelVideoRenderer": {
+                                      "videoId": "lYBUbBu4W08",
+                                      "title": {
+                                        "runs": [
+                                          {
+                                            "text": "Never Gonna Give You Up"
+                                          }
+                                        ]
+                                      },
+                                      "lengthText": {
+                                        "runs": [
+                                          {
+                                            "text": "3:34"
+                                          }
+                                        ]
+                                      },
+                                      "thumbnail": {
+                                        "thumbnails": [
+                                          {
+                                            "url": "https://yt3.googleusercontent.com/eC9DfRcYSk4FE-fvDCJSu_4xsKdVMKxwmFTYFZwP8OqB7R4TKxAjKoR-Kp1lXeRi2WddPFYulSte4eW-=w544-h544-l90-rj",
+                                            "width": 544,
+                                            "height": 544
+                                          }
+                                        ]
+                                      },
+                                      "longBylineText": {
+                                        "runs": [
+                                          {
+                                            "text": "Rick Astley"
+                                          }
+                                        ]
+                                      },
+                                      "menu": {
+                                        "menuRenderer": {
+                                          "items": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          },
+                          {
+                            "playlistPanelVideoWrapperRenderer": {
+                              "primaryRenderer": {
+                                "playlistPanelVideoRenderer": {
+                                  "videoId": "rZlQ28OeGMI",
+                                  "title": {
+                                    "runs": [
+                                      {
+                                        "text": "My Arms Keep Missing You"
+                                      }
+                                    ]
+                                  },
+                                  "lengthText": {
+                                    "runs": [
+                                      {
+                                        "text": "3:15"
+                                      }
+                                    ]
+                                  },
+                                  "thumbnail": {
+                                    "thumbnails": [
+                                      {
+                                        "url": "https://i.ytimg.com/vi/rZlQ28OeGMI/hq720.jpg?sqp=-oaymwEXCNUGEOADIAQqCwjVARCqCBh4INgESFo&rs=AMzJL3k_HRZHjST3lgYq3R8TdIkdynIuaw",
+                                        "width": 853,
+                                        "height": 480
+                                      }
+                                    ]
+                                  },
+                                  "longBylineText": {
+                                    "runs": [
+                                      {
+                                        "text": "Rick Astley",
+                                        "navigationEndpoint": {
+                                          "browseEndpoint": {
+                                            "browseId": "UCwZEU0wAwIyZb4x5G_KJp2w",
+                                            "browseEndpointContextSupportedConfigs": {
+                                              "browseEndpointContextMusicConfig": {
+                                                "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "text": " • "
+                                      },
+                                      {
+                                        "text": "917K views"
+                                      },
+                                      {
+                                        "text": " • "
+                                      },
+                                      {
+                                        "text": "16K likes"
+                                      }
+                                    ]
+                                  },
+                                  "menu": {
+                                    "menuRenderer": {
+                                      "items": []
+                                    }
+                                  }
+                                }
+                              },
+                              "counterpart": [
+                                {
+                                  "counterpartRenderer": {
+                                    "playlistPanelVideoRenderer": {
+                                      "videoId": "mg2PyuE4Iww",
+                                      "title": {
+                                        "runs": [
+                                          {
+                                            "text": "My Arms Keep Missing You"
+                                          }
+                                        ]
+                                      },
+                                      "lengthText": {
+                                        "runs": [
+                                          {
+                                            "text": "3:15"
+                                          }
+                                        ]
+                                      },
+                                      "thumbnail": {
+                                        "thumbnails": [
+                                          {
+                                            "url": "https://yt3.googleusercontent.com/xxyDtUF9srsQA0x14cIvCGCRaPlZ8Ynw1JqiX6-z6p-tv8e0n8lT1ZMTJS6YXReyP4Gn1Remhr5K9wzb=w544-h544-l90-rj",
+                                            "width": 544,
+                                            "height": 544
+                                          }
+                                        ]
+                                      },
+                                      "longBylineText": {
+                                        "runs": [
+                                          {
+                                            "text": "Rick Astley"
+                                          }
+                                        ]
+                                      },
+                                      "menu": {
+                                        "menuRenderer": {
+                                          "items": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          },
+                          {
+                            "playlistPanelVideoRenderer": {
+                              "videoId": "9SJG2LKGspI",
+                              "title": {
+                                "runs": [
+                                  {
+                                    "text": "SAINT PEPSI - STELLA (Music Video)"
+                                  }
+                                ]
+                              },
+                              "lengthText": {
+                                "runs": [
+                                  {
+                                    "text": "2:30"
+                                  }
+                                ]
+                              },
+                              "thumbnail": {
+                                "thumbnails": [
+                                  {
+                                    "url": "https://i.ytimg.com/vi/9SJG2LKGspI/hq720.jpg?sqp=-oaymwEXCNUGEOADIAQqCwjVARCqCBh4INgESFo&rs=AMzJL3nbpzfCEU9oEqiB2s0UPONtMN4rCw",
+                                    "width": 853,
+                                    "height": 480
+                                  }
+                                ]
+                              },
+                              "longBylineText": {
+                                "runs": [
+                                  {
+                                    "text": "Sun Levi",
+                                    "navigationEndpoint": {
+                                      "browseEndpoint": {
+                                        "browseId": "UCEDXQxr3ND3RZaHZBUrSvBw",
+                                        "browseEndpointContextSupportedConfigs": {
+                                          "browseEndpointContextMusicConfig": {
+                                            "pageType": "MUSIC_PAGE_TYPE_USER_CHANNEL"
+                                          }
+                                        }
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "text": " • "
+                                  },
+                                  {
+                                    "text": "1.2M views"
+                                  },
+                                  {
+                                    "text": " • "
+                                  },
+                                  {
+                                    "text": "22K likes"
+                                  }
+                                ]
+                              },
+                              "menu": {
+                                "menuRenderer": {
+                                  "items": []
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "playlistId": "RDAMVMdQw4w9WgXcQ",
+                        "isInfinite": true
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "tabRenderer": {
+                "endpoint": {
+                  "browseEndpoint": {
+                    "browseId": "MPLYt_6AEOVn4k62q",
+                    "browseEndpointContextSupportedConfigs": {
+                      "browseEndpointContextMusicConfig": {
+                        "pageType": "MUSIC_PAGE_TYPE_TRACK_LYRICS"
+                      }
+                    }
+                  }
+                },
+                "title": "Lyrics",
+                "unselectable": true
+              }
+            },
+            {
+              "tabRenderer": {
+                "endpoint": {
+                  "browseEndpoint": {
+                    "browseId": "MPTRt_6AEOVn4k62q",
+                    "browseEndpointContextSupportedConfigs": {
+                      "browseEndpointContextMusicConfig": {
+                        "pageType": "MUSIC_PAGE_TYPE_TRACK_RELATED"
+                      }
+                    }
+                  }
+                },
+                "title": "Related"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "currentVideoEndpoint": {
+    "watchEndpoint": {
+      "videoId": "dQw4w9WgXcQ",
+      "playlistId": "RDAMVMdQw4w9WgXcQ",
+      "index": 0,
+      "playerParams": "ygYQNTZCNDRGNkQxMDU1N0NDNg%3D%3D",
+      "playlistSetVideoId": "56B44F6D10557CC6",
+      "loggingContext": {
+        "vssLoggingContext": {
+          "serializedContextData": "GhFSREFNVk1kUXc0dzlXZ1hjUQ%3D%3D"
+        }
+      }
+    }
+  },
+  "playerOverlays": {
+    "playerOverlayRenderer": {
+      "actions": [
+        {
+          "likeButtonRenderer": {
+            "target": {
+              "videoId": "dQw4w9WgXcQ"
+            },
+            "likeStatus": "INDIFFERENT",
+            "likesAllowed": true,
+            "serviceEndpoints": [
+              {
+                "likeEndpoint": {
+                  "status": "LIKE",
+                  "target": {
+                    "videoId": "dQw4w9WgXcQ"
+                  },
+                  "likeParams": "OAI%3D"
+                }
+              },
+              {
+                "likeEndpoint": {
+                  "status": "DISLIKE",
+                  "target": {
+                    "videoId": "dQw4w9WgXcQ"
+                  },
+                  "dislikeParams": "OAI%3D"
+                }
+              },
+              {
+                "likeEndpoint": {
+                  "status": "INDIFFERENT",
+                  "target": {
+                    "videoId": "dQw4w9WgXcQ"
+                  },
+                  "removeLikeParams": "OAI%3D"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "browserMediaSession": {
+        "browserMediaSessionRenderer": {
+          "thumbnailDetails": {
+            "thumbnails": [
+              {
+                "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hq720.jpg?sqp=-oaymwEXCNUGEOADIAQqCwjVARCqCBh4INgESFo&rs=AMzJL3mV_pzB5jVPqR7u_tjsiVvZv3SMoA",
+                "width": 853,
+                "height": 480
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "videoReporting": {
+    "reportFormModalRenderer": {
+      "optionsSupportedRenderers": {
+        "optionsRenderer": {
+          "items": [
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Sexual content"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLZFF3NHc5V2dYY1FQBTILZFF3NHc5V2dYY1GQASyYAQGoAQM%3D"
+                  }
+                }
+              }
+            },
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Violent or repulsive content"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLZFF3NHc5V2dYY1FQBTILZFF3NHc5V2dYY1GQATaYAQGoAQM%3D"
+                  }
+                }
+              }
+            },
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Hateful or abusive content"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLZFF3NHc5V2dYY1FQBTILZFF3NHc5V2dYY1GQARSYAQGoAQM%3D"
+                  }
+                }
+              }
+            },
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Harassment or bullying"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLZFF3NHc5V2dYY1FQBTILZFF3NHc5V2dYY1GQARGYAQGoAQM%3D"
+                  }
+                }
+              }
+            },
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Harmful or dangerous acts"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLZFF3NHc5V2dYY1FQBTILZFF3NHc5V2dYY1GQAQ2YAQGoAQM%3D"
+                  }
+                }
+              }
+            },
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Misinformation"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLZFF3NHc5V2dYY1FQBTILZFF3NHc5V2dYY1GQAUGYAQGoAQM%3D"
+                  }
+                }
+              }
+            },
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Child abuse"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLZFF3NHc5V2dYY1FQBTILZFF3NHc5V2dYY1GQAQyYAQGoAQM%3D"
+                  }
+                }
+              }
+            },
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Legal issue"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLZFF3NHc5V2dYY1FQBTILZFF3NHc5V2dYY1GQAUWYAQGoAQM%3D"
+                  }
+                }
+              }
+            },
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Promotes terrorism"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLZFF3NHc5V2dYY1FQBTILZFF3NHc5V2dYY1GQATWYAQGoAQM%3D"
+                  }
+                }
+              }
+            },
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Spam or misleading"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLZFF3NHc5V2dYY1FQBTILZFF3NHc5V2dYY1GQATGYAQGoAQM%3D"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "title": {
+        "runs": [
+          {
+            "text": "Report video"
+          }
+        ]
+      },
+      "submitButton": {
+        "buttonRenderer": {
+          "style": "STYLE_BRAND",
+          "isDisabled": true,
+          "text": {
+            "runs": [
+              {
+                "text": "Report"
+              }
+            ]
+          }
+        }
+      },
+      "cancelButton": {
+        "buttonRenderer": {
+          "style": "STYLE_TEXT",
+          "isDisabled": false,
+          "text": {
+            "runs": [
+              {
+                "text": "Cancel"
+              }
+            ]
+          }
+        }
+      },
+      "footer": {
+        "runs": [
+          {
+            "text": "If you are the copyright owner of this video and believe it has been uploaded without your permission, please follow "
+          },
+          {
+            "text": "these directions",
+            "navigationEndpoint": {
+              "urlEndpoint": {
+                "url": "//support.google.com/youtube/answer/2807622?hl=en"
+              }
+            }
+          },
+          {
+            "text": " to submit a copyright infringement notice."
+          }
+        ]
+      }
+    }
+  },
+  "queueContextParams": "CAIaEVJEQU1WTWRRdzR3OVdnWGNRING_nujC_ZQDKiNRUDlQSjVDbWY0b3lTaUpUc1RLeEhnUGtydGNSLTNUdlNDVkIRUkRBTVZNZFF3NHc5V2dYY1FQAVoECAAQAWIAcAF4AZIBDEVnQVlBUSUzRCUzRKIBHxIQNTZCNDRGNkQxMDU1N0NDNhoLZFF3NHc5V2dYY1E="
+}

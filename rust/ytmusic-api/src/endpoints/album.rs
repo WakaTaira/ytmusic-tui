@@ -11,12 +11,12 @@
 //! and a populated `artists` list, producing the identical domain `Track` the
 //! Python pipeline yields.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
-use super::playlist::parse_playlist_items;
 use super::songruns::parse_song_runs;
+use super::stage1::{artists_from_runs, parse_playlist_items};
 use crate::models::{AlbumInfo, Track};
-use crate::nav::{NAVIGATION_BROWSE_ID, Step, THUMBNAILS, nav, nav_array, nav_str};
+use crate::nav::{Step, THUMBNAILS, nav, nav_array, nav_str};
 use crate::parse::{dict_to_album_track, join_artists, pick_largest_thumbnail};
 
 /// Parse a raw album `browse` response into an [`AlbumInfo`].
@@ -128,16 +128,7 @@ fn album_track_shelf(response: &Value) -> Option<&Vec<Value>> {
 /// `parse_artists_runs(straplineTextOne.runs)` → `[{name, id}]`.
 fn strapline_artists(header: &Value) -> Option<Value> {
     let runs = nav_array(header, &[Step::Key("straplineTextOne"), Step::Key("runs")])?;
-    let artists: Vec<Value> = runs
-        .iter()
-        .step_by(2)
-        .map(|run| {
-            let name = run.get("text").and_then(Value::as_str).unwrap_or("");
-            let id = nav_str(run, NAVIGATION_BROWSE_ID);
-            json!({ "name": name, "id": id })
-        })
-        .collect();
-    Some(Value::Array(artists))
+    Some(artists_from_runs(runs))
 }
 
 /// Extract the `year` token from `subtitle.runs` via the song-run classifier

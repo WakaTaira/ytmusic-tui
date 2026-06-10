@@ -189,6 +189,22 @@ async fn get_artist_against_real_api() {
 
 #[tokio::test]
 #[ignore = "hits the live YouTube Music API; requires real browser.json"]
+async fn get_liked_songs_against_real_api() {
+    let client = live_client();
+    let tracks = client
+        .get_liked_songs(10)
+        .await
+        .expect("get_liked_songs succeeds");
+    eprintln!("liked_songs: {} tracks", tracks.len());
+    if let Some(t) = tracks.first() {
+        assert!(!t.video_id.is_empty(), "liked track videoId empty");
+        eprintln!("  first liked: videoId={} title={:?}", t.video_id, t.title);
+    }
+    assert!(tracks.len() <= 10, "limit exceeded");
+}
+
+#[tokio::test]
+#[ignore = "hits the live YouTube Music API; requires real browser.json"]
 async fn get_playlist_tracks_against_real_api() {
     let client = live_client();
     // Discover a real playlistId via search, then fetch its tracks.
@@ -215,4 +231,140 @@ async fn get_playlist_tracks_against_real_api() {
         assert!(!t.video_id.is_empty(), "playlist track videoId empty");
         eprintln!("  first track: videoId={} title={:?}", t.video_id, t.title);
     }
+}
+
+// ---------------------------------------------------------------------------
+// M3d-2 endpoint smoke tests against the live API (library / history / home /
+// radio / lyrics). Public ids/titles only — never header/cookie material.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "hits the live YouTube Music API; requires real browser.json"]
+async fn get_library_playlists_against_real_api() {
+    let client = live_client();
+    let playlists = client
+        .get_library_playlists(25)
+        .await
+        .expect("get_library_playlists succeeds");
+    eprintln!("library_playlists: {}", playlists.len());
+    for p in playlists.iter().take(3) {
+        assert!(!p.playlist_id.is_empty(), "playlistId empty");
+        eprintln!("  {} ({} tracks)", p.title, p.track_count);
+    }
+}
+
+#[tokio::test]
+#[ignore = "hits the live YouTube Music API; requires real browser.json"]
+async fn get_library_albums_against_real_api() {
+    let client = live_client();
+    let albums = client
+        .get_library_albums(25)
+        .await
+        .expect("get_library_albums succeeds");
+    eprintln!("library_albums: {}", albums.len());
+    for a in albums.iter().take(3) {
+        assert!(
+            a.browse_id.starts_with("MPRE"),
+            "album id {:?}",
+            a.browse_id
+        );
+        eprintln!("  {} — {} ({})", a.title, a.artist, a.year);
+    }
+}
+
+#[tokio::test]
+#[ignore = "hits the live YouTube Music API; requires real browser.json"]
+async fn get_library_artists_against_real_api() {
+    let client = live_client();
+    let artists = client
+        .get_library_artists(25)
+        .await
+        .expect("get_library_artists succeeds");
+    eprintln!("library_artists: {}", artists.len());
+    for a in artists.iter().take(3) {
+        assert!(!a.channel_id.is_empty(), "channelId empty");
+        assert!(!a.name.is_empty(), "artist name empty");
+        eprintln!("  {} [{}]", a.name, a.channel_id);
+    }
+}
+
+#[tokio::test]
+#[ignore = "hits the live YouTube Music API; requires real browser.json"]
+async fn get_history_against_real_api() {
+    let client = live_client();
+    let tracks = client.get_history().await.expect("get_history succeeds");
+    eprintln!("history: {} tracks", tracks.len());
+    for t in tracks.iter().take(3) {
+        assert!(!t.video_id.is_empty(), "history track videoId empty");
+        eprintln!("  videoId={} title={:?}", t.video_id, t.title);
+    }
+}
+
+#[tokio::test]
+#[ignore = "hits the live YouTube Music API; requires real browser.json"]
+async fn get_home_against_real_api() {
+    use ytmusic_api::HomeSectionItem;
+    let client = live_client();
+    let sections = client.get_home().await.expect("get_home succeeds");
+    assert!(!sections.is_empty(), "home returned no sections");
+    eprintln!("home: {} sections", sections.len());
+    for s in &sections {
+        let (tracks, playlists) =
+            s.items
+                .iter()
+                .fold((0usize, 0usize), |(t, p), item| match item {
+                    HomeSectionItem::Track(_) => (t + 1, p),
+                    HomeSectionItem::Playlist(_) => (t, p + 1),
+                });
+        eprintln!(
+            "  {:?}: {} items ({} tracks, {} playlists)",
+            s.title,
+            s.items.len(),
+            tracks,
+            playlists
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "hits the live YouTube Music API; requires real browser.json"]
+async fn get_radio_against_real_api() {
+    let client = live_client();
+    // A stable public seed (Rick Astley — "Never Gonna Give You Up").
+    let tracks = client
+        .get_radio("dQw4w9WgXcQ", 10)
+        .await
+        .expect("get_radio succeeds");
+    assert!(!tracks.is_empty(), "radio returned no tracks");
+    assert_eq!(
+        tracks[0].video_id, "dQw4w9WgXcQ",
+        "seed track should be first"
+    );
+    eprintln!("radio[dQw4w9WgXcQ]: {} tracks", tracks.len());
+    eprintln!("  seed: {:?} — {:?}", tracks[0].title, tracks[0].artist);
+    assert!(tracks.len() <= 10, "limit exceeded");
+}
+
+#[tokio::test]
+#[ignore = "hits the live YouTube Music API; requires real browser.json"]
+async fn get_lyrics_against_real_api() {
+    let client = live_client();
+    // "Bohemian Rhapsody" (bSnlKl_PoQU) has a stable public lyrics page.
+    let lyrics = client
+        .get_lyrics("bSnlKl_PoQU")
+        .await
+        .expect("get_lyrics succeeds")
+        .expect("Bohemian Rhapsody has lyrics");
+    assert!(
+        lyrics.starts_with("Is this the real life?"),
+        "unexpected lyrics opener"
+    );
+    eprintln!("lyrics[bSnlKl_PoQU]: {} chars", lyrics.chars().count());
+
+    // A track with no lyrics yields Ok(None), never an error (absence is a value).
+    let none = client
+        .get_lyrics("dQw4w9WgXcQ")
+        .await
+        .expect("no-lyrics is not an error");
+    eprintln!("lyrics[dQw4w9WgXcQ]: present = {}", none.is_some());
 }
