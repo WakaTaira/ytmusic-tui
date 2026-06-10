@@ -352,13 +352,17 @@ impl From<libmpv2::Error> for PlayerError {
 
 /// Thin wrapper around `libmpv2` for headless audio playback.
 ///
-/// Construct with [`Player::new`]; receive playback events on the channel
-/// returned by [`Player::events`]. Playback control methods ([`Player::play`],
+/// Construct with [`Player::new`]; take ownership of the event channel once
+/// with [`Player::take_events`]. Playback control methods ([`Player::play`],
 /// [`Player::toggle_pause`], ...) issue commands against the shared handle from
 /// the controlling thread. The instance shuts the event thread down on drop.
 pub struct Player {
     mpv: Arc<Mpv>,
-    events: Receiver<PlayerEvent>,
+    /// Receiver carrying [`PlayerEvent`]s, taken once by the runtime's fan-out
+    /// forwarder via [`Player::take_events`]. `Option` so the receiver can be
+    /// *moved* out (the `mpsc::Receiver` is `!Clone` — a single consumer owns
+    /// it). `None` after it has been taken.
+    events: Option<Receiver<PlayerEvent>>,
     stop: Arc<AtomicBool>,
     event_thread: Option<JoinHandle<()>>,
     audio_quality: &'static str,
@@ -414,7 +418,7 @@ impl Player {
 
         Ok(Self {
             mpv,
-            events: rx,
+            events: Some(rx),
             stop,
             event_thread: Some(event_thread),
             audio_quality: quality,
@@ -422,16 +426,19 @@ impl Player {
         })
     }
 
-    /// Borrow the channel receiver carrying [`PlayerEvent`]s.
+    /// Take ownership of the channel receiver carrying [`PlayerEvent`]s.
     ///
-    /// The replacement for the Python `on_track_end` / `on_track_error`
-    /// callbacks: poll or block on this in the consuming layer.
+    /// Returns `Some` on the first call and `None` thereafter — the receiver is
+    /// a single-consumer `mpsc::Receiver` (`!Clone`), so exactly one owner may
+    /// hold it. The runtime thread's fan-out forwarder takes it once at startup
+    /// and re-publishes each event onto the shared UI event channel (and, in
+    /// M6, onto a second MPRIS sink); see [`crate::app`].
     ///
-    /// TODO(M5/M6): single-consumer by construction (`Receiver` is not
-    /// `Clone`). When the TUI and MPRIS both need these events, replace with
-    /// a broadcast channel or a fan-out forwarder instead of sharing this.
-    pub fn events(&self) -> &Receiver<PlayerEvent> {
-        &self.events
+    /// This is the M5a resolution of the Python `on_track_end` /
+    /// `on_track_error` callbacks: instead of multiple callbacks, a single
+    /// owner drains the channel and broadcasts to all interested sinks.
+    pub fn take_events(&mut self) -> Option<Receiver<PlayerEvent>> {
+        self.events.take()
     }
 
     // -- Playback control --------------------------------------------------
@@ -984,7 +991,7 @@ mod tests {
 
             Player {
                 mpv,
-                events: rx,
+                events: Some(rx),
                 stop,
                 event_thread: Some(event_thread),
                 audio_quality: "high",
@@ -1007,9 +1014,13 @@ mod tests {
             mut pred: impl FnMut(&PlayerEvent) -> bool,
         ) -> Option<PlayerEvent> {
             let deadline = Instant::now() + DEADLINE;
+            let events = player
+                .events
+                .as_ref()
+                .expect("event receiver present in tests");
             loop {
                 let remaining = deadline.checked_duration_since(Instant::now())?;
-                match player.events.recv_timeout(remaining) {
+                match events.recv_timeout(remaining) {
                     Ok(ev) => {
                         if pred(&ev) {
                             return Some(ev);
@@ -1154,9 +1165,13 @@ mod tests {
             );
             // Let the demuxer get going so the replace clearly aborts a live file.
             let settle = Instant::now() + Duration::from_millis(300);
+            let drain = player
+                .events
+                .as_ref()
+                .expect("event receiver present in tests");
             while Instant::now() < settle {
                 // Drain progress/loaded events without busy-failing.
-                let _ = player.events.recv_timeout(Duration::from_millis(50));
+                let _ = drain.recv_timeout(Duration::from_millis(50));
             }
             // Replace mid-play; the short source will EOF shortly after.
             load(&player, SINE_SHORT);
@@ -1176,7 +1191,11 @@ mod tests {
             );
             // And there must be no second TrackEnded queued (no double advance
             // from the interrupted file's STOP).
-            let extra = player.events.recv_timeout(Duration::from_millis(200));
+            let extra = player
+                .events
+                .as_ref()
+                .expect("event receiver present in tests")
+                .recv_timeout(Duration::from_millis(200));
             assert!(
                 !matches!(extra, Ok(PlayerEvent::TrackEnded)),
                 "STOP must not produce a second TrackEnded, got {extra:?}"
