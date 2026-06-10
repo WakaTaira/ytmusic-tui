@@ -126,10 +126,14 @@ fn classify_message(text: &str) -> String {
         return "Rate limited — try again later".to_owned();
     }
 
-    // Generic fallback: truncate to 80 characters and prefix with "Error: ".
-    // Mirrors: `text[:77] + "..."` when `len(text) > 80`.
-    if text.len() > 80 {
-        format!("Error: {}...", &text[..77])
+    // Generic fallback: truncate long messages and prefix with "Error: ".
+    // Mirrors Python's `text[:77] + "..."` when `len(text) > 80` — both the
+    // threshold and the cut are measured in CHARACTERS, not bytes (a byte
+    // slice would panic mid-codepoint on non-ASCII messages). Output for
+    // long input is "Error: " + 77 chars + "..." (87 display chars total).
+    if text.chars().count() > 80 {
+        let head: String = text.chars().take(77).collect();
+        format!("Error: {head}...")
     } else {
         format!("Error: {text}")
     }
@@ -359,5 +363,18 @@ mod tests {
         assert!(result.ends_with("..."));
         // The underlying text portion is ≤ 77 chars.
         assert!(result.len() <= 87);
+    }
+
+    #[test]
+    fn generic_long_multibyte_error_truncates_without_panicking() {
+        // Regression: a byte slice (&text[..77]) panics mid-codepoint on
+        // non-ASCII input; the cut must count characters like Python's
+        // text[:77].
+        let long_msg = "サーバー側で予期しないエラーが発生しました".repeat(10);
+        let err = ApiError::Parse(long_msg);
+        let result = classify_api_error(&err);
+        assert!(result.starts_with("Error: "));
+        assert!(result.ends_with("..."));
+        assert_eq!(result.chars().count(), 7 + 77 + 3);
     }
 }
