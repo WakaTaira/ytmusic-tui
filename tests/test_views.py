@@ -9,6 +9,7 @@ import pytest
 from helpers import make_app
 from helpers import make_track as _make_track
 from helpers import make_tracks as _make_tracks
+from textual.widgets import ContentSwitcher
 
 from ytmusic_tui.api import (
     AlbumInfo,
@@ -311,6 +312,43 @@ class TestSearchView:
             view.on_data_table_row_selected(mock_event)
 
             app.action_open_artist.assert_called_once_with("UCsearch_1")
+
+    @pytest.mark.asyncio
+    async def test_search_playlist_selection_opens_playlist_view(self) -> None:
+        """Selecting a playlist result must load it into PlaylistView.
+
+        Regression guard: ``_on_playlist_selected`` once routed the
+        view switch through ``getattr(self.app, "action_switch_view",
+        None)``, and that None-guard silently swallowed the dead path so
+        the playlist's tracks were never loaded. Selecting a playlist row
+        must switch to the playlist view and call
+        ``PlaylistView.show_track_list`` with the chosen playlist.
+        """
+        playlist = _make_playlist_info(1)
+        results = _make_search_results(playlists=[playlist])
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            app.action_switch_view("search")
+            await _pilot.pause()
+
+            view = app.query_one(SearchView)
+            view._populate_all_results(results)
+            await _pilot.pause()
+
+            # Spy on the load-bearing call that used to be dead.
+            playlist_view = app.query_one(PlaylistView)
+            playlist_view.show_track_list = MagicMock()  # type: ignore[method-assign]
+
+            mock_event = MagicMock()
+            mock_event.cursor_row = 0
+            mock_dt = MagicMock()
+            mock_dt.id = "search-playlists"
+            mock_event.data_table = mock_dt
+            view.on_data_table_row_selected(mock_event)
+            await _pilot.pause()
+
+            playlist_view.show_track_list.assert_called_once_with(playlist)
+            assert app.query_one(ContentSwitcher).current == "playlist"
 
     @pytest.mark.asyncio
     async def test_search_focus_cycling(self) -> None:
@@ -865,7 +903,7 @@ class TestHomeView:
             from textual.widgets import Label
 
             view = app.query_one(HomeView)
-            view._show_error("Network error — check your connection")
+            view._set_status("Network error — check your connection")
             await _pilot.pause()
 
             status = view.query_one("#home-status", Label)

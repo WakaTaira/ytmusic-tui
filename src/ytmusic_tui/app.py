@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, ClassVar
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.css.query import NoMatches
 from textual.widgets import ContentSwitcher, Header, Static
 
 from ytmusic_tui.actions import BrowseActions, PlaybackActions, PopupActions
@@ -197,9 +198,9 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
             self._notify_views_orientation(new_orientation)
 
     def _notify_views_orientation(self, orientation: Orientation) -> None:
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(NoMatches):
             self.query_one(LibraryView).update_orientation(orientation)
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(NoMatches):
             self.query_one(SearchView).update_orientation(orientation)
 
     def compose(self) -> ComposeResult:

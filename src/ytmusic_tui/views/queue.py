@@ -2,25 +2,33 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
-from textual.widgets import DataTable, Label, Static
+from textual.widgets import DataTable, Label
 
 from ytmusic_tui.formatting import format_duration as _format_duration
+from ytmusic_tui.views.base import FetchView
 from ytmusic_tui.views.filter_bar import FilterBar
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
 
-    from ytmusic_tui.queue import QueueManager, Track
+    from ytmusic_tui.queue import Track
 
 
-class QueueView(Static):
+class QueueView(FetchView):
     """Displays the current playback queue.
 
     Shows all tracks with the currently playing track highlighted.
     Press 'd' on a row to remove it from the queue.
+
+    Reads directly from ``queue_manager`` rather than the API, so it has
+    no fetch worker. It still subclasses :class:`FetchView` for typed app
+    access (``music_app.queue_manager``), the shared teardown-safe
+    ``_set_status``, and the ``_cursor_row`` helper.
     """
+
+    STATUS_LABEL_ID: ClassVar[str] = "#queue-status"
 
     DEFAULT_CSS = """
     QueueView {
@@ -59,13 +67,9 @@ class QueueView(Static):
 
     def refresh_queue(self) -> None:
         """Rebuild the table from the current queue state."""
-        queue: QueueManager | None = getattr(self.app, "queue_manager", None)
+        queue = self.music_app.queue_manager
         table = self.query_one("#queue-table", DataTable)
         table.clear()
-
-        if queue is None:
-            self._set_status("Queue not available")
-            return
 
         tracks: list[Track] = queue.tracks
         current: Track | None = queue.current_track
@@ -94,10 +98,7 @@ class QueueView(Static):
 
         table = self.query_one("#queue-table", DataTable)
         row_index = table.cursor_row
-        queue: QueueManager | None = getattr(self.app, "queue_manager", None)
-
-        if queue is None:
-            return
+        queue = self.music_app.queue_manager
 
         tracks = queue.tracks
         if row_index < 0 or row_index >= len(tracks):
@@ -108,17 +109,11 @@ class QueueView(Static):
 
     def get_focused_item(self) -> Track | None:
         """Return the track at the cursor row, or ``None``."""
-        queue: QueueManager | None = getattr(self.app, "queue_manager", None)
-        if queue is None:
+        row_index = self._cursor_row("#queue-table")
+        if row_index is None:
             return None
 
-        try:
-            table = self.query_one("#queue-table", DataTable)
-            row_index = table.cursor_row
-        except Exception:
-            return None
-
-        tracks = queue.tracks
+        tracks = self.music_app.queue_manager.tracks
         if 0 <= row_index < len(tracks):
             return tracks[row_index]
         return None
@@ -130,7 +125,3 @@ class QueueView(Static):
             filter_bar.hide()
         else:
             filter_bar.show()
-
-    def _set_status(self, text: str) -> None:
-        """Update the status label."""
-        self.query_one("#queue-status", Label).update(text)
