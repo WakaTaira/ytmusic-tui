@@ -133,6 +133,7 @@ class FilterBar(Static):
         """Show the filter bar, store original rows, and focus input."""
         table = self.target_table
         if table is None:
+            self.app.notify("Nothing to filter here", severity="warning", timeout=4)
             return
 
         self._store_original_rows(table)
