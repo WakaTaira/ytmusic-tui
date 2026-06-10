@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from helpers import load_fixture
 
 from ytmusic_tui.api import (
     AlbumInfo,
@@ -72,30 +73,21 @@ def _make_search_song_result(
 ) -> dict:
     """Build a realistic ytmusicapi search result dict for a song.
 
-    Pass None explicitly to simulate a missing field.
-    Omit the kwarg (or pass _UNSET) to get a sensible default.
+    Loads the canonical payload from ``search_song.json`` and applies
+    the given overrides.  Pass None explicitly to simulate a missing
+    field.  Omit the kwarg (or pass _UNSET) to keep the fixture default.
     """
-    if artists is _UNSET:
-        artists = [{"name": "Rick Astley", "id": "UCabc"}]
-    if album is _UNSET:
-        album = {"name": "Whenever You Need Somebody", "id": "MPREabc"}
-    if thumbnails is _UNSET:
-        thumbnails = [
-            {"url": "https://lh3.google.com/small.jpg", "width": 60, "height": 60},
-            {"url": "https://lh3.google.com/large.jpg", "width": 226, "height": 226},
-        ]
-    return {
-        "category": "Songs",
-        "resultType": "song",
-        "videoId": video_id,
-        "title": title,
-        "artists": artists,
-        "album": album,
-        "duration": duration,
-        "duration_seconds": 213,
-        "thumbnails": thumbnails,
-        "isExplicit": False,
-    }
+    result: dict = load_fixture("search_song.json")
+    result["videoId"] = video_id
+    result["title"] = title
+    result["duration"] = duration
+    if artists is not _UNSET:
+        result["artists"] = artists
+    if album is not _UNSET:
+        result["album"] = album
+    if thumbnails is not _UNSET:
+        result["thumbnails"] = thumbnails
+    return result
 
 
 def _make_playlist_item(
@@ -106,18 +98,19 @@ def _make_playlist_item(
     count: int | str = 42,
     thumbnails: list[dict[str, int | str]] | None = None,
 ) -> dict:
-    """Build a realistic ytmusicapi playlist item."""
-    if thumbnails is None:
-        thumbnails = [
-            {"url": "https://lh3.google.com/pl_thumb.jpg", "width": 226, "height": 226},
-        ]
-    return {
-        "playlistId": playlist_id,
-        "title": title,
-        "description": description,
-        "count": count,
-        "thumbnails": thumbnails,
-    }
+    """Build a realistic ytmusicapi playlist item.
+
+    Loads the canonical payload from ``playlist_item.json`` and applies
+    the given overrides.
+    """
+    result: dict = load_fixture("playlist_item.json")
+    result["playlistId"] = playlist_id
+    result["title"] = title
+    result["description"] = description
+    result["count"] = count
+    if thumbnails is not None:
+        result["thumbnails"] = thumbnails
+    return result
 
 
 def _make_playlist_track(
@@ -129,29 +122,22 @@ def _make_playlist_track(
     duration: str | None = "4:12",
     thumbnails: list[dict[str, int | str]] | None = None,
 ) -> dict:
-    """Build a ytmusicapi track dict as returned inside get_playlist."""
-    if artists is None:
-        artists = [{"name": "Artist A", "id": "UCxyz"}]
-    if album is None:
-        album = {"name": "Album X", "id": "MPREdef"}
-    if thumbnails is None:
-        thumbnails = [
-            {"url": "https://lh3.google.com/t_small.jpg", "width": 60, "height": 60},
-            {"url": "https://lh3.google.com/t_large.jpg", "width": 226, "height": 226},
-            {"url": "https://lh3.google.com/t_xlarge.jpg", "width": 544, "height": 544},
-        ]
-    return {
-        "videoId": video_id,
-        "title": title,
-        "artists": artists,
-        "album": album,
-        "duration": duration,
-        "duration_seconds": 252,
-        "thumbnails": thumbnails,
-        "isAvailable": True,
-        "isExplicit": False,
-        "likeStatus": "LIKE",
-    }
+    """Build a ytmusicapi track dict as returned inside get_playlist.
+
+    Loads the canonical payload from ``playlist_track.json`` and applies
+    the given overrides.
+    """
+    result: dict = load_fixture("playlist_track.json")
+    result["videoId"] = video_id
+    result["title"] = title
+    result["duration"] = duration
+    if artists is not None:
+        result["artists"] = artists
+    if album is not None:
+        result["album"] = album
+    if thumbnails is not None:
+        result["thumbnails"] = thumbnails
+    return result
 
 
 def _make_home_section(
@@ -159,23 +145,51 @@ def _make_home_section(
     title: str = "Quick picks",
     contents: list[dict] | None = None,
 ) -> dict:
-    """Build a ytmusicapi home section."""
-    if contents is None:
-        contents = [
-            _make_search_song_result(video_id="home1", title="Home Song 1"),
-            {
-                "resultType": "playlist",
-                "playlistId": "RDCLAK_home",
-                "title": "Chill Mix",
-                "thumbnails": [
-                    {"url": "https://lh3.google.com/mix.jpg", "width": 226, "height": 226}
-                ],
-            },
-        ]
-    return {
-        "title": title,
-        "contents": contents,
-    }
+    """Build a ytmusicapi home section.
+
+    Loads the canonical payload for the first section from
+    ``home_sections.json`` and applies the given overrides.
+    """
+    result: dict = load_fixture("home_sections.json")[0]
+    result["title"] = title
+    if contents is not None:
+        result["contents"] = contents
+    return result
+
+
+def _make_library_album_item(
+    browse_id: str = "MPREb_lib1",
+    title: str = "Lib Album",
+    year: str = "2024",
+) -> dict:
+    """Build a minimal library album dict as returned by ytmusicapi.
+
+    Loads the canonical payload from ``library_album_item.json`` and
+    applies the given overrides.
+    """
+    result: dict = load_fixture("library_album_item.json")
+    result["browseId"] = browse_id
+    result["title"] = title
+    result["year"] = year
+    return result
+
+
+def _make_library_artist_item(
+    browse_id: str = "UClib1",
+    artist: str = "Lib Artist",
+) -> dict:
+    """Build a minimal library artist dict as returned by ytmusicapi.
+
+    ytmusicapi's get_library_artists() returns dicts with 'browseId'
+    and 'artist' keys (not 'name').
+
+    Loads the canonical payload from ``library_artist_item.json`` and
+    applies the given overrides.
+    """
+    result: dict = load_fixture("library_artist_item.json")
+    result["browseId"] = browse_id
+    result["artist"] = artist
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -393,10 +407,7 @@ class TestGetLibraryPlaylists:
     @patch("ytmusic_tui.api.YTMusic")
     def test_returns_playlist_info_list(self, mock_ytmusic_cls: MagicMock) -> None:
         mock_client = MagicMock()
-        mock_client.get_library_playlists.return_value = [
-            _make_playlist_item(playlist_id="PL_1", title="Chill", count=10),
-            _make_playlist_item(playlist_id="PL_2", title="Workout", count="25"),
-        ]
+        mock_client.get_library_playlists.return_value = load_fixture("library_playlists.json")
         mock_ytmusic_cls.return_value = mock_client
 
         api = MusicAPI("/fake/path")
@@ -454,33 +465,13 @@ class TestGetLibraryPlaylists:
 # ---------------------------------------------------------------------------
 
 
-def _make_library_album_item(
-    browse_id: str = "MPREb_lib1",
-    title: str = "Lib Album",
-    year: str = "2024",
-) -> dict:
-    """Build a minimal library album dict as returned by ytmusicapi."""
-    return {
-        "browseId": browse_id,
-        "title": title,
-        "artists": [{"name": "Lib Artist", "id": "UClib1"}],
-        "year": year,
-        "thumbnails": [
-            {"url": "https://lh3.google.com/lib_album.jpg", "width": 226, "height": 226}
-        ],
-    }
-
-
 class TestGetLibraryAlbums:
     """Test the library albums method."""
 
     @patch("ytmusic_tui.api.YTMusic")
     def test_returns_album_info_list(self, mock_ytmusic_cls: MagicMock) -> None:
         mock_client = MagicMock()
-        mock_client.get_library_albums.return_value = [
-            _make_library_album_item(browse_id="MPREb_1", title="Album A"),
-            _make_library_album_item(browse_id="MPREb_2", title="Album B"),
-        ]
+        mock_client.get_library_albums.return_value = load_fixture("library_albums.json")
         mock_ytmusic_cls.return_value = mock_client
 
         api = MusicAPI("/fake/path")
@@ -532,34 +523,13 @@ class TestGetLibraryAlbums:
 # ---------------------------------------------------------------------------
 
 
-def _make_library_artist_item(
-    browse_id: str = "UClib1",
-    artist: str = "Lib Artist",
-) -> dict:
-    """Build a minimal library artist dict as returned by ytmusicapi.
-
-    ytmusicapi's get_library_artists() returns dicts with 'browseId'
-    and 'artist' keys (not 'name').
-    """
-    return {
-        "browseId": browse_id,
-        "artist": artist,
-        "thumbnails": [
-            {"url": "https://lh3.google.com/lib_artist.jpg", "width": 226, "height": 226}
-        ],
-    }
-
-
 class TestGetLibraryArtists:
     """Test the library artists method."""
 
     @patch("ytmusic_tui.api.YTMusic")
     def test_returns_artist_info_list(self, mock_ytmusic_cls: MagicMock) -> None:
         mock_client = MagicMock()
-        mock_client.get_library_artists.return_value = [
-            _make_library_artist_item(browse_id="UC_1", artist="Artist A"),
-            _make_library_artist_item(browse_id="UC_2", artist="Artist B"),
-        ]
+        mock_client.get_library_artists.return_value = load_fixture("library_artists.json")
         mock_ytmusic_cls.return_value = mock_client
 
         api = MusicAPI("/fake/path")
@@ -622,9 +592,8 @@ class TestGetLibraryArtists:
     def test_returns_simplified_artist_info(self, mock_ytmusic_cls: MagicMock) -> None:
         """Library artists should have empty top_songs, albums, etc."""
         mock_client = MagicMock()
-        mock_client.get_library_artists.return_value = [
-            _make_library_artist_item(browse_id="UC_simp", artist="Simple"),
-        ]
+        item = _make_library_artist_item(browse_id="UC_simp", artist="Simple")
+        mock_client.get_library_artists.return_value = [item]
         mock_ytmusic_cls.return_value = mock_client
 
         api = MusicAPI("/fake/path")
@@ -646,14 +615,7 @@ class TestGetPlaylistTracks:
     @patch("ytmusic_tui.api.YTMusic")
     def test_returns_track_list(self, mock_ytmusic_cls: MagicMock) -> None:
         mock_client = MagicMock()
-        mock_client.get_playlist.return_value = {
-            "id": "PL_test",
-            "title": "Test Playlist",
-            "tracks": [
-                _make_playlist_track(video_id="t1", title="Song 1", duration="3:00"),
-                _make_playlist_track(video_id="t2", title="Song 2", duration="4:30"),
-            ],
-        }
+        mock_client.get_playlist.return_value = load_fixture("playlist_with_tracks.json")
         mock_ytmusic_cls.return_value = mock_client
 
         api = MusicAPI("/fake/path")
@@ -724,10 +686,7 @@ class TestGetHome:
     @patch("ytmusic_tui.api.YTMusic")
     def test_returns_home_sections(self, mock_ytmusic_cls: MagicMock) -> None:
         mock_client = MagicMock()
-        mock_client.get_home.return_value = [
-            _make_home_section(title="Quick picks"),
-            _make_home_section(title="Forgotten favourites"),
-        ]
+        mock_client.get_home.return_value = load_fixture("home_sections.json")
         mock_ytmusic_cls.return_value = mock_client
 
         api = MusicAPI("/fake/path")
@@ -788,14 +747,7 @@ class TestGetLikedSongs:
     @patch("ytmusic_tui.api.YTMusic")
     def test_returns_liked_tracks(self, mock_ytmusic_cls: MagicMock) -> None:
         mock_client = MagicMock()
-        mock_client.get_liked_songs.return_value = {
-            "id": "LM",
-            "title": "Your Likes",
-            "tracks": [
-                _make_playlist_track(video_id="like1", title="Liked Song 1"),
-                _make_playlist_track(video_id="like2", title="Liked Song 2"),
-            ],
-        }
+        mock_client.get_liked_songs.return_value = load_fixture("liked_songs.json")
         mock_ytmusic_cls.return_value = mock_client
 
         api = MusicAPI("/fake/path")
@@ -904,58 +856,6 @@ class TestSearchResults:
 # ---------------------------------------------------------------------------
 
 
-def _make_mixed_search_results() -> list[dict]:
-    """Build a realistic mixed search result list from ytmusicapi."""
-    return [
-        {
-            "resultType": "song",
-            "videoId": "song1",
-            "title": "Test Song",
-            "artists": [{"name": "Test Artist", "id": "UC1"}],
-            "album": {"name": "Test Album", "id": "MPRE1"},
-            "duration": "3:30",
-            "duration_seconds": 210,
-            "thumbnails": [{"url": "https://example.com/s.jpg", "width": 120, "height": 120}],
-        },
-        {
-            "resultType": "video",
-            "videoId": "vid1",
-            "title": "Test Video",
-            "artists": [{"name": "Video Artist", "id": "UC2"}],
-            "album": None,
-            "duration": "5:00",
-            "duration_seconds": 300,
-            "thumbnails": [],
-        },
-        {
-            "resultType": "album",
-            "browseId": "MPREb_alb1",
-            "title": "Great Album",
-            "artists": [{"name": "Album Artist", "id": "UC3"}],
-            "year": "2023",
-            "thumbnails": [{"url": "https://example.com/a.jpg", "width": 226, "height": 226}],
-        },
-        {
-            "resultType": "artist",
-            "browseId": "UCartist1",
-            "title": "Famous Artist",
-            "thumbnails": [{"url": "https://example.com/ar.jpg", "width": 226, "height": 226}],
-        },
-        {
-            "resultType": "playlist",
-            "playlistId": "VLPL_search1",
-            "title": "Cool Playlist",
-            "count": 15,
-            "thumbnails": [{"url": "https://example.com/p.jpg", "width": 226, "height": 226}],
-        },
-        # An item with unknown resultType should be ignored
-        {
-            "resultType": "station",
-            "title": "Some Radio",
-        },
-    ]
-
-
 class TestSearchAll:
     """Test the search_all method for multi-category search."""
 
@@ -963,7 +863,7 @@ class TestSearchAll:
     def test_categorizes_mixed_results(self, mock_ytmusic_cls: MagicMock) -> None:
         """Mixed search results should be categorized by resultType."""
         mock_client = MagicMock()
-        mock_client.search.return_value = _make_mixed_search_results()
+        mock_client.search.return_value = load_fixture("search_results_mixed.json")
         mock_ytmusic_cls.return_value = mock_client
 
         api = MusicAPI("/fake/path")

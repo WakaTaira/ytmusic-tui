@@ -3,12 +3,15 @@
 Canonical factories for dummy tracks and a fully mocked application.
 Import these instead of redefining per-file copies::
 
-    from helpers import make_app, make_track, make_tracks
+    from helpers import make_app, make_track, make_tracks, load_fixture
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import copy
+import json
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
 from ytmusic_tui.player import PlayerState
@@ -16,10 +19,29 @@ from ytmusic_tui.queue import Track
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
     from unittest.mock import MagicMock
 
     from ytmusic_tui.app import YtMusicTui
+
+
+_FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+def load_fixture(name: str) -> Any:
+    """Load a JSON fixture file from the tests/fixtures directory.
+
+    Returns a deep copy so callers can mutate the result freely without
+    affecting subsequent calls.
+
+    Args:
+        name: Filename relative to tests/fixtures/ (e.g. ``"search_song.json"``).
+
+    Returns:
+        The parsed JSON value (dict, list, str, int, etc.).
+    """
+    path = _FIXTURES_DIR / name
+    with path.open(encoding="utf-8") as fh:
+        return copy.deepcopy(json.load(fh))
 
 
 def make_track(n: int = 1) -> Track:
