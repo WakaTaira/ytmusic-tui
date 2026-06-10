@@ -8,7 +8,6 @@ audio_quality = "high"  # low / normal / high
 
 [ui]
 theme = "synthwave"
-vim_keys = true
 
 # Key bindings are configured separately via keymap.toml.
 # See: ~/.config/ytmusic-tui/keymap.toml and config/default_keymap.toml

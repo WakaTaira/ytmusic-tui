@@ -67,7 +67,6 @@ class TestConfigDefaults:
         assert cfg.player.backend == "mpv"
         assert cfg.player.audio_quality == "high"
         assert cfg.ui.theme == "synthwave"
-        assert cfg.ui.vim_keys is True
 
     def test_auth_config_frozen(self) -> None:
         """AuthConfig should be immutable."""
@@ -106,7 +105,6 @@ class TestConfigLoading:
 
             [ui]
             theme = "nord"
-            vim_keys = false
         """)
         bundled = tmp_path / "default.toml"
         bundled.write_text(toml_content)
@@ -118,7 +116,6 @@ class TestConfigLoading:
         assert cfg.auth.browser_auth_path == "/custom/browser.json"
         assert cfg.player.volume == 75
         assert cfg.ui.theme == "nord"
-        assert cfg.ui.vim_keys is False
 
     def test_user_overrides_bundled(self, tmp_path: Path) -> None:
         """User config should override bundled defaults."""

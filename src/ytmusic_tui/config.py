@@ -41,7 +41,6 @@ class UIConfig:
     """User-interface settings."""
 
     theme: str = "synthwave"
-    vim_keys: bool = True
 
 
 @dataclass(frozen=True)
@@ -177,7 +176,6 @@ def _parse_config(data: dict[str, Any]) -> AppConfig:
         ),
         ui=UIConfig(
             theme=str(ui_raw.get("theme", UIConfig.theme)),
-            vim_keys=bool(ui_raw.get("vim_keys", UIConfig.vim_keys)),
         ),
     )
 

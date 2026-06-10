@@ -121,7 +121,6 @@ audio_quality = "high"  # low / normal / high
 
 [ui]
 theme = "synthwave"  # synthwave / nord / gruvbox / catppuccin
-vim_keys = true
 ```
 
 ### keymap.toml
