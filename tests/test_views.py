@@ -21,26 +21,11 @@ from ytmusic_tui.views.library import LibraryPane, LibraryView
 from ytmusic_tui.views.playlist import PlaylistView
 from ytmusic_tui.views.queue import QueueView
 from ytmusic_tui.views.search import Pane, SearchView
+from helpers import make_app, make_track as _make_track, make_tracks as _make_tracks
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_track(n: int) -> Track:
-    """Create a dummy track with a numeric suffix."""
-    return Track(
-        video_id=f"vid_{n}",
-        title=f"Song {n}",
-        artist=f"Artist {n}",
-        album=f"Album {n}",
-        duration_seconds=float(180 + n),
-    )
-
-
-def _make_tracks(count: int) -> list[Track]:
-    """Create *count* dummy tracks numbered 1..count."""
-    return [_make_track(i) for i in range(1, count + 1)]
 
 
 def _make_playlist_info(n: int) -> PlaylistInfo:
@@ -97,96 +82,27 @@ def _make_search_results(
 
 def _make_app():
     """Create a YtMusicTui app with mocked dependencies."""
-    with (
-        patch("ytmusic_tui.app.MusicAPI") as mock_api_cls,
-        patch("ytmusic_tui.app.Player") as mock_player_cls,
-    ):
-        mock_api = mock_api_cls.return_value
-        mock_api.get_home.return_value = []
-        mock_api.search.return_value = []
-        mock_api.get_library_playlists.return_value = []
-        mock_api.get_library_albums.return_value = []
-        mock_api.get_library_artists.return_value = []
-        mock_api.get_playlist_tracks.return_value = []
-        mock_api.get_liked_songs.return_value = []
-
-        mock_player = mock_player_cls.return_value
-        mock_player.get_state.return_value = PlayerState()
-
-        from ytmusic_tui.app import YtMusicTui
-
-        app = YtMusicTui(auth_path="/fake/auth.json")
-        return app
+    return make_app()
 
 
 def _make_app_with_search_results(results: list[Track]):
     """Create an app where search returns the given results."""
-    with (
-        patch("ytmusic_tui.app.MusicAPI") as mock_api_cls,
-        patch("ytmusic_tui.app.Player") as mock_player_cls,
-    ):
-        mock_api = mock_api_cls.return_value
-        mock_api.get_home.return_value = []
-        mock_api.search.return_value = results
-        mock_api.get_library_playlists.return_value = []
-        mock_api.get_library_albums.return_value = []
-        mock_api.get_library_artists.return_value = []
-        mock_api.get_liked_songs.return_value = []
-
-        mock_player = mock_player_cls.return_value
-        mock_player.get_state.return_value = PlayerState()
-
-        from ytmusic_tui.app import YtMusicTui
-
-        app = YtMusicTui(auth_path="/fake/auth.json")
-        return app
+    return make_app(configure_api=lambda api: setattr(api.search, "return_value", results))
 
 
 def _make_app_with_playlists(playlists: list[PlaylistInfo], tracks: list[Track] | None = None):
     """Create an app where library playlists returns given data."""
-    with (
-        patch("ytmusic_tui.app.MusicAPI") as mock_api_cls,
-        patch("ytmusic_tui.app.Player") as mock_player_cls,
-    ):
-        mock_api = mock_api_cls.return_value
-        mock_api.get_home.return_value = []
-        mock_api.search.return_value = []
-        mock_api.get_library_playlists.return_value = playlists
-        mock_api.get_library_albums.return_value = []
-        mock_api.get_library_artists.return_value = []
-        mock_api.get_playlist_tracks.return_value = tracks or []
-        mock_api.get_liked_songs.return_value = []
 
-        mock_player = mock_player_cls.return_value
-        mock_player.get_state.return_value = PlayerState()
+    def _configure(api) -> None:
+        api.get_library_playlists.return_value = playlists
+        api.get_playlist_tracks.return_value = tracks or []
 
-        from ytmusic_tui.app import YtMusicTui
-
-        app = YtMusicTui(auth_path="/fake/auth.json")
-        return app
+    return make_app(configure_api=_configure)
 
 
 def _make_app_with_home_sections(sections: list[HomeSection]):
     """Create an app where get_home returns the given sections."""
-    with (
-        patch("ytmusic_tui.app.MusicAPI") as mock_api_cls,
-        patch("ytmusic_tui.app.Player") as mock_player_cls,
-    ):
-        mock_api = mock_api_cls.return_value
-        mock_api.get_home.return_value = sections
-        mock_api.search.return_value = []
-        mock_api.get_library_playlists.return_value = []
-        mock_api.get_library_albums.return_value = []
-        mock_api.get_library_artists.return_value = []
-        mock_api.get_playlist_tracks.return_value = []
-
-        mock_player = mock_player_cls.return_value
-        mock_player.get_state.return_value = PlayerState()
-
-        from ytmusic_tui.app import YtMusicTui
-
-        app = YtMusicTui(auth_path="/fake/auth.json")
-        return app
+    return make_app(configure_api=lambda api: setattr(api.get_home, "return_value", sections))
 
 
 def _make_app_with_library(
@@ -196,26 +112,14 @@ def _make_app_with_library(
     playlist_tracks: list[Track] | None = None,
 ):
     """Create an app with library data for 3-pane tests."""
-    with (
-        patch("ytmusic_tui.app.MusicAPI") as mock_api_cls,
-        patch("ytmusic_tui.app.Player") as mock_player_cls,
-    ):
-        mock_api = mock_api_cls.return_value
-        mock_api.get_home.return_value = []
-        mock_api.search.return_value = []
-        mock_api.get_library_playlists.return_value = playlists or []
-        mock_api.get_library_albums.return_value = albums or []
-        mock_api.get_library_artists.return_value = artists or []
-        mock_api.get_liked_songs.return_value = []
-        mock_api.get_playlist_tracks.return_value = playlist_tracks or []
 
-        mock_player = mock_player_cls.return_value
-        mock_player.get_state.return_value = PlayerState()
+    def _configure(api) -> None:
+        api.get_library_playlists.return_value = playlists or []
+        api.get_library_albums.return_value = albums or []
+        api.get_library_artists.return_value = artists or []
+        api.get_playlist_tracks.return_value = playlist_tracks or []
 
-        from ytmusic_tui.app import YtMusicTui
-
-        app = YtMusicTui(auth_path="/fake/auth.json")
-        return app
+    return make_app(configure_api=_configure)
 
 
 # ===================================================================
@@ -951,18 +855,17 @@ class TestHomeView:
 
     @pytest.mark.asyncio
     async def test_home_view_error_display(self) -> None:
-        """HomeView should display errors in the status label."""
+        """HomeView should display the given error message verbatim."""
         app = _make_app()
         async with app.run_test(size=(120, 40)) as _pilot:
             from textual.widgets import Label
 
             view = app.query_one(HomeView)
-            view._show_error("Connection failed")
+            view._show_error("Network error — check your connection")
             await _pilot.pause()
 
             status = view.query_one("#home-status", Label)
-            assert "Error" in status.content
-            assert "Connection failed" in status.content
+            assert "Network error" in status.content
 
     @pytest.mark.asyncio
     async def test_home_view_track_selection_plays(self) -> None:

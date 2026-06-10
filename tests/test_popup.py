@@ -20,25 +20,11 @@ from ytmusic_tui.views.popup import (
     build_actions,
 )
 
+from helpers import make_app as _make_app, make_track as _make_track, make_tracks as _make_tracks
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_track(n: int = 1) -> Track:
-    """Create a dummy track."""
-    return Track(
-        video_id=f"vid_{n}",
-        title=f"Song {n}",
-        artist=f"Artist {n}",
-        album=f"Album {n}",
-        duration_seconds=float(180 + n),
-    )
-
-
-def _make_tracks(count: int) -> list[Track]:
-    """Create *count* dummy tracks numbered 1..count."""
-    return [_make_track(i) for i in range(1, count + 1)]
 
 
 def _make_playlist_info(n: int = 1) -> PlaylistInfo:
@@ -59,30 +45,6 @@ def _make_album_info(n: int = 1) -> AlbumInfo:
         artist=f"Artist {n}",
         year=str(2020 + n),
     )
-
-
-def _make_app():
-    """Create a YtMusicTui app with mocked dependencies."""
-    with (
-        patch("ytmusic_tui.app.MusicAPI") as mock_api_cls,
-        patch("ytmusic_tui.app.Player") as mock_player_cls,
-    ):
-        mock_api = mock_api_cls.return_value
-        mock_api.get_home.return_value = []
-        mock_api.search.return_value = []
-        mock_api.get_library_playlists.return_value = []
-        mock_api.get_library_albums.return_value = []
-        mock_api.get_library_artists.return_value = []
-        mock_api.get_playlist_tracks.return_value = []
-        mock_api.get_liked_songs.return_value = []
-
-        mock_player = mock_player_cls.return_value
-        mock_player.get_state.return_value = PlayerState()
-
-        from ytmusic_tui.app import YtMusicTui
-
-        app = YtMusicTui(auth_path="/fake/auth.json")
-        return app
 
 
 # ===================================================================

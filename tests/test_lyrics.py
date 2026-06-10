@@ -9,16 +9,6 @@ import pytest
 from ytmusic_tui.queue import Track
 
 
-def _make_track(n: int = 1) -> Track:
-    return Track(
-        video_id=f"vid{n}",
-        title=f"Song {n}",
-        artist=f"Artist {n}",
-        album=f"Album {n}",
-        duration_seconds=200.0,
-    )
-
-
 # ---------------------------------------------------------------------------
 # API: get_lyrics
 # ---------------------------------------------------------------------------

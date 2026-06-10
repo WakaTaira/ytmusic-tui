@@ -73,6 +73,8 @@ known-first-party = ["ytmusic_tui"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Make tests/helpers.py importable as `helpers` from any test module.
+pythonpath = ["tests"]
 markers = [
     "integration: tests that require a valid OAuth token and network access",
 ]

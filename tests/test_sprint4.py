@@ -14,26 +14,11 @@ from ytmusic_tui.api import (
 )
 from ytmusic_tui.player import PlayerState
 from ytmusic_tui.queue import Track
+from helpers import make_app, make_track as _make_track, make_tracks as _make_tracks
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_track(n: int) -> Track:
-    """Create a dummy track with a numeric suffix."""
-    return Track(
-        video_id=f"vid_{n}",
-        title=f"Song {n}",
-        artist=f"Artist {n}",
-        album=f"Album {n}",
-        duration_seconds=float(180 + n),
-    )
-
-
-def _make_tracks(count: int) -> list[Track]:
-    """Create *count* dummy tracks numbered 1..count."""
-    return [_make_track(i) for i in range(1, count + 1)]
 
 
 def _make_album_info(browse_id: str = "MPREb_test1") -> AlbumInfo:
@@ -78,29 +63,13 @@ def _make_artist_info(channel_id: str = "UCtest123") -> ArtistInfo:
 
 
 def _make_app():
-    """Create a YtMusicTui app with mocked dependencies."""
-    with (
-        patch("ytmusic_tui.app.MusicAPI") as mock_api_cls,
-        patch("ytmusic_tui.app.Player") as mock_player_cls,
-    ):
-        mock_api = mock_api_cls.return_value
-        mock_api.get_home.return_value = []
-        mock_api.search.return_value = []
-        mock_api.get_library_playlists.return_value = []
-        mock_api.get_library_albums.return_value = []
-        mock_api.get_library_artists.return_value = []
-        mock_api.get_playlist_tracks.return_value = []
-        mock_api.get_liked_songs.return_value = []
-        mock_api.get_album.return_value = _make_album_info()
-        mock_api.get_artist.return_value = _make_artist_info()
+    """Create an app whose API also serves album and artist pages."""
 
-        mock_player = mock_player_cls.return_value
-        mock_player.get_state.return_value = PlayerState()
+    def _configure(api) -> None:
+        api.get_album.return_value = _make_album_info()
+        api.get_artist.return_value = _make_artist_info()
 
-        from ytmusic_tui.app import YtMusicTui
-
-        app = YtMusicTui(auth_path="/fake/auth.json")
-        return app
+    return make_app(configure_api=_configure)
 
 
 # ---------------------------------------------------------------------------

@@ -20,30 +20,11 @@ from ytmusic_tui.views.player import (
 from ytmusic_tui.views.playlist import PlaylistView
 from ytmusic_tui.views.queue import QueueView
 from ytmusic_tui.views.search import SearchView
+from helpers import make_app as _make_app
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_app():
-    """Create a YtMusicTui app with mocked dependencies."""
-    with (
-        patch("ytmusic_tui.app.MusicAPI") as mock_api_cls,
-        patch("ytmusic_tui.app.Player") as mock_player_cls,
-    ):
-        mock_api = mock_api_cls.return_value
-        mock_api.get_home.return_value = []
-        mock_api.get_library_playlists.return_value = []
-        mock_api.get_library_albums.return_value = []
-        mock_api.get_library_artists.return_value = []
-        mock_api.get_liked_songs.return_value = []
-        mock_player_cls.return_value.get_state.return_value = PlayerState()
-
-        from ytmusic_tui.app import YtMusicTui
-
-        app = YtMusicTui(auth_path="/fake/auth.json")
-        return app
 
 
 # ===================================================================

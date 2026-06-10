@@ -5,26 +5,11 @@ from __future__ import annotations
 import pytest
 
 from ytmusic_tui.queue import QueueManager, RepeatMode, Track
+from helpers import make_track as _make_track, make_tracks as _make_tracks
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_track(n: int) -> Track:
-    """Create a dummy track with a numeric suffix."""
-    return Track(
-        video_id=f"vid_{n}",
-        title=f"Song {n}",
-        artist=f"Artist {n}",
-        album=f"Album {n}",
-        duration_seconds=float(180 + n),
-    )
-
-
-def _make_tracks(count: int) -> list[Track]:
-    """Create *count* dummy tracks numbered 1..count."""
-    return [_make_track(i) for i in range(1, count + 1)]
 
 
 # ===================================================================

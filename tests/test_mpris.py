@@ -10,17 +10,7 @@ import pytest
 
 from ytmusic_tui.player import PlayerState
 from ytmusic_tui.queue import RepeatMode, Track
-
-
-def _make_track(n: int = 1) -> Track:
-    return Track(
-        video_id=f"vid{n}",
-        title=f"Song {n}",
-        artist=f"Artist {n}",
-        album=f"Album {n}",
-        duration_seconds=200.0,
-        thumbnail_url=f"https://img.example.com/{n}.jpg",
-    )
+from helpers import make_track as _make_track
 
 
 def _make_state(
@@ -90,7 +80,8 @@ class TestMediaPlayer2Player:
         assert metadata["xesam:title"].value == "Song 1"
         assert metadata["xesam:artist"].value == ["Artist 1"]
         assert metadata["xesam:album"].value == "Album 1"
-        assert metadata["mpris:length"].value == 200_000_000
+        # make_track(1) has duration 181.0 s
+        assert metadata["mpris:length"].value == 181_000_000
         assert "mpris:artUrl" in metadata
 
     def test_update_state_paused(self) -> None:

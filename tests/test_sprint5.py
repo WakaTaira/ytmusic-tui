@@ -11,34 +11,11 @@ import pytest
 from ytmusic_tui.config import DEFAULT_KEYMAP, load_keymap
 from ytmusic_tui.layout import Orientation, detect_orientation
 from ytmusic_tui.player import PlayerState
+from helpers import make_app as _make_app
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_app(keymap_path: Path | None = None):
-    """Create a YtMusicTui app with mocked dependencies."""
-    with (
-        patch("ytmusic_tui.app.MusicAPI") as mock_api_cls,
-        patch("ytmusic_tui.app.Player") as mock_player_cls,
-    ):
-        mock_api = mock_api_cls.return_value
-        mock_api.get_home.return_value = []
-        mock_api.search.return_value = []
-        mock_api.get_library_playlists.return_value = []
-        mock_api.get_library_albums.return_value = []
-        mock_api.get_library_artists.return_value = []
-        mock_api.get_playlist_tracks.return_value = []
-        mock_api.get_liked_songs.return_value = []
-
-        mock_player = mock_player_cls.return_value
-        mock_player.get_state.return_value = PlayerState()
-
-        from ytmusic_tui.app import YtMusicTui
-
-        app = YtMusicTui(auth_path="/fake/auth.json", keymap_path=keymap_path)
-        return app
 
 
 # ===================================================================

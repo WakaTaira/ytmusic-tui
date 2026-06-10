@@ -9,16 +9,7 @@ import pytest
 from ytmusic_tui.api import PlaylistInfo
 from ytmusic_tui.queue import Track
 from ytmusic_tui.views.popup import PlaylistPickerPopup
-
-
-def _make_track(n: int = 1) -> Track:
-    return Track(
-        video_id=f"vid{n}",
-        title=f"Song {n}",
-        artist=f"Artist {n}",
-        album=f"Album {n}",
-        duration_seconds=200.0,
-    )
+from helpers import make_app, make_track as _make_track
 
 
 # ---------------------------------------------------------------------------
@@ -216,3 +207,4 @@ class TestPlaylistPickerPopup:
         popup = PlaylistPickerPopup()
         assert popup._playlists == []
         assert popup._track is None
+
