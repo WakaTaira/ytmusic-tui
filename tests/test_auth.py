@@ -72,6 +72,14 @@ class TestClassifyApiError:
         msg = classify_api_error(Exception("Something broke"))
         assert "Something broke" in msg
 
+    def test_mutation_failed_message_surfaced_verbatim(self) -> None:
+        """MutationFailedError already carries a precise, user-facing message;
+        classify_api_error returns it unchanged."""
+        from ytmusic_tui.api import MutationFailedError
+
+        msg = classify_api_error(MutationFailedError("Track was not found in the playlist"))
+        assert msg == "Track was not found in the playlist"
+
     def test_long_message_truncated(self) -> None:
         long_msg = "x" * 200
         msg = classify_api_error(Exception(long_msg))

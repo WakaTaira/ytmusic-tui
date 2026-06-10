@@ -8,22 +8,25 @@ navigates to the playlist view.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
-from textual import work
 from textual.containers import VerticalScroll
+from textual.css.query import NoMatches
 from textual.widgets import DataTable, Label, Static
 
-from ytmusic_tui.auth import classify_api_error
+from ytmusic_tui.api import PlaylistInfo
 from ytmusic_tui.formatting import format_duration as _format_duration
+from ytmusic_tui.queue import Track
+from ytmusic_tui.views.base import FetchView
 from ytmusic_tui.views.filter_bar import FilterBar
 from ytmusic_tui.views.guards import teardown_safe
+from ytmusic_tui.views.playlist import PlaylistView
+from ytmusic_tui.views.widgets import NavDataTable
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
 
-    from ytmusic_tui.api import HomeSection, PlaylistInfo
-    from ytmusic_tui.queue import Track
+    from ytmusic_tui.api import HomeSection
 
 
 class _SectionTable(Static):
@@ -66,7 +69,7 @@ class _SectionTable(Static):
     def compose(self) -> ComposeResult:
         """Render a section title and its items table."""
         yield Label(self._section_title, classes="section-title")
-        table: DataTable[Any] = DataTable(id=f"home-section-{self._section_index}")
+        table: DataTable[Any] = NavDataTable(id=f"home-section-{self._section_index}")
         table.cursor_type = "row"
         table.add_columns("Title", "Artist / Info", "Duration")
         yield table
@@ -86,13 +89,15 @@ class _SectionTable(Static):
         return self._items
 
 
-class HomeView(Static):
+class HomeView(FetchView):
     """Home screen displaying recommendation sections.
 
     On mount, launches a background worker to fetch home data
     from the YouTube Music API, then renders section titles
     and interactive item tables.
     """
+
+    STATUS_LABEL_ID: ClassVar[str] = "#home-status"
 
     DEFAULT_CSS = """
     HomeView {
@@ -118,7 +123,7 @@ class HomeView(Static):
 
     def on_mount(self) -> None:
         """Kick off the background data fetch."""
-        self._fetch_home()
+        self._run_fetch(self.music_app.music_api.get_home, self._render_sections)
 
     def on_show(self) -> None:
         """Auto-focus the first table when the view becomes visible."""
@@ -158,20 +163,6 @@ class HomeView(Static):
         target.focus()
         target.scroll_visible(animate=False)
 
-    @work(thread=True)
-    def _fetch_home(self) -> None:
-        """Fetch home sections in a background thread."""
-        api = getattr(self.app, "music_api", None)
-        if api is None:
-            self.app.call_from_thread(self._show_error, "Error: API not initialized")
-            return
-
-        try:
-            sections = api.get_home()
-            self.app.call_from_thread(self._render_sections, sections)
-        except Exception as exc:
-            self.app.call_from_thread(self._show_error, classify_api_error(exc))
-
     @teardown_safe
     def _render_sections(self, sections: list[HomeSection]) -> None:
         """Populate the scroll container with fetched sections."""
@@ -200,16 +191,6 @@ class HomeView(Static):
         if focusable:
             focusable[0].focus()
 
-    @teardown_safe
-    def _show_error(self, message: str) -> None:
-        """Display an error in the status label.
-
-        The message is shown as-is; classify_api_error already returns
-        user-ready text.
-        """
-        status = self.query_one("#home-status", Label)
-        status.update(message)
-
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle Enter on a row in any section table.
 
@@ -231,36 +212,21 @@ class HomeView(Static):
 
     def _handle_item_selection(self, item: Track | PlaylistInfo) -> None:
         """Dispatch selection based on item type."""
-        from ytmusic_tui.api import PlaylistInfo as _PlaylistInfo
-        from ytmusic_tui.queue import Track as _Track
-
-        if isinstance(item, _Track):
+        if isinstance(item, Track):
             self._play_track(item)
-        elif isinstance(item, _PlaylistInfo):
+        elif isinstance(item, PlaylistInfo):
             self._open_playlist(item)
 
     def _play_track(self, track: Track) -> None:
         """Queue a single track and start playing."""
-        queue = getattr(self.app, "queue_manager", None)
-        player = getattr(self.app, "player", None)
-
-        if queue is not None:
-            queue.set_playlist([track], start_index=0)
-        if player is not None:
-            player.play(track.video_id)
+        self.music_app.queue_manager.set_playlist([track], start_index=0)
+        self.music_app.player.play(track.video_id)
 
     def _open_playlist(self, playlist: PlaylistInfo) -> None:
         """Switch to playlist view and load the selected playlist."""
-        from ytmusic_tui.views.playlist import PlaylistView
-
-        app = self.app
-        app.action_switch_view("playlist")  # type: ignore[attr-defined]
-
-        try:
-            playlist_view = app.query_one(PlaylistView)
-            playlist_view._show_track_list(playlist)
-        except Exception:
-            pass
+        app = self.music_app
+        app.action_switch_view("playlist")
+        app.query_one(PlaylistView).show_track_list(playlist)
 
     def toggle_filter(self) -> None:
         """Toggle the filter bar for the focused section table."""
@@ -298,9 +264,9 @@ class HomeView(Static):
 
         try:
             table = section_widget.query_one(DataTable)
-            row_index = table.cursor_row
-        except Exception:
+        except NoMatches:
             return None
+        row_index = table.cursor_row
 
         items = section_widget.items
         if 0 <= row_index < len(items):
@@ -310,16 +276,13 @@ class HomeView(Static):
 
 def _format_row(item: Track | PlaylistInfo) -> tuple[str, str, str]:
     """Format a home section item as a table row (title, info, duration)."""
-    from ytmusic_tui.api import PlaylistInfo as _PlaylistInfo
-    from ytmusic_tui.queue import Track as _Track
-
-    if isinstance(item, _Track):
+    if isinstance(item, Track):
         return (
             item.title,
             item.artist or "",
             _format_duration(item.duration_seconds),
         )
-    if isinstance(item, _PlaylistInfo):
+    if isinstance(item, PlaylistInfo):
         count_str = f"{item.track_count} tracks" if item.track_count else "Playlist"
         return (item.title, count_str, "")
     return (str(item), "", "")

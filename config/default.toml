@@ -8,8 +8,6 @@ audio_quality = "high"  # low / normal / high
 
 [ui]
 theme = "synthwave"
-vim_keys = true
 
-[keybinds]
-# Default keybindings (spotify_player-compatible)
-# Override in ~/.config/ytmusic-tui/config.toml
+# Key bindings are configured separately via keymap.toml.
+# See: ~/.config/ytmusic-tui/keymap.toml and config/default_keymap.toml

@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
-from textual import work
 from textual.containers import Vertical
-from textual.widgets import DataTable, Label, Static
+from textual.css.query import NoMatches
+from textual.widgets import DataTable, Label
 
-from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.formatting import format_duration as _format_duration
+from ytmusic_tui.views.base import FetchView
 from ytmusic_tui.views.filter_bar import FilterBar
 from ytmusic_tui.views.guards import teardown_safe
+from ytmusic_tui.views.widgets import NavDataTable
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -20,13 +21,15 @@ if TYPE_CHECKING:
     from ytmusic_tui.queue import Track
 
 
-class HistoryView(Static):
+class HistoryView(FetchView):
     """Recently played tracks, newest first.
 
     The list is refetched every time the view is opened (history moves
     fast). Enter on a row queues the visible history from the selected
     position, album-style.
     """
+
+    STATUS_LABEL_ID: ClassVar[str] = "#history-status"
 
     DEFAULT_CSS = """
     HistoryView {
@@ -58,33 +61,23 @@ class HistoryView(Static):
         yield Label("Recently played", id="history-title")
         yield Label("", id="history-status")
         with Vertical(id="history-table-container"):
-            table: DataTable[Any] = DataTable(id="history-table")
+            table: DataTable[Any] = NavDataTable(id="history-table")
             table.cursor_type = "row"
             table.add_columns("Title", "Artist", "Album", "Duration")
             yield table
         yield FilterBar("history-table", id="history-filter")
 
     def on_show(self) -> None:
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(NoMatches):
             self.query_one("#history-table", DataTable).focus()
 
     def refresh_history(self) -> None:
         """Refetch the listening history."""
-        self._set_status("Loading history...")
-        self._fetch_history()
-
-    @work(thread=True)
-    def _fetch_history(self) -> None:
-        api = getattr(self.app, "music_api", None)
-        if api is None:
-            self.app.call_from_thread(self._set_status, "Error: API not initialized")
-            return
-
-        try:
-            tracks = api.get_history()
-            self.app.call_from_thread(self._populate, tracks)
-        except Exception as exc:
-            self.app.call_from_thread(self._set_status, classify_api_error(exc))
+        self._run_fetch(
+            self.music_app.music_api.get_history,
+            self._populate,
+            loading="Loading history...",
+        )
 
     @teardown_safe
     def _populate(self, tracks: list[Track]) -> None:
@@ -112,22 +105,14 @@ class HistoryView(Static):
             return
 
         track = self._tracks[row_index]
-        queue = getattr(self.app, "queue_manager", None)
-        player = getattr(self.app, "player", None)
-
-        if queue is not None:
-            queue.set_playlist(self._tracks, start_index=row_index)
-        if player is not None:
-            player.play(track.video_id)
+        self.music_app.queue_manager.set_playlist(self._tracks, start_index=row_index)
+        self.music_app.player.play(track.video_id)
 
     def get_focused_item(self) -> Track | None:
         """Return the track at the cursor row, or ``None``."""
-        try:
-            table = self.query_one("#history-table", DataTable)
-            row_index = table.cursor_row
-        except Exception:
+        row_index = self._cursor_row("#history-table")
+        if row_index is None:
             return None
-
         if 0 <= row_index < len(self._tracks):
             return self._tracks[row_index]
         return None
@@ -139,8 +124,3 @@ class HistoryView(Static):
             filter_bar.hide()
         else:
             filter_bar.show()
-
-    @teardown_safe
-    def _set_status(self, text: str) -> None:
-        """Update the status label."""
-        self.query_one("#history-status", Label).update(text)

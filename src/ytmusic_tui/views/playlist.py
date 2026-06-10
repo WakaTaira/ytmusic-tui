@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
-from textual import work
 from textual.containers import Vertical
-from textual.widgets import DataTable, Label, Static
+from textual.widgets import DataTable, Label
 
-from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.formatting import format_duration as _format_duration
+from ytmusic_tui.views.base import FetchView
 from ytmusic_tui.views.filter_bar import FilterBar
 from ytmusic_tui.views.guards import teardown_safe
+from ytmusic_tui.views.widgets import NavDataTable
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from ytmusic_tui.queue import Track
 
 
-class PlaylistView(Static):
+class PlaylistView(FetchView):
     """Two-level playlist browser.
 
     Level 1: list of library playlists (title, track count).
@@ -29,6 +29,8 @@ class PlaylistView(Static):
     Enter drills into playlists / selects a track to play.
     Escape returns from track list to playlist list.
     """
+
+    STATUS_LABEL_ID: ClassVar[str] = "#playlist-status"
 
     DEFAULT_CSS = """
     PlaylistView {
@@ -59,7 +61,7 @@ class PlaylistView(Static):
         """Build the playlist layout: status label, data table, and filter bar."""
         yield Label("", id="playlist-status")
         with Vertical(id="playlist-table-container"):
-            table: DataTable[Any] = DataTable(id="playlist-table")
+            table: DataTable[Any] = NavDataTable(id="playlist-table")
             table.cursor_type = "row"
             yield table
         yield FilterBar("playlist-table", id="playlist-filter")
@@ -79,23 +81,11 @@ class PlaylistView(Static):
         table = self.query_one("#playlist-table", DataTable)
         table.clear(columns=True)
         table.add_columns("Title", "Tracks")
-        self._fetch_playlists()
-
-    @work(thread=True)
-    def _fetch_playlists(self) -> None:
-        """Fetch library playlists in a background thread."""
-        self.app.call_from_thread(self._set_status, "Loading playlists...")
-
-        api = getattr(self.app, "music_api", None)
-        if api is None:
-            self.app.call_from_thread(self._set_status, "Error: API not initialized")
-            return
-
-        try:
-            playlists: list[PlaylistInfo] = api.get_library_playlists()
-            self.app.call_from_thread(self._populate_playlists, playlists)
-        except Exception as exc:
-            self.app.call_from_thread(self._set_status, classify_api_error(exc))
+        self._run_fetch(
+            self.music_app.music_api.get_library_playlists,
+            self._populate_playlists,
+            loading="Loading playlists...",
+        )
 
     @teardown_safe
     def _populate_playlists(self, playlists: list[PlaylistInfo]) -> None:
@@ -113,7 +103,7 @@ class PlaylistView(Static):
         for pl in playlists:
             table.add_row(pl.title, str(pl.track_count))
 
-    def _show_track_list(self, playlist: PlaylistInfo) -> None:
+    def show_track_list(self, playlist: PlaylistInfo) -> None:
         """Switch to track list view for the given playlist."""
         self._viewing_tracks = True
         self._current_playlist_title = playlist.title
@@ -121,25 +111,22 @@ class PlaylistView(Static):
         table = self.query_one("#playlist-table", DataTable)
         table.clear(columns=True)
         table.add_columns("Title", "Artist", "Album", "Duration")
-        self._fetch_tracks(playlist.playlist_id)
-
-    @work(thread=True)
-    def _fetch_tracks(self, playlist_id: str) -> None:
-        """Fetch playlist tracks in a background thread."""
-        self.app.call_from_thread(
-            self._set_status, f"Loading tracks for {self._current_playlist_title}..."
+        playlist_id = playlist.playlist_id
+        self._run_fetch(
+            lambda: self.music_app.music_api.get_playlist_tracks(playlist_id),
+            self._populate_tracks,
+            loading=f"Loading tracks for {playlist.title}...",
         )
 
-        api = getattr(self.app, "music_api", None)
-        if api is None:
-            self.app.call_from_thread(self._set_status, "Error: API not initialized")
-            return
+    @property
+    def current_playlist_id(self) -> str:
+        """The ID of the playlist currently being viewed."""
+        return self._current_playlist_id
 
-        try:
-            tracks: list[Track] = api.get_playlist_tracks(playlist_id)
-            self.app.call_from_thread(self._populate_tracks, tracks)
-        except Exception as exc:
-            self.app.call_from_thread(self._set_status, classify_api_error(exc))
+    @property
+    def is_viewing_tracks(self) -> bool:
+        """Whether the view is showing a track list (vs. playlist list)."""
+        return self._viewing_tracks
 
     @teardown_safe
     def _populate_tracks(self, tracks: list[Track]) -> None:
@@ -178,19 +165,14 @@ class PlaylistView(Static):
             if row_index < 0 or row_index >= len(self._playlists):
                 return
             playlist = self._playlists[row_index]
-            self._show_track_list(playlist)
+            self.show_track_list(playlist)
         else:
             # Track list mode
             if row_index < 0 or row_index >= len(self._tracks):
                 return
             track = self._tracks[row_index]
-            queue = getattr(self.app, "queue_manager", None)
-            player = getattr(self.app, "player", None)
-
-            if queue is not None:
-                queue.set_playlist(self._tracks, start_index=row_index)
-            if player is not None:
-                player.play(track.video_id)
+            self.music_app.queue_manager.set_playlist(self._tracks, start_index=row_index)
+            self.music_app.player.play(track.video_id)
 
     def on_key(self, event: object) -> None:
         """Handle Escape to go back to playlist list from track list."""
@@ -220,10 +202,8 @@ class PlaylistView(Static):
         In track list mode: returns a Track.
         Returns ``None`` if the list is empty.
         """
-        try:
-            table = self.query_one("#playlist-table", DataTable)
-            row_index = table.cursor_row
-        except Exception:
+        row_index = self._cursor_row("#playlist-table")
+        if row_index is None:
             return None
 
         if self._viewing_tracks:
@@ -233,8 +213,3 @@ class PlaylistView(Static):
             if 0 <= row_index < len(self._playlists):
                 return self._playlists[row_index]
         return None
-
-    @teardown_safe
-    def _set_status(self, text: str) -> None:
-        """Update the status label."""
-        self.query_one("#playlist-status", Label).update(text)

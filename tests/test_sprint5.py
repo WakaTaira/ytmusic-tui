@@ -226,14 +226,11 @@ class TestAppKeymapIntegration:
         """Default keymap should leave all bindings at their compiled-in keys."""
         app = _make_app()
         async with app.run_test(size=(120, 40)) as _pilot:
-            # The quit binding should be at "Q" by default
-            found = False
-            for key, bindings in app._bindings.key_to_bindings.items():
-                for binding in bindings:
-                    if binding.action == "quit":
-                        assert key == "Q"
-                        found = True
-            assert found, "quit binding not found"
+            # active_bindings is the public, keymap-applied view of the
+            # bindings (the official keymap mechanism does not mutate the
+            # raw BINDINGS map). The quit binding should be at "Q".
+            actions = {key: ab.binding.action for key, ab in app.screen.active_bindings.items()}
+            assert actions.get("Q") == "quit"
 
     @pytest.mark.asyncio
     async def test_custom_keymap_overrides_binding(self, tmp_path: Path) -> None:
@@ -248,14 +245,10 @@ class TestAppKeymapIntegration:
 
         app = _make_app(keymap_path=keymap_file)
         async with app.run_test(size=(120, 40)) as _pilot:
-            # Should find quit at ctrl+q
-            found = False
-            for key, bindings in app._bindings.key_to_bindings.items():
-                for binding in bindings:
-                    if binding.action == "quit":
-                        assert key == "ctrl+q"
-                        found = True
-            assert found, "quit binding not found at ctrl+q"
+            actions = {key: ab.binding.action for key, ab in app.screen.active_bindings.items()}
+            # quit moved to ctrl+q; the default Q no longer triggers quit.
+            assert actions.get("ctrl+q") == "quit"
+            assert actions.get("Q") != "quit"
 
     @pytest.mark.asyncio
     async def test_missing_keymap_uses_defaults(self) -> None:
@@ -263,11 +256,8 @@ class TestAppKeymapIntegration:
         fake_path = Path("/tmp/ytmusic-tui-nonexistent-keymap-test.toml")
         app = _make_app(keymap_path=fake_path)
         async with app.run_test(size=(120, 40)) as _pilot:
-            # All default bindings should be present
-            binding_actions = set()
-            for bindings in app._bindings.key_to_bindings.values():
-                for binding in bindings:
-                    binding_actions.add(binding.action)
+            # All default bindings should be present and active.
+            binding_actions = {ab.binding.action for ab in app.screen.active_bindings.values()}
             assert "quit" in binding_actions
             assert "toggle_pause" in binding_actions
             assert "next_track" in binding_actions

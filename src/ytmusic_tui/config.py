@@ -41,14 +41,6 @@ class UIConfig:
     """User-interface settings."""
 
     theme: str = "synthwave"
-    vim_keys: bool = True
-
-
-@dataclass(frozen=True)
-class KeybindsConfig:
-    """Custom keybinding overrides (reserved for future use)."""
-
-    overrides: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -58,7 +50,6 @@ class AppConfig:
     auth: AuthConfig = field(default_factory=AuthConfig)
     player: PlayerConfig = field(default_factory=PlayerConfig)
     ui: UIConfig = field(default_factory=UIConfig)
-    keybinds: KeybindsConfig = field(default_factory=KeybindsConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -110,14 +101,6 @@ THEMES: dict[str, dict[str, str]] = {
         "text-muted": "#a6adc8",
     },
 }
-
-
-def get_theme(name: str) -> dict[str, str]:
-    """Return the CSS variable dict for the named theme.
-
-    Falls back to ``"synthwave"`` if the name is unknown.
-    """
-    return dict(THEMES.get(name, THEMES["synthwave"]))
 
 
 def build_textual_theme(name: str) -> Theme:
@@ -181,7 +164,6 @@ def _parse_config(data: dict[str, Any]) -> AppConfig:
     auth_raw = data.get("auth", {})
     player_raw = data.get("player", {})
     ui_raw = data.get("ui", {})
-    keybinds_raw = data.get("keybinds", {})
 
     return AppConfig(
         auth=AuthConfig(
@@ -194,10 +176,6 @@ def _parse_config(data: dict[str, Any]) -> AppConfig:
         ),
         ui=UIConfig(
             theme=str(ui_raw.get("theme", UIConfig.theme)),
-            vim_keys=bool(ui_raw.get("vim_keys", UIConfig.vim_keys)),
-        ),
-        keybinds=KeybindsConfig(
-            overrides=dict(keybinds_raw) if keybinds_raw else {},
         ),
     )
 
@@ -257,7 +235,7 @@ DEFAULT_KEYMAP: dict[str, str] = {
     "cycle_repeat": "r",
     "volume_up": "plus,equal",
     "volume_down": "minus",
-    "focus_search": "slash",
+    "search": "slash",
     "switch_home": "g",
     "switch_library": "l",
     "switch_queue": "q",
@@ -268,6 +246,7 @@ DEFAULT_KEYMAP: dict[str, str] = {
     "open_action_popup": "full_stop",
     "open_theme_popup": "T",
     "open_lyrics": "L",
+    "cycle_audio_quality": "b",
 }
 
 

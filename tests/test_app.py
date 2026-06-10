@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,6 +22,9 @@ from ytmusic_tui.views.player import (
 from ytmusic_tui.views.playlist import PlaylistView
 from ytmusic_tui.views.queue import QueueView
 from ytmusic_tui.views.search import SearchView
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -247,11 +251,84 @@ class TestKeyBindings:
             assert actions.get("less_than_sign") == "seek_backward"
 
     def test_seek_actions_remappable_via_keymap(self) -> None:
-        """seek_forward / seek_backward must be exposed to keymap.toml."""
+        """seek_forward / seek_backward must be exposed to keymap.toml.
+
+        Remappability is expressed by a Binding carrying an ``id`` equal
+        to the keymap action name (set_keymap overrides by binding id).
+        """
+        from textual.binding import Binding
+
         from ytmusic_tui.app import YtMusicTui
 
-        assert YtMusicTui._ACTION_TO_TEXTUAL["seek_forward"] == "seek_forward"
-        assert YtMusicTui._ACTION_TO_TEXTUAL["seek_backward"] == "seek_backward"
+        binding_ids = {b.id for b in YtMusicTui.BINDINGS if isinstance(b, Binding)}
+        assert "seek_forward" in binding_ids
+        assert "seek_backward" in binding_ids
+
+    def test_search_action_has_renamed_id(self) -> None:
+        """The ``/`` filter binding must expose the ``search`` keymap id.
+
+        Renamed from ``focus_search`` to match spotify_player's "Search".
+        """
+        from textual.binding import Binding
+
+        from ytmusic_tui.app import YtMusicTui
+
+        actions = {b.id: b.action for b in YtMusicTui.BINDINGS if isinstance(b, Binding)}
+        assert actions.get("search") == "toggle_filter"
+        assert "focus_search" not in actions
+
+    def test_search_page_default_unbound(self) -> None:
+        """search_page ships without a key: no binding and not in defaults."""
+        from textual.binding import Binding
+
+        from ytmusic_tui.app import YtMusicTui
+        from ytmusic_tui.config import DEFAULT_KEYMAP
+
+        assert "search_page" not in DEFAULT_KEYMAP
+        binding_keys = [b.key for b in YtMusicTui.BINDINGS if isinstance(b, Binding)]
+        binding_actions = [b.action for b in YtMusicTui.BINDINGS if isinstance(b, Binding)]
+        # No compiled-in binding maps to the search_page action.
+        assert "search_page" not in binding_actions
+        # The example key in default_keymap.toml is not compiled in either.
+        assert "ctrl+s" not in binding_keys
+
+    @pytest.mark.asyncio
+    async def test_search_page_bindable_via_keymap(self, tmp_path: Path) -> None:
+        """A keymap.toml search_page entry binds the key to the search page."""
+        from textual.widgets import ContentSwitcher, Input
+
+        keymap_file = tmp_path / "keymap.toml"
+        keymap_file.write_text('[keybinds]\nsearch_page = "ctrl+s"\n')
+
+        app = _make_app(keymap_path=keymap_file)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("ctrl+s")
+            # Two pumps: one for on_show, one for the deferred focus_input
+            # scheduled via call_after_refresh.
+            await pilot.pause()
+            await pilot.pause()
+
+            switcher = app.query_one(ContentSwitcher)
+            assert switcher.current == "search"
+            search_input = app.query_one("#search-input", Input)
+            assert app.focused is search_input
+
+    @pytest.mark.asyncio
+    async def test_search_page_unbound_without_keymap_entry(self) -> None:
+        """Without a keymap entry, no key triggers the search page action."""
+        from textual.binding import Binding
+
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            # The live binding table carries no search_page action because
+            # _apply_keymap only binds it when keymap.toml opts in.
+            active_actions = {
+                b.action
+                for bindings in app._bindings.key_to_bindings.values()
+                for b in bindings
+                if isinstance(b, Binding)
+            }
+            assert "search_page" not in active_actions
 
 
 # ===================================================================
@@ -289,6 +366,74 @@ class TestSessionProbe:
             await pilot.pause()
 
         assert captured == []
+
+
+# ===================================================================
+# Playback error surfacing
+# ===================================================================
+
+
+class TestPlaybackError:
+    @pytest.mark.asyncio
+    async def test_error_notifies_with_track_title(self) -> None:
+        from helpers import capture_notifications
+
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            captured = capture_notifications(app)
+            app.queue_manager.set_playlist(
+                [Track(video_id="vid", title="Dead Stream", artist="X")]
+            )
+            app._on_playback_error()
+
+        assert any(
+            "Dead Stream" in message and "press n to skip" in message and severity == "error"
+            for message, severity in captured
+        )
+
+    @pytest.mark.asyncio
+    async def test_error_notifies_without_track(self) -> None:
+        from helpers import capture_notifications
+
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            captured = capture_notifications(app)
+            app._on_playback_error()
+
+        assert captured == [("Playback failed", "error")]
+
+    @pytest.mark.asyncio
+    async def test_error_appends_description(self) -> None:
+        from helpers import capture_notifications
+
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            captured = capture_notifications(app)
+            app.queue_manager.set_playlist(
+                [Track(video_id="vid", title="Dead Stream", artist="X")]
+            )
+            app._on_playback_error("loading failed")
+
+        assert any(
+            "(loading failed)" in message and severity == "error" for message, severity in captured
+        )
+
+    @pytest.mark.asyncio
+    async def test_error_does_not_advance_queue(self) -> None:
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            app.queue_manager.set_playlist(
+                [
+                    Track(video_id="a", title="A", artist="X"),
+                    Track(video_id="b", title="B", artist="X"),
+                ]
+            )
+            app._on_playback_error("loading failed")
+
+        # Surfacing the error must not skip to the next track.
+        current = app.queue_manager.current_track
+        assert current is not None
+        assert current.video_id == "a"
 
 
 # ===================================================================
@@ -725,6 +870,79 @@ class TestPlayerBarLayout:
             row_middle = bar.query_one("#player-row-middle")
             album = row_middle.query_one("#player-album", Static)
             assert album is not None
+
+
+# ===================================================================
+# Audio quality
+# ===================================================================
+
+
+class TestAudioQuality:
+    @pytest.mark.asyncio
+    async def test_cycle_audio_quality_notifies(self) -> None:
+        """Pressing b fires a notification that contains the new quality level."""
+        from helpers import capture_notifications
+
+        app = _make_app()
+        app.player.cycle_audio_quality.return_value = "low"
+        async with app.run_test(size=(120, 40)) as _pilot:
+            captured = capture_notifications(app)
+            app.action_cycle_audio_quality()
+
+        assert any("low" in message for message, _ in captured)
+
+    @pytest.mark.asyncio
+    async def test_cycle_audio_quality_notification_mentions_next_track(self) -> None:
+        """The notification must mention that the change applies from the next track."""
+        from helpers import capture_notifications
+
+        app = _make_app()
+        app.player.cycle_audio_quality.return_value = "normal"
+        async with app.run_test(size=(120, 40)) as _pilot:
+            captured = capture_notifications(app)
+            app.action_cycle_audio_quality()
+
+        assert any("next track" in message for message, _ in captured)
+
+    def test_cycle_audio_quality_binding_id_present(self) -> None:
+        """Binding id 'cycle_audio_quality' must exist for keymap.toml remapping."""
+        from textual.binding import Binding
+
+        from ytmusic_tui.app import YtMusicTui
+
+        binding_ids = {b.id for b in YtMusicTui.BINDINGS if isinstance(b, Binding)}
+        assert "cycle_audio_quality" in binding_ids
+
+    def test_cycle_audio_quality_in_default_keymap(self) -> None:
+        """cycle_audio_quality must appear in DEFAULT_KEYMAP with key 'b'."""
+        from ytmusic_tui.config import DEFAULT_KEYMAP
+
+        assert DEFAULT_KEYMAP.get("cycle_audio_quality") == "b"
+
+    @pytest.mark.asyncio
+    async def test_b_key_triggers_cycle(self) -> None:
+        """Pressing b in the running app calls cycle_audio_quality on the player."""
+        app = _make_app()
+        app.player.cycle_audio_quality.return_value = "low"
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("b")
+
+        app.player.cycle_audio_quality.assert_called_once()
+
+    def test_app_passes_audio_quality_to_player(self) -> None:
+        """YtMusicTui forwards config.player.audio_quality to Player.__init__."""
+        from ytmusic_tui.config import AppConfig, PlayerConfig
+
+        config = AppConfig(player=PlayerConfig(audio_quality="low"))
+        # Patch Player directly so we can spy on the constructor call.
+        with patch("ytmusic_tui.app.Player") as mock_player_cls:
+            mock_player_cls.return_value.get_state.return_value = PlayerState()
+            from ytmusic_tui.app import YtMusicTui
+
+            with patch("ytmusic_tui.app.MusicAPI"):
+                YtMusicTui(auth_path="/fake/auth.json", config=config)
+
+        mock_player_cls.assert_called_once_with(audio_quality="low")
 
 
 # ===================================================================

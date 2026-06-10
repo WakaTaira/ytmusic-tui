@@ -318,10 +318,10 @@ class TestAppNavigation:
             assert switcher.current == "home"
 
     @pytest.mark.asyncio
-    async def test_focus_search_pushes_history(self) -> None:
+    async def test_search_page_pushes_history(self) -> None:
         app = _make_app()
         async with app.run_test(size=(120, 40)) as _pilot:
-            app.action_focus_search()
+            app.action_search_page()
             assert app.nav.current == PageState(page_type="search")
             assert app.nav.can_go_back
 

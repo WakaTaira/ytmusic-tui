@@ -9,6 +9,7 @@ import pytest
 from helpers import make_app
 from helpers import make_track as _make_track
 from helpers import make_tracks as _make_tracks
+from textual.widgets import ContentSwitcher
 
 from ytmusic_tui.api import (
     AlbumInfo,
@@ -311,6 +312,43 @@ class TestSearchView:
             view.on_data_table_row_selected(mock_event)
 
             app.action_open_artist.assert_called_once_with("UCsearch_1")
+
+    @pytest.mark.asyncio
+    async def test_search_playlist_selection_opens_playlist_view(self) -> None:
+        """Selecting a playlist result must load it into PlaylistView.
+
+        Regression guard: ``_on_playlist_selected`` once routed the
+        view switch through ``getattr(self.app, "action_switch_view",
+        None)``, and that None-guard silently swallowed the dead path so
+        the playlist's tracks were never loaded. Selecting a playlist row
+        must switch to the playlist view and call
+        ``PlaylistView.show_track_list`` with the chosen playlist.
+        """
+        playlist = _make_playlist_info(1)
+        results = _make_search_results(playlists=[playlist])
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            app.action_switch_view("search")
+            await _pilot.pause()
+
+            view = app.query_one(SearchView)
+            view._populate_all_results(results)
+            await _pilot.pause()
+
+            # Spy on the load-bearing call that used to be dead.
+            playlist_view = app.query_one(PlaylistView)
+            playlist_view.show_track_list = MagicMock()  # type: ignore[method-assign]
+
+            mock_event = MagicMock()
+            mock_event.cursor_row = 0
+            mock_dt = MagicMock()
+            mock_dt.id = "search-playlists"
+            mock_event.data_table = mock_dt
+            view.on_data_table_row_selected(mock_event)
+            await _pilot.pause()
+
+            playlist_view.show_track_list.assert_called_once_with(playlist)
+            assert app.query_one(ContentSwitcher).current == "playlist"
 
     @pytest.mark.asyncio
     async def test_search_focus_cycling(self) -> None:
@@ -687,13 +725,13 @@ class TestKeybindings:
             app.player.adjust_volume.assert_called_with(-5)
 
     @pytest.mark.asyncio
-    async def test_action_focus_search(self) -> None:
-        """action_focus_search should switch to search and focus input."""
+    async def test_action_search_page(self) -> None:
+        """action_search_page should switch to search and focus input."""
         app = _make_app()
         async with app.run_test(size=(120, 40)) as _pilot:
             from textual.widgets import ContentSwitcher
 
-            app.action_focus_search()
+            app.action_search_page()
             await _pilot.pause()
 
             switcher = app.query_one(ContentSwitcher)
@@ -865,7 +903,7 @@ class TestHomeView:
             from textual.widgets import Label
 
             view = app.query_one(HomeView)
-            view._show_error("Network error — check your connection")
+            view._set_status("Network error — check your connection")
             await _pilot.pause()
 
             status = view.query_one("#home-status", Label)
@@ -1370,3 +1408,173 @@ class TestQueueViewRefreshOnTrackChange:
 
             # Should not crash; queue advances normally
             assert app.queue_manager.current_track == tracks[1]
+
+
+# ===================================================================
+# PlayerBar: MPRIS connection-lost notification (Task 1b)
+# ===================================================================
+
+
+class TestPlayerBarMprisErrorNotify:
+    """_poll_player_state should fire a one-shot warning when the MPRIS
+    D-Bus connection dies at runtime (connection_error becomes non-None)."""
+
+    @pytest.mark.asyncio
+    async def test_connection_error_emits_warning_once(self) -> None:
+        """When mpris.connection_error is set, a warning notification is emitted
+        exactly once no matter how many poll ticks follow."""
+        from unittest.mock import MagicMock
+
+        from helpers import capture_notifications, make_app
+
+        from ytmusic_tui.mpris import MprisService
+        from ytmusic_tui.views.player import PlayerBar
+
+        app = make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            captured = capture_notifications(app)
+
+            # Install a fake MprisService whose connection_error is already set.
+            fake_mpris = MagicMock(spec=MprisService)
+            fake_mpris.connection_error = "OSError: disconnected"
+            app._mpris = fake_mpris
+
+            bar = app.query_one(PlayerBar)
+            assert not bar._mpris_error_notified
+
+            # First poll tick — should emit warning
+            bar._poll_player_state()
+            await _pilot.pause()
+
+            mpris_warnings = [
+                (msg, sev) for msg, sev in captured if "MPRIS" in msg and sev == "warning"
+            ]
+            assert len(mpris_warnings) == 1, f"Expected 1 warning, got: {captured}"
+            assert bar._mpris_error_notified
+
+            # Second poll tick — must NOT emit a second notification
+            bar._poll_player_state()
+            await _pilot.pause()
+
+            mpris_warnings_after = [
+                (msg, sev) for msg, sev in captured if "MPRIS" in msg and sev == "warning"
+            ]
+            assert len(mpris_warnings_after) == 1, "Duplicate MPRIS warning emitted"
+
+    @pytest.mark.asyncio
+    async def test_no_notification_when_mpris_healthy(self) -> None:
+        """No notification when mpris.connection_error is None."""
+        from unittest.mock import MagicMock
+
+        from helpers import capture_notifications, make_app
+
+        from ytmusic_tui.mpris import MprisService
+        from ytmusic_tui.views.player import PlayerBar
+
+        app = make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            captured = capture_notifications(app)
+
+            fake_mpris = MagicMock(spec=MprisService)
+            fake_mpris.connection_error = None
+            app._mpris = fake_mpris
+
+            bar = app.query_one(PlayerBar)
+            bar._poll_player_state()
+            await _pilot.pause()
+
+            mpris_warnings = [
+                (msg, sev) for msg, sev in captured if "MPRIS" in msg and sev == "warning"
+            ]
+            assert mpris_warnings == []
+
+    @pytest.mark.asyncio
+    async def test_no_notification_when_mpris_absent(self) -> None:
+        """No MPRIS-related notification when _mpris is None (not installed)."""
+        from helpers import capture_notifications, make_app
+
+        from ytmusic_tui.views.player import PlayerBar
+
+        app = make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            captured = capture_notifications(app)
+            app._mpris = None
+
+            bar = app.query_one(PlayerBar)
+            bar._poll_player_state()
+            await _pilot.pause()
+
+            mpris_warnings = [
+                (msg, sev) for msg, sev in captured if "MPRIS" in msg and sev == "warning"
+            ]
+            assert mpris_warnings == []
+
+
+# ===================================================================
+# Vim-style j/k navigation (spotify_player parity)
+# ===================================================================
+
+
+class TestVimNavigation:
+    @pytest.mark.asyncio
+    async def test_jk_moves_cursor_in_focused_table(self) -> None:
+        """j/k should move the cursor down/up in a focused row table."""
+        from textual.widgets import DataTable
+
+        app = make_app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            app.queue_manager.set_playlist(_make_tracks(3))
+            app.action_switch_view("queue")
+            await pilot.pause()
+
+            view = app.query_one(QueueView)
+            view.refresh_queue()
+            await pilot.pause()
+
+            table = view.query_one("#queue-table", DataTable)
+            table.focus()
+            await pilot.pause()
+            assert table.cursor_row == 0
+
+            await pilot.press("j")
+            await pilot.pause()
+            assert table.cursor_row == 1
+
+            await pilot.press("j")
+            await pilot.pause()
+            assert table.cursor_row == 2
+
+            await pilot.press("k")
+            await pilot.pause()
+            assert table.cursor_row == 1
+
+    @pytest.mark.asyncio
+    async def test_jk_types_into_search_input_without_moving_cursor(self) -> None:
+        """Typing j/k into the search Input inserts the chars and never
+        moves a table cursor (bindings live on the table, not the App)."""
+        from textual.widgets import DataTable, Input
+
+        from ytmusic_tui.views.search import _TABLE_IDS
+
+        app = make_app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            app.action_switch_view("search")
+            await pilot.pause()
+
+            view = app.query_one(SearchView)
+            view.focus_input()
+            await pilot.pause()
+
+            search_input = view.query_one("#search-input", Input)
+            tracks_table = view.query_one(f"#{_TABLE_IDS[Pane.TRACKS]}", DataTable)
+            assert app.focused is search_input
+            assert tracks_table.cursor_row == 0
+
+            await pilot.press("j")
+            await pilot.press("k")
+            await pilot.pause()
+
+            # The Input received the literal characters ...
+            assert search_input.value == "jk"
+            # ... and the table cursor never moved.
+            assert tracks_table.cursor_row == 0
