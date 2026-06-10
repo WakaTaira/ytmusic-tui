@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, cast
 from textual import work
 from textual.widgets import ContentSwitcher, Static
 
+from ytmusic_tui.api import AlbumInfo, PlaylistInfo
 from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.config import THEMES, build_textual_theme
 from ytmusic_tui.navigation import PageState
@@ -31,14 +32,20 @@ from ytmusic_tui.views.home import HomeView
 from ytmusic_tui.views.library import LibraryView
 from ytmusic_tui.views.lyrics import LyricsView
 from ytmusic_tui.views.playlist import PlaylistView
-from ytmusic_tui.views.popup import ActionKind, ActionPopup, PlaylistPickerPopup, ThemePopup
+from ytmusic_tui.views.popup import (
+    NEW_PLAYLIST_SENTINEL,
+    ActionKind,
+    ActionPopup,
+    PlaylistPickerPopup,
+    ThemePopup,
+)
 from ytmusic_tui.views.queue import QueueView
 from ytmusic_tui.views.search import SearchView
 
 if TYPE_CHECKING:
     from textual.app import App
 
-    from ytmusic_tui.api import AlbumInfo, MusicAPI, PlaylistInfo
+    from ytmusic_tui.api import MusicAPI
     from ytmusic_tui.config import AppConfig
     from ytmusic_tui.navigation import NavigationManager
     from ytmusic_tui.player import Player
@@ -272,7 +279,7 @@ class PopupActions(_Base):
             context = "queue"
         elif switcher.current == "playlist":
             pv = self.query_one(PlaylistView)
-            if getattr(pv, "_viewing_tracks", False):
+            if pv.is_viewing_tracks:
                 context = "playlist_tracks"
         self.query_one(ActionPopup).show(item, context=context)
 
@@ -352,8 +359,6 @@ class PopupActions(_Base):
             self._handle_open(item)
 
     def _handle_play_all(self, item: object) -> None:
-        from ytmusic_tui.api import AlbumInfo, PlaylistInfo
-
         if isinstance(item, PlaylistInfo):
             self._play_all_playlist(item.playlist_id)
         elif isinstance(item, AlbumInfo):
@@ -378,11 +383,9 @@ class PopupActions(_Base):
             self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
 
     def _handle_open(self, item: object) -> None:
-        from ytmusic_tui.api import AlbumInfo, PlaylistInfo
-
         if isinstance(item, PlaylistInfo):
             self.action_switch_view("playlist")
-            self.query_one(PlaylistView)._show_track_list(item)
+            self.query_one(PlaylistView).show_track_list(item)
         elif isinstance(item, AlbumInfo):
             self.action_open_album(item.browse_id)
 
@@ -413,7 +416,7 @@ class PopupActions(_Base):
         if not isinstance(track, Track) or not track.video_id:
             return
         playlist_id = event.playlist_id
-        if playlist_id == PlaylistPickerPopup._NEW_PLAYLIST_SENTINEL:
+        if playlist_id == NEW_PLAYLIST_SENTINEL:
             self._create_and_add(track)
         elif playlist_id:
             self._add_to_existing_playlist(playlist_id, track)
@@ -460,7 +463,7 @@ class PopupActions(_Base):
     def _remove_from_playlist(self, track: Track) -> None:
         try:
             pv = self.query_one(PlaylistView)
-            playlist_id = getattr(pv, "_current_playlist_id", "")
+            playlist_id = pv.current_playlist_id
             if not playlist_id:
                 return
             if not self.music_api.remove_playlist_items(playlist_id, [track.video_id]):
@@ -473,8 +476,6 @@ class PopupActions(_Base):
             self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
 
     def _reload_playlist_view(self, playlist_id: str) -> None:
-        from ytmusic_tui.api import PlaylistInfo
-
         pv = self.query_one(PlaylistView)
         title = getattr(pv, "_current_playlist_title", "")
-        pv._show_track_list(PlaylistInfo(playlist_id=playlist_id, title=title))
+        pv.show_track_list(PlaylistInfo(playlist_id=playlist_id, title=title))

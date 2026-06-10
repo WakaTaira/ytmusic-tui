@@ -13,11 +13,14 @@ from typing import TYPE_CHECKING, Any
 from textual.message import Message
 from textual.widgets import Label, ListItem, ListView, Static
 
+from ytmusic_tui.api import AlbumInfo, PlaylistInfo
+from ytmusic_tui.queue import Track
+
 if TYPE_CHECKING:
     from textual.app import ComposeResult
 
-    from ytmusic_tui.api import AlbumInfo, PlaylistInfo
-    from ytmusic_tui.queue import Track
+# Sentinel value emitted when the user chooses "New playlist" in the picker.
+NEW_PLAYLIST_SENTINEL = "__new__"
 
 
 # ---------------------------------------------------------------------------
@@ -113,19 +116,15 @@ def build_actions(
     context: str = "",
 ) -> list[PopupAction]:
     """Build the appropriate action list based on the item type."""
-    from ytmusic_tui.api import AlbumInfo as _AlbumInfo
-    from ytmusic_tui.api import PlaylistInfo as _PlaylistInfo
-    from ytmusic_tui.queue import Track as _Track
-
-    if isinstance(item, _Track):
+    if isinstance(item, Track):
         if context == "queue":
             return actions_for_queue_track(item)
         if context == "playlist_tracks":
             return actions_for_playlist_track(item)
         return actions_for_track(item)
-    if isinstance(item, _PlaylistInfo):
+    if isinstance(item, PlaylistInfo):
         return actions_for_playlist(item)
-    if isinstance(item, _AlbumInfo):
+    if isinstance(item, AlbumInfo):
         return actions_for_album(item)
     return []
 
@@ -440,8 +439,6 @@ class PlaylistPickerPopup(Static):
     class Dismissed(Message):
         """Emitted when the popup is closed."""
 
-    _NEW_PLAYLIST_SENTINEL = "__new__"
-
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._playlists: list[tuple[str, str]] = []
@@ -477,7 +474,7 @@ class PlaylistPickerPopup(Static):
         if index is None or index < 0:
             return
         if index == 0:
-            playlist_id = self._NEW_PLAYLIST_SENTINEL
+            playlist_id = NEW_PLAYLIST_SENTINEL
         else:
             adj = index - 1
             if adj >= len(self._playlists):
@@ -503,14 +500,10 @@ class PlaylistPickerPopup(Static):
 
 def _item_title(item: Track | PlaylistInfo | AlbumInfo) -> str:
     """Extract a human-readable title from a popup target item."""
-    from ytmusic_tui.api import AlbumInfo as _AlbumInfo
-    from ytmusic_tui.api import PlaylistInfo as _PlaylistInfo
-    from ytmusic_tui.queue import Track as _Track
-
-    if isinstance(item, _Track):
+    if isinstance(item, Track):
         return f"{item.title} - {item.artist}" if item.artist else item.title
-    if isinstance(item, _PlaylistInfo):
+    if isinstance(item, PlaylistInfo):
         return item.title
-    if isinstance(item, _AlbumInfo):
+    if isinstance(item, AlbumInfo):
         return f"{item.title} - {item.artist}" if item.artist else item.title
     return str(item)

@@ -142,6 +142,13 @@ class LibraryView(Static):
 
     def on_mount(self) -> None:
         """Initialize all three panes and fetch data."""
+        self.refresh_library()
+
+    def refresh_library(self) -> None:
+        """Set up columns, reset labels, and re-fetch all library data.
+
+        Safe to call after mount to reload content without remounting.
+        """
         self._setup_columns()
         self._update_pane_labels()
         self._fetch_all_data()

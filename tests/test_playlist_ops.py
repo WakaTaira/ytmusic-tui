@@ -9,7 +9,7 @@ from helpers import capture_notifications as _capture_notifications
 from helpers import make_app
 from helpers import make_track as _make_track
 
-from ytmusic_tui.views.popup import PlaylistPickerPopup
+from ytmusic_tui.views.popup import NEW_PLAYLIST_SENTINEL, PlaylistPickerPopup
 
 # ---------------------------------------------------------------------------
 # API methods
@@ -200,7 +200,7 @@ class TestContextActions:
 
 class TestPlaylistPickerPopup:
     def test_sentinel_value(self) -> None:
-        assert PlaylistPickerPopup._NEW_PLAYLIST_SENTINEL == "__new__"
+        assert NEW_PLAYLIST_SENTINEL == "__new__"
 
     def test_initial_state(self) -> None:
         popup = PlaylistPickerPopup()

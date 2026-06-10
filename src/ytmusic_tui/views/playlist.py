@@ -113,7 +113,7 @@ class PlaylistView(Static):
         for pl in playlists:
             table.add_row(pl.title, str(pl.track_count))
 
-    def _show_track_list(self, playlist: PlaylistInfo) -> None:
+    def show_track_list(self, playlist: PlaylistInfo) -> None:
         """Switch to track list view for the given playlist."""
         self._viewing_tracks = True
         self._current_playlist_title = playlist.title
@@ -122,6 +122,16 @@ class PlaylistView(Static):
         table.clear(columns=True)
         table.add_columns("Title", "Artist", "Album", "Duration")
         self._fetch_tracks(playlist.playlist_id)
+
+    @property
+    def current_playlist_id(self) -> str:
+        """The ID of the playlist currently being viewed."""
+        return self._current_playlist_id
+
+    @property
+    def is_viewing_tracks(self) -> bool:
+        """Whether the view is showing a track list (vs. playlist list)."""
+        return self._viewing_tracks
 
     @work(thread=True)
     def _fetch_tracks(self, playlist_id: str) -> None:
@@ -178,7 +188,7 @@ class PlaylistView(Static):
             if row_index < 0 or row_index >= len(self._playlists):
                 return
             playlist = self._playlists[row_index]
-            self._show_track_list(playlist)
+            self.show_track_list(playlist)
         else:
             # Track list mode
             if row_index < 0 or row_index >= len(self._tracks):

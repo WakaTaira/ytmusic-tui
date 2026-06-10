@@ -14,16 +14,18 @@ from textual import work
 from textual.containers import VerticalScroll
 from textual.widgets import DataTable, Label, Static
 
+from ytmusic_tui.api import PlaylistInfo
 from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.formatting import format_duration as _format_duration
+from ytmusic_tui.queue import Track
 from ytmusic_tui.views.filter_bar import FilterBar
 from ytmusic_tui.views.guards import teardown_safe
+from ytmusic_tui.views.playlist import PlaylistView
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
 
-    from ytmusic_tui.api import HomeSection, PlaylistInfo
-    from ytmusic_tui.queue import Track
+    from ytmusic_tui.api import HomeSection
 
 
 class _SectionTable(Static):
@@ -231,12 +233,9 @@ class HomeView(Static):
 
     def _handle_item_selection(self, item: Track | PlaylistInfo) -> None:
         """Dispatch selection based on item type."""
-        from ytmusic_tui.api import PlaylistInfo as _PlaylistInfo
-        from ytmusic_tui.queue import Track as _Track
-
-        if isinstance(item, _Track):
+        if isinstance(item, Track):
             self._play_track(item)
-        elif isinstance(item, _PlaylistInfo):
+        elif isinstance(item, PlaylistInfo):
             self._open_playlist(item)
 
     def _play_track(self, track: Track) -> None:
@@ -251,16 +250,9 @@ class HomeView(Static):
 
     def _open_playlist(self, playlist: PlaylistInfo) -> None:
         """Switch to playlist view and load the selected playlist."""
-        from ytmusic_tui.views.playlist import PlaylistView
-
         app = self.app
         app.action_switch_view("playlist")  # type: ignore[attr-defined]
-
-        try:
-            playlist_view = app.query_one(PlaylistView)
-            playlist_view._show_track_list(playlist)
-        except Exception:
-            pass
+        app.query_one(PlaylistView).show_track_list(playlist)
 
     def toggle_filter(self) -> None:
         """Toggle the filter bar for the focused section table."""
@@ -310,16 +302,13 @@ class HomeView(Static):
 
 def _format_row(item: Track | PlaylistInfo) -> tuple[str, str, str]:
     """Format a home section item as a table row (title, info, duration)."""
-    from ytmusic_tui.api import PlaylistInfo as _PlaylistInfo
-    from ytmusic_tui.queue import Track as _Track
-
-    if isinstance(item, _Track):
+    if isinstance(item, Track):
         return (
             item.title,
             item.artist or "",
             _format_duration(item.duration_seconds),
         )
-    if isinstance(item, _PlaylistInfo):
+    if isinstance(item, PlaylistInfo):
         count_str = f"{item.track_count} tracks" if item.track_count else "Playlist"
         return (item.title, count_str, "")
     return (str(item), "", "")

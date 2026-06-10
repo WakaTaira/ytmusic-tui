@@ -285,7 +285,7 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
         if page.page_type == "history":
             self.query_one(HistoryView).refresh_history()
         if page.page_type == "library":
-            self.query_one(LibraryView).on_mount()
+            self.query_one(LibraryView).refresh_library()
         if page.page_type == "album" and "browse_id" in page.context:
             self.query_one(AlbumView).load_album(page.context["browse_id"])
         if page.page_type == "artist" and "channel_id" in page.context:
