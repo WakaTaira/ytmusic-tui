@@ -26,6 +26,7 @@ from ytmusic_tui.player import Player
 from ytmusic_tui.queue import QueueManager
 from ytmusic_tui.views.album import AlbumView
 from ytmusic_tui.views.artist import ArtistView
+from ytmusic_tui.views.history import HistoryView
 from ytmusic_tui.views.home import HomeView
 from ytmusic_tui.views.library import LibraryView
 from ytmusic_tui.views.lyrics import LyricsView
@@ -60,6 +61,11 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
         Binding("minus", "volume_down", "Vol-", show=False),
         Binding("greater_than_sign", "seek_forward", "Seek +5s", show=False),
         Binding("less_than_sign", "seek_backward", "Seek -5s", show=False),
+        Binding("circumflex_accent", "seek_start", "Seek 0:00", show=False),
+        Binding("underscore", "toggle_mute", "Mute", show=False),
+        Binding("f", "toggle_like", "Like", show=True),
+        Binding("R", "start_radio", "Radio", show=True, key_display="R"),
+        Binding("H", "switch_view('history')", "History", show=False, key_display="H"),
         Binding("slash", "toggle_filter", "Filter", show=True),
         Binding("g", "switch_view('home')", "Home", show=True),
         Binding("l", "switch_view('library')", "Library", show=True),
@@ -91,6 +97,11 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
         "volume_down": "volume_down",
         "seek_forward": "seek_forward",
         "seek_backward": "seek_backward",
+        "seek_start": "seek_start",
+        "toggle_mute": "toggle_mute",
+        "toggle_like": "toggle_like",
+        "start_radio": "start_radio",
+        "switch_history": "switch_view('history')",
         "focus_search": "toggle_filter",
         "switch_home": "switch_view('home')",
         "switch_library": "switch_view('library')",
@@ -202,6 +213,7 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
             yield AlbumView(id="album")
             yield ArtistView(id="artist")
             yield LyricsView(id="lyrics")
+            yield HistoryView(id="history")
         yield ActionPopup(id="action-popup")
         yield ThemePopup(id="theme-popup")
         yield PlaylistPickerPopup(id="playlist-picker")
@@ -270,6 +282,8 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
 
         if page.page_type == "queue":
             self.query_one(QueueView).refresh_queue()
+        if page.page_type == "history":
+            self.query_one(HistoryView).refresh_history()
         if page.page_type == "library":
             self.query_one(LibraryView).on_mount()
         if page.page_type == "album" and "browse_id" in page.context:
@@ -300,6 +314,7 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
             "album": AlbumView,
             "artist": ArtistView,
             "lyrics": LyricsView,
+            "history": HistoryView,
         }
         view_cls = view_map.get(current_id or "")
         if view_cls is None:

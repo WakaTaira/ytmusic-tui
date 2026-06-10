@@ -55,10 +55,10 @@ class TestActionBuilders:
     """Tests for the pure action-building functions."""
 
     def test_actions_for_track_count(self) -> None:
-        """Track should have 5 actions."""
+        """Track should have 7 actions."""
         track = _make_track()
         actions = actions_for_track(track)
-        assert len(actions) == 5
+        assert len(actions) == 7
 
     def test_actions_for_track_kinds(self) -> None:
         """Track actions should include Play, Add to queue, etc."""
@@ -67,9 +67,11 @@ class TestActionBuilders:
         kinds = [a.kind for a in actions]
         assert ActionKind.PLAY in kinds
         assert ActionKind.ADD_TO_QUEUE in kinds
+        assert ActionKind.START_RADIO in kinds
         assert ActionKind.GO_TO_ARTIST in kinds
         assert ActionKind.GO_TO_ALBUM in kinds
         assert ActionKind.ADD_TO_PLAYLIST in kinds
+        assert ActionKind.TOGGLE_LIKE in kinds
 
     def test_actions_for_track_add_to_playlist_enabled(self) -> None:
         """Add to playlist should be enabled."""
@@ -111,7 +113,7 @@ class TestActionBuilders:
         """build_actions should dispatch correctly for Track."""
         track = _make_track()
         actions = build_actions(track)
-        assert len(actions) == 5
+        assert len(actions) == 7
         assert actions[0].kind is ActionKind.PLAY
 
     def test_build_actions_dispatches_to_playlist(self) -> None:
@@ -156,7 +158,7 @@ class TestActionPopup:
             await _pilot.pause()
 
             assert popup.is_visible is True
-            assert len(popup.actions) == 5
+            assert len(popup.actions) == 7
             assert popup.item is track
 
     @pytest.mark.asyncio

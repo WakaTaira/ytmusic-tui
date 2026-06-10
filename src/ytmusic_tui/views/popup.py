@@ -30,6 +30,8 @@ class ActionKind(Enum):
 
     PLAY = auto()
     ADD_TO_QUEUE = auto()
+    START_RADIO = auto()
+    TOGGLE_LIKE = auto()
     GO_TO_ARTIST = auto()
     GO_TO_ALBUM = auto()
     ADD_TO_PLAYLIST = auto()
@@ -58,9 +60,11 @@ def actions_for_track(track: Track) -> list[PopupAction]:
     return [
         PopupAction(kind=ActionKind.PLAY, label="Play"),
         PopupAction(kind=ActionKind.ADD_TO_QUEUE, label="Add to queue"),
+        PopupAction(kind=ActionKind.START_RADIO, label="Start radio"),
         PopupAction(kind=ActionKind.GO_TO_ARTIST, label="Go to artist"),
         PopupAction(kind=ActionKind.GO_TO_ALBUM, label="Go to album"),
         PopupAction(kind=ActionKind.ADD_TO_PLAYLIST, label="Add to playlist"),
+        PopupAction(kind=ActionKind.TOGGLE_LIKE, label="Like / Unlike"),
     ]
 
 

@@ -199,6 +199,29 @@ def _dict_to_album_track(item: dict[str, Any], album_artist: str = "") -> Track 
     )
 
 
+def _watch_item_to_track(item: dict[str, Any]) -> Track | None:
+    """Convert a get_watch_playlist track dict into a Track.
+
+    Watch-playlist items differ from search results: the duration lives
+    in 'length' as a string and thumbnails under 'thumbnail'.
+    """
+    video_id = item.get("videoId")
+    if not video_id:
+        return None
+
+    album_data = item.get("album")
+    album_name = album_data.get("name", "") if isinstance(album_data, dict) else ""
+
+    return Track(
+        video_id=video_id,
+        title=item.get("title", ""),
+        artist=_join_artists(item.get("artists")),
+        album=album_name,
+        duration_seconds=parse_duration(item.get("length")),
+        thumbnail_url=_pick_largest_thumbnail(item.get("thumbnail")),
+    )
+
+
 def _dict_to_album_info(item: dict[str, Any]) -> AlbumInfo | None:
     """Convert a raw ytmusicapi album dict (from artist page) into AlbumInfo."""
     browse_id = item.get("browseId")
@@ -575,6 +598,67 @@ class MusicAPI:
             if track is not None:
                 tracks.append(track)
 
+        return tracks
+
+    # ------------------------------------------------------------------
+    # Likes, radio, history
+    # ------------------------------------------------------------------
+
+    def get_like_status(self, video_id: str) -> str | None:
+        """Return the track's like status ('LIKE', 'DISLIKE', 'INDIFFERENT').
+
+        Returns None when the status cannot be determined. Raises on API
+        errors so workers can classify them.
+        """
+        watch = self._client.get_watch_playlist(video_id, limit=1)
+        if not isinstance(watch, dict):
+            return None
+        for item in watch.get("tracks") or []:
+            if isinstance(item, dict) and item.get("videoId") == video_id:
+                status = item.get("likeStatus")
+                return status if isinstance(status, str) else None
+        return None
+
+    def rate_track(self, video_id: str, status: str) -> bool:
+        """Rate a track ('LIKE', 'INDIFFERENT', 'DISLIKE').
+
+        Returns True on success, False on failure (sentinel pattern,
+        consistent with the playlist mutations).
+        """
+        try:
+            self._client.rate_song(video_id, cast("Any", status))
+        except Exception:
+            return False
+        return True
+
+    def get_radio(self, video_id: str, limit: int = 50) -> list[Track]:
+        """Return a radio queue seeded by *video_id* (seed track first).
+
+        Raises on API errors so workers can classify them.
+        """
+        watch = self._client.get_watch_playlist(video_id, radio=True, limit=limit)
+        if not isinstance(watch, dict):
+            return []
+        tracks: list[Track] = []
+        for item in watch.get("tracks") or []:
+            if not isinstance(item, dict):
+                continue
+            track = _watch_item_to_track(item)
+            if track is not None:
+                tracks.append(track)
+        return tracks
+
+    def get_history(self) -> list[Track]:
+        """Return recently played tracks (newest first).
+
+        Raises on API errors so workers can classify them.
+        """
+        raw: list[dict[str, Any]] = self._client.get_history()
+        tracks: list[Track] = []
+        for item in raw:
+            track = _dict_to_track(item)
+            if track is not None:
+                tracks.append(track)
         return tracks
 
     # ------------------------------------------------------------------

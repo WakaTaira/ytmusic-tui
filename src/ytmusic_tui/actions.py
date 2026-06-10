@@ -26,6 +26,7 @@ from ytmusic_tui.navigation import PageState
 from ytmusic_tui.queue import Track
 from ytmusic_tui.views.album import AlbumView
 from ytmusic_tui.views.artist import ArtistView
+from ytmusic_tui.views.history import HistoryView
 from ytmusic_tui.views.home import HomeView
 from ytmusic_tui.views.library import LibraryView
 from ytmusic_tui.views.lyrics import LyricsView
@@ -117,6 +118,15 @@ class PlaybackActions(_Base):
         with contextlib.suppress(Exception):
             self.player.seek(seconds)
 
+    def action_seek_start(self) -> None:
+        if not self.player.get_state().video_id:
+            return
+        with contextlib.suppress(Exception):
+            self.player.seek_absolute(0.0)
+
+    def action_toggle_mute(self) -> None:
+        self.player.toggle_mute()
+
     def _queue_and_play(self, tracks: list[Track]) -> None:
         self.queue_manager.set_playlist(tracks, start_index=0)
         self.player.play(tracks[0].video_id)
@@ -131,6 +141,7 @@ class BrowseActions(_Base):
         queue_manager: QueueManager
 
         def _navigate_to(self, page: PageState) -> None: ...
+        def _queue_and_play(self, tracks: list[Track]) -> None: ...
 
     def action_open_lyrics(self) -> None:
         current = self.queue_manager.current_track
@@ -176,6 +187,40 @@ class BrowseActions(_Base):
             return
         self._lookup_and_open_album(current.album, current.artist)
 
+    def action_toggle_like(self) -> None:
+        current = self.queue_manager.current_track
+        if current is not None:
+            self._toggle_like(current.video_id)
+
+    @work(thread=True)
+    def _toggle_like(self, video_id: str) -> None:
+        try:
+            status = self.music_api.get_like_status(video_id)
+            new_status = "INDIFFERENT" if status == "LIKE" else "LIKE"
+            if self.music_api.rate_track(video_id, new_status):
+                message = "Liked" if new_status == "LIKE" else "Like removed"
+                self.call_from_thread(self.notify, message)
+            else:
+                self.call_from_thread(self.notify, "Could not update like", severity="error")
+        except Exception as exc:
+            self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
+
+    def action_start_radio(self) -> None:
+        current = self.queue_manager.current_track
+        if current is not None:
+            self._start_radio(current.video_id)
+
+    @work(thread=True)
+    def _start_radio(self, video_id: str) -> None:
+        try:
+            tracks = self.music_api.get_radio(video_id)
+            if tracks:
+                self.call_from_thread(self._queue_and_play, tracks)
+            else:
+                self.call_from_thread(self.notify, "Radio returned no tracks", severity="warning")
+        except Exception as exc:
+            self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
+
     @work(thread=True)
     def _lookup_and_open_album(self, album_name: str, artist_name: str = "") -> None:
         try:
@@ -207,6 +252,8 @@ class PopupActions(_Base):
         # stubs return Any because @work wraps them to return a Worker.
         def _lookup_and_open_artist(self, artist_name: str) -> Any: ...
         def _lookup_and_open_album(self, album_name: str, artist_name: str = "") -> Any: ...
+        def _toggle_like(self, video_id: str) -> Any: ...
+        def _start_radio(self, video_id: str) -> Any: ...
         def _queue_and_play(self, tracks: list[Track]) -> None: ...
         def _refresh_queue_view_if_active(self) -> None: ...
         def action_switch_view(self, view_id: str) -> None: ...
@@ -250,6 +297,7 @@ class PopupActions(_Base):
             "album": AlbumView,
             "artist": ArtistView,
             "lyrics": LyricsView,
+            "history": HistoryView,
         }
         view_cls = view_map.get(current_id or "")
         if view_cls is None:
@@ -274,6 +322,12 @@ class PopupActions(_Base):
         elif action.kind is ActionKind.ADD_TO_QUEUE:
             if isinstance(item, Track):
                 self.queue_manager.add(item)
+        elif action.kind is ActionKind.START_RADIO:
+            if isinstance(item, Track):
+                self._start_radio(item.video_id)
+        elif action.kind is ActionKind.TOGGLE_LIKE:
+            if isinstance(item, Track):
+                self._toggle_like(item.video_id)
         elif action.kind is ActionKind.GO_TO_ARTIST:
             artist_name = ""
             if isinstance(item, Track) or hasattr(item, "artist"):

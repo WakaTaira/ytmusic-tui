@@ -215,7 +215,8 @@ class PlayerBar(Static):
         self.query_one("#player-time", Static).update(f"{pos_str} / {dur_str}")
 
         # Volume
-        self.query_one("#player-volume", Static).update(f"Vol: {state.volume}")
+        volume_text = "Vol: MUTE" if state.is_muted else f"Vol: {state.volume}"
+        self.query_one("#player-volume", Static).update(volume_text)
 
     def on_mount(self) -> None:
         """Start the periodic state-polling timer."""

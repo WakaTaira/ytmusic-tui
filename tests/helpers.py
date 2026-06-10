@@ -75,6 +75,10 @@ def make_app(
         mock_api.get_library_artists.return_value = []
         mock_api.get_playlist_tracks.return_value = []
         mock_api.get_liked_songs.return_value = []
+        mock_api.get_history.return_value = []
+        mock_api.get_radio.return_value = []
+        mock_api.get_like_status.return_value = "INDIFFERENT"
+        mock_api.rate_track.return_value = True
 
         mock_player = mock_player_cls.return_value
         mock_player.get_state.return_value = PlayerState()

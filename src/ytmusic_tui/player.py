@@ -25,6 +25,7 @@ class PlayerState:
 
     is_playing: bool = False
     volume: int = 80
+    is_muted: bool = False
     position: float = 0.0
     duration: float = 0.0
     title: str = ""
@@ -107,6 +108,10 @@ class Player:
         current = self._mpv.volume or 0
         self.set_volume(int(current) + delta)
 
+    def toggle_mute(self) -> None:
+        """Toggle audio mute."""
+        self._mpv.mute = not self._mpv.mute
+
     # -- Seeking ------------------------------------------------------------
 
     def seek(self, seconds: float) -> None:
@@ -129,6 +134,7 @@ class Player:
         idle = self.is_idle
         pause = self._mpv.pause
         volume = self._mpv.volume
+        muted = self._mpv.mute
         time_pos = self._mpv.time_pos
         duration = self._mpv.duration
         title = self._mpv.media_title
@@ -136,6 +142,7 @@ class Player:
         return PlayerState(
             is_playing=not idle and not pause if pause is not None else False,
             volume=int(volume) if volume is not None else 0,
+            is_muted=bool(muted),
             position=float(time_pos) if time_pos is not None else 0.0,
             duration=float(duration) if duration is not None else 0.0,
             title=str(title) if title is not None else "",
