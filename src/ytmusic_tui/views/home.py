@@ -17,6 +17,7 @@ from textual.widgets import DataTable, Label, Static
 from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.formatting import format_duration as _format_duration
 from ytmusic_tui.views.filter_bar import FilterBar
+from ytmusic_tui.views.guards import teardown_safe
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -171,6 +172,7 @@ class HomeView(Static):
         except Exception as exc:
             self.app.call_from_thread(self._show_error, classify_api_error(exc))
 
+    @teardown_safe
     def _render_sections(self, sections: list[HomeSection]) -> None:
         """Populate the scroll container with fetched sections."""
         status = self.query_one("#home-status", Label)
@@ -198,6 +200,7 @@ class HomeView(Static):
         if focusable:
             focusable[0].focus()
 
+    @teardown_safe
     def _show_error(self, message: str) -> None:
         """Display an error in the status label.
 

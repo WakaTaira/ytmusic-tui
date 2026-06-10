@@ -13,6 +13,7 @@ from textual.containers import VerticalScroll
 from textual.widgets import Label, Static
 
 from ytmusic_tui.auth import classify_api_error
+from ytmusic_tui.views.guards import teardown_safe
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -87,9 +88,11 @@ class LyricsView(Static):
         except Exception as exc:
             self.app.call_from_thread(self._show_status, classify_api_error(exc))
 
+    @teardown_safe
     def _display_lyrics(self, text: str) -> None:
         self._show_status("")
         self.query_one("#lyrics-text", Label).update(text)
 
+    @teardown_safe
     def _show_status(self, text: str) -> None:
         self.query_one("#lyrics-status", Label).update(text)

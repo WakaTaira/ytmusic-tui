@@ -18,6 +18,7 @@ from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.formatting import format_duration as _format_duration
 from ytmusic_tui.layout import Orientation
 from ytmusic_tui.views.filter_bar import FilterBar
+from ytmusic_tui.views.guards import teardown_safe
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -258,10 +259,12 @@ class SearchView(Static):
     # Status / populate
     # -----------------------------------------------------------------
 
+    @teardown_safe
     def _set_status(self, text: str) -> None:
         """Update the status label."""
         self.query_one("#search-status", Label).update(text)
 
+    @teardown_safe
     def _populate_all_results(self, results: SearchResults) -> None:
         """Fill all four panes with categorized search results."""
         self._results = results

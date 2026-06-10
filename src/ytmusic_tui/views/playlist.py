@@ -11,6 +11,7 @@ from textual.widgets import DataTable, Label, Static
 from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.formatting import format_duration as _format_duration
 from ytmusic_tui.views.filter_bar import FilterBar
+from ytmusic_tui.views.guards import teardown_safe
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -96,6 +97,7 @@ class PlaylistView(Static):
         except Exception as exc:
             self.app.call_from_thread(self._set_status, classify_api_error(exc))
 
+    @teardown_safe
     def _populate_playlists(self, playlists: list[PlaylistInfo]) -> None:
         """Fill the table with playlist data."""
         self._playlists = playlists
@@ -139,6 +141,7 @@ class PlaylistView(Static):
         except Exception as exc:
             self.app.call_from_thread(self._set_status, classify_api_error(exc))
 
+    @teardown_safe
     def _populate_tracks(self, tracks: list[Track]) -> None:
         """Fill the table with track data."""
         self._tracks = tracks
@@ -231,6 +234,7 @@ class PlaylistView(Static):
                 return self._playlists[row_index]
         return None
 
+    @teardown_safe
     def _set_status(self, text: str) -> None:
         """Update the status label."""
         self.query_one("#playlist-status", Label).update(text)

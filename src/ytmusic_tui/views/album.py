@@ -11,6 +11,7 @@ from textual.widgets import DataTable, Label, Static
 from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.formatting import format_duration as _format_duration
 from ytmusic_tui.views.filter_bar import FilterBar
+from ytmusic_tui.views.guards import teardown_safe
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -114,6 +115,7 @@ class AlbumView(Static):
         except Exception as exc:
             self.app.call_from_thread(self._set_status, classify_api_error(exc))
 
+    @teardown_safe
     def _populate(self, album: AlbumInfo) -> None:
         """Fill the view with album data."""
         self._album = album
@@ -182,6 +184,7 @@ class AlbumView(Static):
         else:
             filter_bar.show()
 
+    @teardown_safe
     def _set_status(self, text: str) -> None:
         """Update the status label."""
         self.query_one("#album-status", Label).update(text)

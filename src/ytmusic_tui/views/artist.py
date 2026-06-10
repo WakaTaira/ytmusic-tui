@@ -12,6 +12,7 @@ from textual.widgets import DataTable, Label, Static
 from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.formatting import format_duration as _format_duration
 from ytmusic_tui.views.filter_bar import FilterBar
+from ytmusic_tui.views.guards import teardown_safe
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -139,6 +140,7 @@ class ArtistView(Static):
         except Exception as exc:
             self.app.call_from_thread(self._set_status, classify_api_error(exc))
 
+    @teardown_safe
     def _populate(self, artist: ArtistInfo) -> None:
         """Fill all sections with artist data."""
         self._artist = artist
@@ -256,6 +258,7 @@ class ArtistView(Static):
             filter_bar.retarget(target_id)
             filter_bar.show()
 
+    @teardown_safe
     def _set_status(self, text: str) -> None:
         """Update the status label."""
         self.query_one("#artist-status", Label).update(text)

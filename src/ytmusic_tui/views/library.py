@@ -8,19 +8,18 @@ selected item.
 
 from __future__ import annotations
 
-import contextlib
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from textual import work
 from textual.containers import Horizontal, Vertical
-from textual.css.query import NoMatches
 from textual.widgets import DataTable, Label, Static
 
 from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.formatting import format_duration as _format_duration
 from ytmusic_tui.layout import Orientation
 from ytmusic_tui.views.filter_bar import FilterBar
+from ytmusic_tui.views.guards import teardown_safe
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -293,14 +292,11 @@ class LibraryView(Static):
     # Population callbacks
     # ------------------------------------------------------------------
 
+    @teardown_safe
     def _populate_playlists(self, playlists: list[PlaylistInfo]) -> None:
         """Fill the playlists pane with data."""
         self._playlists = playlists
-        try:
-            table = self.query_one("#library-playlists", DataTable)
-        except NoMatches:
-            # The view was torn down while the fetch worker ran.
-            return
+        table = self.query_one("#library-playlists", DataTable)
         table.clear()
 
         if not playlists:
@@ -312,14 +308,11 @@ class LibraryView(Static):
 
         self._update_combined_status()
 
+    @teardown_safe
     def _populate_albums(self, albums: list[AlbumInfo]) -> None:
         """Fill the albums pane with data."""
         self._albums = albums
-        try:
-            table = self.query_one("#library-albums", DataTable)
-        except NoMatches:
-            # The view was torn down while the fetch worker ran.
-            return
+        table = self.query_one("#library-albums", DataTable)
         table.clear()
 
         if not albums:
@@ -331,14 +324,11 @@ class LibraryView(Static):
 
         self._update_combined_status()
 
+    @teardown_safe
     def _populate_artists(self, artists: list[ArtistInfo]) -> None:
         """Fill the artists pane with data."""
         self._artists = artists
-        try:
-            table = self.query_one("#library-artists", DataTable)
-        except NoMatches:
-            # The view was torn down while the fetch worker ran.
-            return
+        table = self.query_one("#library-artists", DataTable)
         table.clear()
 
         if not artists:
@@ -384,14 +374,11 @@ class LibraryView(Static):
         except Exception as exc:
             self.app.call_from_thread(self._set_status, classify_api_error(exc))
 
+    @teardown_safe
     def _populate_tracks(self, tracks: list[Track]) -> None:
         """Fill the playlists pane with track data."""
         self._tracks = tracks
-        try:
-            table = self.query_one("#library-playlists", DataTable)
-        except NoMatches:
-            # The view was torn down while the fetch worker ran.
-            return
+        table = self.query_one("#library-playlists", DataTable)
         table.clear()
 
         if not tracks:
@@ -531,14 +518,10 @@ class LibraryView(Static):
             filter_bar.retarget(target_id)
             filter_bar.show()
 
+    @teardown_safe
     def _set_status(self, text: str) -> None:
-        """Update the status label.
-
-        Tolerates a torn-down view: background workers may deliver
-        their result after the screen has been unmounted.
-        """
-        with contextlib.suppress(NoMatches):
-            self.query_one("#library-status", Label).update(text)
+        """Update the status label."""
+        self.query_one("#library-status", Label).update(text)
 
     def update_orientation(self, orientation: Orientation) -> None:
         """Switch between horizontal and vertical pane layout.
