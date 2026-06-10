@@ -59,7 +59,7 @@ class Player:
         self.on_track_end: Callable[[], None] | None = None
 
         # Register end-of-file observer for queue integration
-        @self._mpv.event_callback("end-file")
+        @self._mpv.event_callback("end-file")  # type: ignore[untyped-decorator]
         def _on_end_file(_event: mpv.MpvEvent) -> None:
             if self.on_track_end is not None:
                 self.on_track_end()

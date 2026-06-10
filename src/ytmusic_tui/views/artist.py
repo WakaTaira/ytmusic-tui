@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from textual import work
 from textual.containers import Vertical, VerticalScroll
@@ -61,7 +61,7 @@ class ArtistView(Static):
     }
     """
 
-    def __init__(self, **kwargs: object) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._artist: ArtistInfo | None = None
         self._top_songs: list[Track] = []
@@ -76,7 +76,7 @@ class ArtistView(Static):
             # Top Songs section
             yield Label("Top Songs", classes="section-label", id="label-top-songs")
             with Vertical(id="top-songs-container"):
-                table = DataTable(id="artist-top-songs")
+                table: DataTable[Any] = DataTable(id="artist-top-songs")
                 table.cursor_type = "row"
                 table.add_columns("Title", "Album", "Duration")
                 yield table
@@ -227,26 +227,16 @@ class ArtistView(Static):
         actions defined for RelatedArtist).
         """
         focused = self.app.focused
-        if focused is None:
+        if not isinstance(focused, DataTable):
             return None
 
-        table_id = getattr(focused, "id", "")
+        table_id = focused.id or ""
+        row_index = focused.cursor_row
 
-        if table_id == "artist-top-songs":
-            try:
-                row_index = focused.cursor_row  # type: ignore[union-attr]
-            except Exception:
-                return None
-            if 0 <= row_index < len(self._top_songs):
-                return self._top_songs[row_index]
-
-        elif table_id == "artist-albums":
-            try:
-                row_index = focused.cursor_row  # type: ignore[union-attr]
-            except Exception:
-                return None
-            if 0 <= row_index < len(self._albums):
-                return self._albums[row_index]
+        if table_id == "artist-top-songs" and 0 <= row_index < len(self._top_songs):
+            return self._top_songs[row_index]
+        if table_id == "artist-albums" and 0 <= row_index < len(self._albums):
+            return self._albums[row_index]
 
         return None
 

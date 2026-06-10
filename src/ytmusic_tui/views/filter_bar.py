@@ -7,7 +7,7 @@ Inspired by spotify_player's popup filter bar.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from textual.containers import Horizontal
 from textual.reactive import reactive
@@ -116,7 +116,7 @@ class FilterBar(Static):
             yield Label("", id="filter-count")
 
     @property
-    def target_table(self) -> DataTable | None:
+    def target_table(self) -> DataTable[Any] | None:
         """Resolve the target DataTable from the DOM."""
         from textual.widgets import DataTable
 
@@ -165,7 +165,7 @@ class FilterBar(Static):
     # Row storage
     # -----------------------------------------------------------------
 
-    def _store_original_rows(self, table: DataTable) -> None:
+    def _store_original_rows(self, table: DataTable[Any]) -> None:
         """Snapshot all current rows from the table."""
         rows: list[RowData] = []
         for row_key in table.rows:
@@ -174,7 +174,7 @@ class FilterBar(Static):
         self._original_rows = rows
         self._has_stored_rows = True
 
-    def _restore_rows(self, table: DataTable) -> None:
+    def _restore_rows(self, table: DataTable[Any]) -> None:
         """Replace table content with the stored original rows."""
         table.clear()
         for row in self._original_rows:

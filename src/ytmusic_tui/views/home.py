@@ -8,7 +8,7 @@ navigates to the playlist view.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from textual import work
 from textual.containers import VerticalScroll
@@ -55,7 +55,7 @@ class _SectionTable(Static):
         section_title: str,
         items: list[Track | PlaylistInfo],
         section_index: int,
-        **kwargs: object,
+        **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._section_title = section_title
@@ -65,7 +65,7 @@ class _SectionTable(Static):
     def compose(self) -> ComposeResult:
         """Render a section title and its items table."""
         yield Label(self._section_title, classes="section-title")
-        table = DataTable(id=f"home-section-{self._section_index}")
+        table: DataTable[Any] = DataTable(id=f"home-section-{self._section_index}")
         table.cursor_type = "row"
         table.add_columns("Title", "Artist / Info", "Duration")
         yield table

@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
+from helpers import make_app as _make_app
 
 from ytmusic_tui.navigation import MAX_HISTORY_DEPTH, NavigationManager, PageState
-from helpers import make_app as _make_app
 
 # ===================================================================
 # PageState

@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from helpers import make_app as _make_app
 from textual.widgets import ContentSwitcher, Header, Static
 
 from ytmusic_tui.player import PlayerState
@@ -20,7 +21,6 @@ from ytmusic_tui.views.player import (
 from ytmusic_tui.views.playlist import PlaylistView
 from ytmusic_tui.views.queue import QueueView
 from ytmusic_tui.views.search import SearchView
-from helpers import make_app as _make_app
 
 # ---------------------------------------------------------------------------
 # Helpers

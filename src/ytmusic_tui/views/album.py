@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from textual import work
 from textual.containers import Vertical
@@ -57,7 +57,7 @@ class AlbumView(Static):
     }
     """
 
-    def __init__(self, **kwargs: object) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._album: AlbumInfo | None = None
         self._tracks: list[Track] = []
@@ -69,7 +69,7 @@ class AlbumView(Static):
             yield Label("", id="album-meta")
         yield Label("", id="album-status")
         with Vertical(id="album-table-container"):
-            table = DataTable(id="album-table")
+            table: DataTable[Any] = DataTable(id="album-table")
             table.cursor_type = "row"
             table.add_columns("#", "Title", "Artist", "Duration")
             yield table

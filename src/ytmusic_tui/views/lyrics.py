@@ -6,7 +6,7 @@ the YouTube Music API (get_watch_playlist → get_lyrics).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from textual import work
 from textual.containers import VerticalScroll
@@ -48,7 +48,7 @@ class LyricsView(Static):
     }
     """
 
-    def __init__(self, **kwargs: object) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._current_video_id: str = ""
 

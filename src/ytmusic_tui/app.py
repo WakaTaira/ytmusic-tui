@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import ContentSwitcher, Header
+from textual.widgets import ContentSwitcher, Header, Static
 
 from ytmusic_tui.actions import BrowseActions, PlaybackActions, PopupActions
 from ytmusic_tui.api import MusicAPI
@@ -41,13 +41,15 @@ if TYPE_CHECKING:
 _DEFAULT_AUTH_PATH = Path.home() / ".config" / "ytmusic-tui" / "browser.json"
 
 
-class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App):
+class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
     """YouTube Music TUI client."""
 
     TITLE = "ytmusic-tui"
     CSS_PATH = "app.tcss"
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    # Narrower than App's BindingType list: _apply_keymap relies on
+    # every entry being a full Binding.
+    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
         Binding("space", "toggle_pause", "Play/Pause", show=True),
         Binding("n", "next_track", "Next", show=True),
         Binding("p", "previous_track", "Prev", show=True),
@@ -142,12 +144,12 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App):
             textual_action = self._ACTION_TO_TEXTUAL.get(action_name)
             if textual_action is None:
                 continue
-            idx = action_index.get(textual_action)
-            if idx is None:
+            target_idx = action_index.get(textual_action)
+            if target_idx is None:
                 continue
-            old = new_bindings[idx]
+            old = new_bindings[target_idx]
             if old.key != key:
-                new_bindings[idx] = Binding(
+                new_bindings[target_idx] = Binding(
                     key,
                     old.action,
                     old.description,
@@ -264,7 +266,7 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App):
     def action_toggle_filter(self) -> None:
         switcher = self.query_one(ContentSwitcher)
         current_id = switcher.current
-        view_map: dict[str, type] = {
+        view_map: dict[str, type[Static]] = {
             "home": HomeView,
             "search": SearchView,
             "library": LibraryView,

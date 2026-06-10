@@ -8,7 +8,7 @@ by the TUI layer.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ytmusicapi import YTMusic
 
@@ -285,7 +285,11 @@ class MusicAPI:
             List of Track objects from song results. Non-song results
             (artists, albums without videoId) are filtered out.
         """
-        raw_results: list[dict[str, Any]] = self._client.search(query, filter=filter, limit=limit)
+        # ytmusicapi types `filter` as a Literal; this wrapper deliberately
+        # accepts plain str | None, so cast at the client boundary.
+        raw_results: list[dict[str, Any]] = self._client.search(
+            query, filter=cast("Any", filter), limit=limit
+        )
 
         tracks: list[Track] = []
         for item in raw_results:
@@ -312,7 +316,11 @@ class MusicAPI:
         Returns:
             SearchResults with tracks, albums, artists, and playlists.
         """
-        raw_results: list[dict[str, Any]] = self._client.search(query, filter=filter, limit=limit)
+        # ytmusicapi types `filter` as a Literal; this wrapper deliberately
+        # accepts plain str | None, so cast at the client boundary.
+        raw_results: list[dict[str, Any]] = self._client.search(
+            query, filter=cast("Any", filter), limit=limit
+        )
 
         tracks: list[Track] = []
         albums: list[AlbumInfo] = []
@@ -538,7 +546,7 @@ class MusicAPI:
         try:
             watch = self._client.get_watch_playlist(video_id)
             lyrics_id = watch.get("lyrics")
-            if not lyrics_id:
+            if not lyrics_id or not isinstance(lyrics_id, str):
                 return None
             lyrics_data = self._client.get_lyrics(lyrics_id)
             if isinstance(lyrics_data, dict):

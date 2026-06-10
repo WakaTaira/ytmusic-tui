@@ -484,16 +484,18 @@ class MprisService:
         self._started.set()
 
         stop_task = asyncio.ensure_future(self._stop_event.wait())
-        disconnect_task = asyncio.ensure_future(bus.wait_for_disconnect())
+        disconnect_task = asyncio.ensure_future(
+            bus.wait_for_disconnect()  # type: ignore[no-untyped-call]
+        )
         done, pending = await asyncio.wait(
             {stop_task, disconnect_task}, return_when=asyncio.FIRST_COMPLETED
         )
         for task in pending:
             task.cancel()
         if disconnect_task in done:
-            exc = disconnect_task.exception()
-            if exc is not None:
-                self._record_error(exc, "MPRIS: D-Bus connection lost")
+            disconnect_error = disconnect_task.exception()
+            if disconnect_error is not None:
+                self._record_error(disconnect_error, "MPRIS: D-Bus connection lost")
         with contextlib.suppress(Exception):
             bus.disconnect()
 
@@ -517,11 +519,9 @@ class MprisService:
         loop = self._loop
         if iface is None or loop is None:
             return
-        try:
+        # RuntimeError: the event loop is already closed (shutdown race).
+        with contextlib.suppress(RuntimeError):
             loop.call_soon_threadsafe(iface.update_state, state, track, shuffle, repeat_mode)
-        except RuntimeError:
-            # The event loop is already closed (shutdown race).
-            pass
 
     def shutdown(self) -> None:
         """Stop the MPRIS service.

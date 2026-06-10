@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import textwrap
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
+from helpers import make_app as _make_app
 
 from ytmusic_tui.config import DEFAULT_KEYMAP, load_keymap
 from ytmusic_tui.layout import Orientation, detect_orientation
-from ytmusic_tui.player import PlayerState
-from helpers import make_app as _make_app
 
 # ---------------------------------------------------------------------------
 # Helpers

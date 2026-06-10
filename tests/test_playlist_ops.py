@@ -5,12 +5,10 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from helpers import make_app
+from helpers import make_track as _make_track
 
-from ytmusic_tui.api import PlaylistInfo
-from ytmusic_tui.queue import Track
 from ytmusic_tui.views.popup import PlaylistPickerPopup
-from helpers import make_app, make_track as _make_track
-
 
 # ---------------------------------------------------------------------------
 # API methods
@@ -157,7 +155,7 @@ class TestRemovePlaylistItems:
 
 class TestContextActions:
     def test_queue_track_has_remove(self) -> None:
-        from ytmusic_tui.views.popup import actions_for_queue_track, ActionKind
+        from ytmusic_tui.views.popup import ActionKind, actions_for_queue_track
 
         track = _make_track()
         actions = actions_for_queue_track(track)
@@ -165,7 +163,7 @@ class TestContextActions:
         assert ActionKind.REMOVE_FROM_QUEUE in kinds
 
     def test_playlist_track_has_remove(self) -> None:
-        from ytmusic_tui.views.popup import actions_for_playlist_track, ActionKind
+        from ytmusic_tui.views.popup import ActionKind, actions_for_playlist_track
 
         track = _make_track()
         actions = actions_for_playlist_track(track)
@@ -173,7 +171,7 @@ class TestContextActions:
         assert ActionKind.REMOVE_FROM_PLAYLIST in kinds
 
     def test_build_actions_with_queue_context(self) -> None:
-        from ytmusic_tui.views.popup import build_actions, ActionKind
+        from ytmusic_tui.views.popup import ActionKind, build_actions
 
         track = _make_track()
         actions = build_actions(track, context="queue")
@@ -182,7 +180,7 @@ class TestContextActions:
         assert ActionKind.ADD_TO_QUEUE not in kinds
 
     def test_build_actions_with_playlist_context(self) -> None:
-        from ytmusic_tui.views.popup import build_actions, ActionKind
+        from ytmusic_tui.views.popup import ActionKind, build_actions
 
         track = _make_track()
         actions = build_actions(track, context="playlist_tracks")
@@ -190,7 +188,7 @@ class TestContextActions:
         assert ActionKind.REMOVE_FROM_PLAYLIST in kinds
 
     def test_build_actions_default_context(self) -> None:
-        from ytmusic_tui.views.popup import build_actions, ActionKind
+        from ytmusic_tui.views.popup import ActionKind, build_actions
 
         track = _make_track()
         actions = build_actions(track)
@@ -207,6 +205,7 @@ class TestPlaylistPickerPopup:
         popup = PlaylistPickerPopup()
         assert popup._playlists == []
         assert popup._track is None
+
 
 # ---------------------------------------------------------------------------
 # User feedback for playlist operations (worker -> notify)
@@ -267,8 +266,7 @@ class TestPlaylistOpsFeedback:
             await pilot.pause()
 
         assert any(
-            "Auth expired" in message and severity == "error"
-            for message, severity in captured
+            "Auth expired" in message and severity == "error" for message, severity in captured
         )
 
     @pytest.mark.asyncio
@@ -313,6 +311,5 @@ class TestPlaylistOpsFeedback:
             await pilot.pause()
 
         assert any(
-            "Network error" in message and severity == "error"
-            for message, severity in captured
+            "Network error" in message and severity == "error" for message, severity in captured
         )

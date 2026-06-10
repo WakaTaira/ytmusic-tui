@@ -5,6 +5,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from helpers import make_app
+from helpers import make_tracks as _make_tracks
 
 from ytmusic_tui.api import (
     AlbumInfo,
@@ -12,9 +14,7 @@ from ytmusic_tui.api import (
     MusicAPI,
     RelatedArtist,
 )
-from ytmusic_tui.player import PlayerState
 from ytmusic_tui.queue import Track
-from helpers import make_app, make_track as _make_track, make_tracks as _make_tracks
 
 # ---------------------------------------------------------------------------
 # Helpers

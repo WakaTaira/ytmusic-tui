@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from textual import work
 from textual.containers import Vertical
@@ -46,7 +46,7 @@ class PlaylistView(Static):
     }
     """
 
-    def __init__(self, **kwargs: object) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._playlists: list[PlaylistInfo] = []
         self._tracks: list[Track] = []
@@ -58,7 +58,7 @@ class PlaylistView(Static):
         """Build the playlist layout: status label, data table, and filter bar."""
         yield Label("", id="playlist-status")
         with Vertical(id="playlist-table-container"):
-            table = DataTable(id="playlist-table")
+            table: DataTable[Any] = DataTable(id="playlist-table")
             table.cursor_type = "row"
             yield table
         yield FilterBar("playlist-table", id="playlist-filter")
@@ -191,7 +191,7 @@ class PlaylistView(Static):
 
     def on_key(self, event: object) -> None:
         """Handle Escape to go back to playlist list from track list."""
-        key_event = event  # type: ignore[assignment]
+        key_event = event
         key = getattr(key_event, "key", None)
 
         # Let the filter bar handle its own Escape

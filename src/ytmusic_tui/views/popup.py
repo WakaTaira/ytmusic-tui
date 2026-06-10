@@ -187,7 +187,7 @@ class ActionPopup(Static):
     class Dismissed(Message):
         """Emitted when the popup is closed without an action."""
 
-    def __init__(self, **kwargs: object) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._actions: list[PopupAction] = []
         self._item: Any = None
@@ -322,7 +322,7 @@ class ThemePopup(Static):
     class Dismissed(Message):
         """Emitted when the popup is closed without selecting a theme."""
 
-    def __init__(self, **kwargs: object) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._theme_names: list[str] = []
 
@@ -438,7 +438,7 @@ class PlaylistPickerPopup(Static):
 
     _NEW_PLAYLIST_SENTINEL = "__new__"
 
-    def __init__(self, **kwargs: object) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._playlists: list[tuple[str, str]] = []
         self._track: Any = None

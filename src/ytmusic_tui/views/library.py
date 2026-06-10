@@ -9,7 +9,7 @@ selected item.
 from __future__ import annotations
 
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from textual import work
 from textual.containers import Horizontal, Vertical
@@ -104,7 +104,7 @@ class LibraryView(Static):
     }
     """
 
-    def __init__(self, **kwargs: object) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._active_pane: LibraryPane = LibraryPane.PLAYLISTS
         self._playlists: list[PlaylistInfo] = []
@@ -122,7 +122,7 @@ class LibraryView(Static):
             # Playlists pane (left)
             with Vertical(classes="library-pane library-pane-playlists"):
                 yield Label("Playlists", id="pane-label-playlists", classes="pane-label-active")
-                table = DataTable(id="library-playlists")
+                table: DataTable[Any] = DataTable(id="library-playlists")
                 table.cursor_type = "row"
                 yield table
             # Albums pane (center)
@@ -214,7 +214,7 @@ class LibraryView(Static):
 
     def on_key(self, event: object) -> None:
         """Handle Tab/Shift-Tab for pane cycling, Escape to go back."""
-        key_event = event  # type: ignore[assignment]
+        key_event = event
         key = getattr(key_event, "key", None)
 
         if key == "tab":

@@ -7,10 +7,10 @@ from collections import deque
 from unittest.mock import patch
 
 import pytest
+from helpers import make_track as _make_track
 
 from ytmusic_tui.player import PlayerState
 from ytmusic_tui.queue import RepeatMode, Track
-from helpers import make_track as _make_track
 
 
 def _make_state(

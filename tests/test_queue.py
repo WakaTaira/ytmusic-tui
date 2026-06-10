@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import pytest
+from helpers import make_track as _make_track
+from helpers import make_tracks as _make_tracks
 
 from ytmusic_tui.queue import QueueManager, RepeatMode, Track
-from helpers import make_track as _make_track, make_tracks as _make_tracks
 
 # ---------------------------------------------------------------------------
 # Helpers

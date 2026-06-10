@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from textual.widgets import DataTable, Label, Static
 
@@ -42,7 +42,7 @@ class QueueView(Static):
     def compose(self) -> ComposeResult:
         """Build the queue layout: status label, data table, and filter bar."""
         yield Label("", id="queue-status")
-        table = DataTable(id="queue-table")
+        table: DataTable[Any] = DataTable(id="queue-table")
         table.cursor_type = "row"
         table.add_columns("#", "Title", "Artist", "Album", "Duration")
         yield table
@@ -92,7 +92,7 @@ class QueueView(Static):
 
     def on_key(self, event: object) -> None:
         """Handle 'd' key to remove the selected track from the queue."""
-        key_event = event  # type: ignore[assignment]
+        key_event = event
         if getattr(key_event, "key", None) != "d":
             return
 

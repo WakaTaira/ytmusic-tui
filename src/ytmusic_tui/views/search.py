@@ -8,7 +8,7 @@ actions.
 from __future__ import annotations
 
 from enum import IntEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from textual import work
 from textual.containers import Horizontal, Vertical
@@ -118,7 +118,7 @@ class _SearchPane(Vertical):
     def __init__(
         self,
         pane: Pane,
-        **kwargs: object,
+        **kwargs: Any,
     ) -> None:
         super().__init__(id=_PANE_IDS[pane], **kwargs)
         self.pane = pane
@@ -165,7 +165,7 @@ class SearchView(Static):
     }
     """
 
-    def __init__(self, **kwargs: object) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._results: SearchResults | None = None
         self._track_list: list[Track] = []
@@ -184,7 +184,7 @@ class SearchView(Static):
                 # Top-left: Tracks
                 with _SearchPane(Pane.TRACKS):
                     yield Label("Tracks", classes="pane-title")
-                    table = DataTable(id=_TABLE_IDS[Pane.TRACKS])
+                    table: DataTable[Any] = DataTable(id=_TABLE_IDS[Pane.TRACKS])
                     table.cursor_type = "row"
                     table.add_columns("Title", "Artist", "Album", "Duration")
                     yield table

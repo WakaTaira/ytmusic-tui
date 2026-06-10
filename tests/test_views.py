@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 
 import pytest
+from helpers import make_app
+from helpers import make_track as _make_track
+from helpers import make_tracks as _make_tracks
 
 from ytmusic_tui.api import (
     AlbumInfo,
@@ -14,14 +18,14 @@ from ytmusic_tui.api import (
     RelatedArtist,
     SearchResults,
 )
-from ytmusic_tui.player import PlayerState
-from ytmusic_tui.queue import Track
 from ytmusic_tui.views.home import HomeView
 from ytmusic_tui.views.library import LibraryPane, LibraryView
 from ytmusic_tui.views.playlist import PlaylistView
 from ytmusic_tui.views.queue import QueueView
 from ytmusic_tui.views.search import Pane, SearchView
-from helpers import make_app, make_track as _make_track, make_tracks as _make_tracks
+
+if TYPE_CHECKING:
+    from ytmusic_tui.queue import Track
 
 # ---------------------------------------------------------------------------
 # Helpers

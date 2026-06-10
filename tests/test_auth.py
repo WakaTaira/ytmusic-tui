@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 from ytmusic_tui.auth import (
     classify_api_error,
@@ -13,6 +11,8 @@ from ytmusic_tui.auth import (
     validate_auth_file,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # is_auth_error
@@ -33,9 +33,7 @@ class TestIsAuthError:
         assert is_auth_error(Exception("HTTP 401 Unauthorized")) is True
 
     def test_invalid_credentials(self) -> None:
-        assert is_auth_error(
-            Exception("Request had invalid authentication credentials")
-        ) is True
+        assert is_auth_error(Exception("Request had invalid authentication credentials")) is True
 
     def test_generic_error_not_auth(self) -> None:
         assert is_auth_error(Exception("Something went wrong")) is False
