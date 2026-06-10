@@ -1,0 +1,38 @@
+{
+  "id": "LM",
+  "title": "Your Likes",
+  "tracks": [
+    {
+      "videoId": "like1",
+      "title": "Liked Song 1",
+      "artists": [{"name": "Artist A", "id": "UCxyz"}],
+      "album": {"name": "Album X", "id": "MPREdef"},
+      "duration": "4:12",
+      "duration_seconds": 252,
+      "thumbnails": [
+        {"url": "https://lh3.google.com/t_small.jpg", "width": 60, "height": 60},
+        {"url": "https://lh3.google.com/t_large.jpg", "width": 226, "height": 226},
+        {"url": "https://lh3.google.com/t_xlarge.jpg", "width": 544, "height": 544}
+      ],
+      "isAvailable": true,
+      "isExplicit": false,
+      "likeStatus": "LIKE"
+    },
+    {
+      "videoId": "like2",
+      "title": "Liked Song 2",
+      "artists": [{"name": "Artist A", "id": "UCxyz"}],
+      "album": {"name": "Album X", "id": "MPREdef"},
+      "duration": "4:12",
+      "duration_seconds": 252,
+      "thumbnails": [
+        {"url": "https://lh3.google.com/t_small.jpg", "width": 60, "height": 60},
+        {"url": "https://lh3.google.com/t_large.jpg", "width": 226, "height": 226},
+        {"url": "https://lh3.google.com/t_xlarge.jpg", "width": 544, "height": 544}
+      ],
+      "isAvailable": true,
+      "isExplicit": false,
+      "likeStatus": "LIKE"
+    }
+  ]
+}

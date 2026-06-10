@@ -1,0 +1,20 @@
+[
+  {
+    "browseId": "MPREb_1",
+    "title": "Album A",
+    "artists": [{"name": "Lib Artist", "id": "UClib1"}],
+    "year": "2024",
+    "thumbnails": [
+      {"url": "https://lh3.google.com/lib_album.jpg", "width": 226, "height": 226}
+    ]
+  },
+  {
+    "browseId": "MPREb_2",
+    "title": "Album B",
+    "artists": [{"name": "Lib Artist", "id": "UClib1"}],
+    "year": "2024",
+    "thumbnails": [
+      {"url": "https://lh3.google.com/lib_album.jpg", "width": 226, "height": 226}
+    ]
+  }
+]
