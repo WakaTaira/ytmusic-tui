@@ -19,7 +19,9 @@ dependencies = [
     "ytmusicapi>=1.12.0",
     "textual>=0.80.0",
     "python-mpv>=1.0.7",
-    "yt-dlp>=2024.0.0",
+    # YouTube rotates its JS challenges constantly; stale yt-dlp builds
+    # silently fail to resolve streams (playback does nothing).
+    "yt-dlp>=2026.6.9",
     "tomli>=2.0.0;python_version<'3.11'",
     # MPRIS2 support. Pinned to 5.x because mpris.py vendors a fixed copy
     # of the 5.x _MessageWriter.write_callback (EAGAIN tolerance).
