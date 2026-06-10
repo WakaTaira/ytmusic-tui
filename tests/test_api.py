@@ -980,7 +980,7 @@ class TestSearchAll:
         api = MusicAPI("/fake/path")
         api.search_all("test", limit=5)
 
-        mock_client.search.assert_called_once_with("test", limit=5)
+        mock_client.search.assert_called_once_with("test", filter=None, limit=5)
 
     @patch("ytmusic_tui.api.YTMusic")
     def test_skips_invalid_items(self, mock_ytmusic_cls: MagicMock) -> None:

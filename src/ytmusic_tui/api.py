@@ -295,20 +295,24 @@ class MusicAPI:
 
         return tracks
 
-    def search_all(self, query: str, limit: int = 10) -> SearchResults:
+    def search_all(self, query: str, limit: int = 10, filter: str | None = None) -> SearchResults:
         """Search across all categories and return categorized results.
 
-        Calls the ytmusicapi search without a filter, then categorizes
-        each result by its ``resultType`` field.
+        Calls the ytmusicapi search, then categorizes each result by its
+        ``resultType`` field.
 
         Args:
             query: Search string.
             limit: Maximum number of results to request.
+            filter: Optional category restriction passed straight to
+                ytmusicapi ('songs', 'albums', 'artists', 'playlists').
+                When given, only the matching SearchResults field is
+                populated.
 
         Returns:
             SearchResults with tracks, albums, artists, and playlists.
         """
-        raw_results: list[dict[str, Any]] = self._client.search(query, limit=limit)
+        raw_results: list[dict[str, Any]] = self._client.search(query, filter=filter, limit=limit)
 
         tracks: list[Track] = []
         albums: list[AlbumInfo] = []

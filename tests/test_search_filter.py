@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
 import pytest
 
-from ytmusic_tui.views.search import _parse_search_prefix
+from ytmusic_tui.views.search import SearchView, _parse_search_prefix
 
 
 class TestParseSearchPrefix:
@@ -79,3 +82,87 @@ class TestParseSearchPrefix:
         cat, query = _parse_search_prefix("")
         assert cat is None
         assert query == ""
+
+
+class TestSearchDispatch:
+    """Verify the prefix parser is wired into the input handler."""
+
+    def _submit(self, raw: str) -> list[tuple[str, str | None]]:
+        view = SearchView()
+        calls: list[tuple[str, str | None]] = []
+        view._run_search = (  # type: ignore[method-assign]
+            lambda query, category=None: calls.append((query, category))
+        )
+        view.on_input_submitted(SimpleNamespace(value=raw))  # type: ignore[arg-type]
+        return calls
+
+    def test_plain_query_searches_all_categories(self) -> None:
+        assert self._submit("lofi beats") == [("lofi beats", None)]
+
+    def test_prefixed_query_restricts_category(self) -> None:
+        assert self._submit("#albums:ok computer") == [("ok computer", "albums")]
+
+    def test_songs_prefix_dispatches_songs(self) -> None:
+        assert self._submit("#songs:rick astley") == [("rick astley", "songs")]
+
+    def test_empty_input_does_not_search(self) -> None:
+        assert self._submit("   ") == []
+
+    def test_prefix_without_query_falls_back_to_full_search(self) -> None:
+        # "#songs:" alone is not a valid prefixed query; it is searched as-is.
+        assert self._submit("#songs:") == [("#songs:", None)]
+
+
+class TestSearchAllFilterPassthrough:
+    """search_all must forward the category filter to ytmusicapi."""
+
+    @patch("ytmusic_tui.api.YTMusic")
+    def test_filter_forwarded_to_client(self, mock_ytmusic_cls: MagicMock) -> None:
+        from ytmusic_tui.api import MusicAPI
+
+        mock_client = MagicMock()
+        mock_client.search.return_value = []
+        mock_ytmusic_cls.return_value = mock_client
+
+        api = MusicAPI("/fake/path")
+        api.search_all("query", limit=20, filter="albums")
+
+        mock_client.search.assert_called_once_with("query", filter="albums", limit=20)
+
+    @patch("ytmusic_tui.api.YTMusic")
+    def test_no_filter_by_default(self, mock_ytmusic_cls: MagicMock) -> None:
+        from ytmusic_tui.api import MusicAPI
+
+        mock_client = MagicMock()
+        mock_client.search.return_value = []
+        mock_ytmusic_cls.return_value = mock_client
+
+        api = MusicAPI("/fake/path")
+        api.search_all("query")
+
+        mock_client.search.assert_called_once_with("query", filter=None, limit=10)
+
+    @patch("ytmusic_tui.api.YTMusic")
+    def test_filtered_results_populate_matching_category(
+        self, mock_ytmusic_cls: MagicMock
+    ) -> None:
+        from ytmusic_tui.api import MusicAPI
+
+        mock_client = MagicMock()
+        mock_client.search.return_value = [
+            {
+                "resultType": "album",
+                "title": "OK Computer",
+                "artists": [{"name": "Radiohead", "id": "a1"}],
+                "browseId": "MPREb_x",
+                "year": "1997",
+            }
+        ]
+        mock_ytmusic_cls.return_value = mock_client
+
+        api = MusicAPI("/fake/path")
+        results = api.search_all("ok computer", filter="albums")
+
+        assert len(results.albums) == 1
+        assert results.albums[0].title == "OK Computer"
+        assert results.tracks == []

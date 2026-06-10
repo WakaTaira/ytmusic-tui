@@ -222,15 +222,24 @@ class SearchView(Static):
         self._switch_focus(self._focused_pane)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle Enter in the search input."""
+        """Handle Enter in the search input.
+
+        A ``#category:query`` prefix restricts the search to one result
+        type; anything else searches across all categories.
+        """
         query = event.value.strip()
         if not query:
             return
-        self._run_search(query)
+        category, parsed_query = _parse_search_prefix(query)
+        self._run_search(parsed_query, category)
 
     @work(thread=True)
-    def _run_search(self, query: str) -> None:
-        """Fetch search results in a background thread."""
+    def _run_search(self, query: str, category: str | None = None) -> None:
+        """Fetch search results in a background thread.
+
+        When *category* is given, the API call is restricted to that
+        result type and only the matching pane is populated.
+        """
         self.app.call_from_thread(self._set_status, "Searching...")
 
         api = getattr(self.app, "music_api", None)
@@ -239,7 +248,7 @@ class SearchView(Static):
             return
 
         try:
-            results: SearchResults = api.search_all(query, limit=20)
+            results: SearchResults = api.search_all(query, limit=20, filter=category)
             self.app.call_from_thread(self._populate_all_results, results)
         except Exception as exc:
             self.app.call_from_thread(self._set_status, f"Error: {exc}")
