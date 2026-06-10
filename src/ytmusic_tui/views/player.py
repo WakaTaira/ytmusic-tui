@@ -193,10 +193,7 @@ class PlayerBar(Static):
         self.query_one("#player-modes", Static).update(modes_text)
 
         # Progress bar (text-based)
-        try:
-            term_width = self.size.width - 18
-        except Exception:
-            term_width = 60
+        term_width = self.size.width - 18
         bar_width = max(10, term_width)
         filled = int(bar_width * state.progress)
         empty = bar_width - filled

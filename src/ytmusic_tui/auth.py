@@ -19,10 +19,6 @@ _AUTH_ERROR_PATTERNS = (
 )
 
 
-class AuthError(Exception):
-    """Raised when an API call fails due to authentication."""
-
-
 def is_auth_error(exc: Exception) -> bool:
     """Return True if *exc* looks like an authentication failure."""
     msg = str(exc)

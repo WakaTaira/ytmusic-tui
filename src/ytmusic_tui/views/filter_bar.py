@@ -235,16 +235,3 @@ class FilterBar(Static):
             prevent_default = getattr(event, "prevent_default", None)
             if prevent_default is not None:
                 prevent_default()
-
-    # -----------------------------------------------------------------
-    # Public: update stored rows externally
-    # -----------------------------------------------------------------
-
-    def update_stored_rows(self, rows: list[RowData]) -> None:
-        """Replace stored original rows (for views that rebuild tables).
-
-        This allows views to update the filter bar's backing data when
-        they repopulate their tables without closing the filter.
-        """
-        self._original_rows = list(rows)
-        self._has_stored_rows = True

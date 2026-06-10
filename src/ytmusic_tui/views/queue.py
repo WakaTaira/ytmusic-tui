@@ -57,10 +57,6 @@ class QueueView(Static):
         self.query_one("#queue-table", DataTable).focus()
         self.refresh_queue()
 
-    def on_focus(self) -> None:
-        """Refresh queue when the view gains focus."""
-        self.refresh_queue()
-
     def refresh_queue(self) -> None:
         """Rebuild the table from the current queue state."""
         queue: QueueManager | None = getattr(self.app, "queue_manager", None)

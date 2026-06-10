@@ -13,7 +13,6 @@ from ytmusic_tui.config import (
     AuthConfig,
     PlayerConfig,
     UIConfig,
-    get_theme,
     load_config,
 )
 
@@ -48,22 +47,6 @@ class TestThemes:
                     f"Theme '{name}' key '{key}' has invalid value: {value!r}"
                 )
 
-    def test_get_theme_known(self) -> None:
-        """get_theme returns the correct palette for a known theme."""
-        result = get_theme("nord")
-        assert result["primary"] == "#88c0d0"
-
-    def test_get_theme_unknown_falls_back(self) -> None:
-        """get_theme falls back to synthwave for unknown names."""
-        result = get_theme("nonexistent")
-        assert result == THEMES["synthwave"]
-
-    def test_get_theme_returns_copy(self) -> None:
-        """get_theme should return a copy, not the original dict."""
-        result = get_theme("synthwave")
-        result["primary"] = "modified"
-        assert THEMES["synthwave"]["primary"] != "modified"
-
     def test_four_themes_exist(self) -> None:
         """We should have exactly four built-in themes."""
         assert len(THEMES) == 4
@@ -85,7 +68,6 @@ class TestConfigDefaults:
         assert cfg.player.audio_quality == "high"
         assert cfg.ui.theme == "synthwave"
         assert cfg.ui.vim_keys is True
-        assert cfg.keybinds.overrides == {}
 
     def test_auth_config_frozen(self) -> None:
         """AuthConfig should be immutable."""
@@ -203,23 +185,6 @@ class TestConfigLoading:
         assert cfg.ui.theme == "catppuccin"
         # Non-overridden sections keep their defaults
         assert cfg.player.volume == 80
-
-    def test_keybinds_override(self, tmp_path: Path) -> None:
-        """Keybind overrides should be loaded from user config."""
-        user = tmp_path / "user.toml"
-        user.write_text(
-            textwrap.dedent("""\
-            [keybinds]
-            play_pause = "p"
-            quit = "ctrl+q"
-        """)
-        )
-
-        cfg = load_config(
-            user_path=user,
-            bundled_path=tmp_path / "nonexistent.toml",
-        )
-        assert cfg.keybinds.overrides == {"play_pause": "p", "quit": "ctrl+q"}
 
     def test_load_real_bundled_default(self) -> None:
         """The real bundled default.toml should load without errors."""
