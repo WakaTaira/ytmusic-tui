@@ -20,6 +20,7 @@ from ytmusic_tui.layout import Orientation
 from ytmusic_tui.views.base import FetchView
 from ytmusic_tui.views.filter_bar import FilterBar
 from ytmusic_tui.views.guards import teardown_safe
+from ytmusic_tui.views.widgets import NavDataTable
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -125,19 +126,19 @@ class LibraryView(FetchView):
             # Playlists pane (left)
             with Vertical(classes="library-pane library-pane-playlists"):
                 yield Label("Playlists", id="pane-label-playlists", classes="pane-label-active")
-                table: DataTable[Any] = DataTable(id="library-playlists")
+                table: DataTable[Any] = NavDataTable(id="library-playlists")
                 table.cursor_type = "row"
                 yield table
             # Albums pane (center)
             with Vertical(classes="library-pane library-pane-albums"):
                 yield Label("Albums", id="pane-label-albums", classes="pane-label")
-                table = DataTable(id="library-albums")
+                table = NavDataTable(id="library-albums")
                 table.cursor_type = "row"
                 yield table
             # Artists pane (right)
             with Vertical(classes="library-pane library-pane-artists"):
                 yield Label("Artists", id="pane-label-artists", classes="pane-label")
-                table = DataTable(id="library-artists")
+                table = NavDataTable(id="library-artists")
                 table.cursor_type = "row"
                 yield table
         yield FilterBar("library-playlists", id="library-filter")

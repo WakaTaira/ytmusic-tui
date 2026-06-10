@@ -38,6 +38,8 @@ from ytmusic_tui.views.queue import QueueView
 from ytmusic_tui.views.search import SearchView
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from ytmusic_tui.mpris import MprisService
     from ytmusic_tui.views.base import FetchView
 
@@ -70,8 +72,8 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
     # Each remappable binding carries an ``id`` matching its canonical
     # keymap action name (the keys of config.DEFAULT_KEYMAP). The id is
     # what keymap.toml overrides target, so the keymap name can differ
-    # freely from Textual's action string (e.g. id="focus_search" binds
-    # the "toggle_filter" action; id="switch_home" binds
+    # freely from Textual's action string (e.g. id="search" binds the
+    # "toggle_filter" action; id="switch_home" binds
     # "switch_view('home')"). _apply_keymap feeds these ids to
     # App.set_keymap.
     #
@@ -105,7 +107,7 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
             key_display="H",
             id="switch_history",
         ),
-        Binding("slash", "toggle_filter", "Filter", show=True, id="focus_search"),
+        Binding("slash", "toggle_filter", "Filter", show=True, id="search"),
         Binding("g", "switch_view('home')", "Home", show=True, id="switch_home"),
         Binding("l", "switch_view('library')", "Library", show=True, id="switch_library"),
         Binding("q", "switch_view('queue')", "Queue", show=True, id="switch_queue"),
@@ -129,6 +131,16 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
         Binding("7", "switch_view('artist')", "Artist", show=False),
         Binding("8", "open_lyrics", "Lyrics", show=False),
     ]
+
+    # Actions that are user-bindable via keymap.toml but ship with NO
+    # default key. spotify_player binds "SearchPage" to the two-key
+    # sequence ``g s``, which Textual cannot express, so we leave it
+    # unbound and let the user assign a single key if they want it.
+    #
+    # Maps keymap name -> Textual action string. Deliberately absent from
+    # config.DEFAULT_KEYMAP (no default key). _apply_keymap binds any
+    # keymap.toml entry whose name appears here.
+    UNBOUND_ACTIONS: ClassVar[Mapping[str, str]] = {"search_page": "search_page"}
 
     def __init__(
         self,
@@ -168,14 +180,20 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
 
         ``keymap`` maps canonical action names to key strings (the shape
         returned by :func:`config.load_keymap`). Each name is matched
-        against a ``Binding.id`` in :attr:`BINDINGS`; unknown names (e.g.
-        stale entries in a user keymap.toml) are dropped. The surviving
-        entries are handed to :meth:`App.set_keymap`, which overrides the
-        compiled-in key per binding id and refreshes the Footer.
+        against a ``Binding.id`` in :attr:`BINDINGS`; matching entries are
+        handed to :meth:`App.set_keymap`, which overrides the compiled-in
+        key per binding id and refreshes the Footer.
+
+        Names that are neither a binding id nor a key of
+        :attr:`UNBOUND_ACTIONS` (e.g. stale entries in a user
+        keymap.toml) are dropped. Names in :attr:`UNBOUND_ACTIONS` have no
+        compiled-in binding, so any key the user assigns them is added via
+        :meth:`App.bind`.
 
         Safe to call from ``__init__``: ``set_keymap`` only stores the
         mapping and the override is applied lazily when active bindings
-        are computed (after mount).
+        are computed (after mount); ``bind`` mutates the binding table
+        directly.
         """
         binding_ids = {
             binding.id
@@ -183,6 +201,16 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
             if isinstance(binding, Binding) and binding.id is not None
         }
         self.set_keymap({name: key for name, key in keymap.items() if name in binding_ids})
+
+        # Bind the unbound-but-bindable actions the user opted into.
+        # App.bind is documented as public-but-warned ("may be private or
+        # removed in the future"). We accept that risk because these binds
+        # happen once at startup; if the method disappears we would switch
+        # to a hidden Binding(..., show=False) plus set_keymap instead.
+        for name, action in self.UNBOUND_ACTIONS.items():
+            key = keymap.get(name)
+            if key is not None:
+                self.bind(key, action, description="Search page", show=False)
 
     # -----------------------------------------------------------------
     # Responsive layout
@@ -316,9 +344,18 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
                 artist=track.artist if track else "",
             )
 
-    def action_focus_search(self) -> None:
+    def action_search_page(self) -> None:
+        """Switch to the search view and focus its input.
+
+        Reachable only when the user binds ``search_page`` in keymap.toml
+        (see :attr:`UNBOUND_ACTIONS`); ships unbound by default.
+
+        The input focus is deferred via ``call_after_refresh`` so it wins
+        the race against ``SearchView.on_show``, which otherwise focuses
+        the active result pane when the view becomes visible.
+        """
         self.action_switch_view("search")
-        self.query_one(SearchView).focus_input()
+        self.call_after_refresh(self.query_one(SearchView).focus_input)
 
     def current_view(self) -> FetchView | None:
         """Return the currently displayed view, or ``None`` if unresolved.

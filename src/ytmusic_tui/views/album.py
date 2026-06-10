@@ -11,6 +11,7 @@ from ytmusic_tui.formatting import format_duration as _format_duration
 from ytmusic_tui.views.base import FetchView
 from ytmusic_tui.views.filter_bar import FilterBar
 from ytmusic_tui.views.guards import teardown_safe
+from ytmusic_tui.views.widgets import NavDataTable
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -71,7 +72,7 @@ class AlbumView(FetchView):
             yield Label("", id="album-meta")
         yield Label("", id="album-status")
         with Vertical(id="album-table-container"):
-            table: DataTable[Any] = DataTable(id="album-table")
+            table: DataTable[Any] = NavDataTable(id="album-table")
             table.cursor_type = "row"
             table.add_columns("#", "Title", "Artist", "Duration")
             yield table

@@ -76,7 +76,7 @@ ytmusic-tui
 
 | Key       | Action                             |
 |-----------|------------------------------------|
-| `j` / `k` | Navigate up/down                  |
+| `j` / `k` (or `↓` / `↑`) | Navigate rows down/up |
 | `Enter`   | Play / Select                      |
 | `Space`   | Play / Pause                       |
 | `n` / `p` | Next / Previous                    |
@@ -104,6 +104,17 @@ ytmusic-tui
 | `1`-`7`   | Direct view switch                 |
 
 All keybindings can be remapped via `keymap.toml` (see Configuration).
+
+**Unbound actions.** Some actions ship without a default key but can be
+bound in `keymap.toml`. `search_page` jumps to the search page and focuses
+its input -- the spotify_player default for this is the two-key sequence
+`g s`, which the terminal binding layer cannot express, so it is left
+unbound. Assign it a single key if you want it:
+
+```toml
+[keybinds]
+search_page = "ctrl+s"  # go to the search page and focus its input
+```
 
 ## Configuration
 

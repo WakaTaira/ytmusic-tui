@@ -11,6 +11,7 @@ from ytmusic_tui.formatting import format_duration as _format_duration
 from ytmusic_tui.views.base import FetchView
 from ytmusic_tui.views.filter_bar import FilterBar
 from ytmusic_tui.views.guards import teardown_safe
+from ytmusic_tui.views.widgets import NavDataTable
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -60,7 +61,7 @@ class PlaylistView(FetchView):
         """Build the playlist layout: status label, data table, and filter bar."""
         yield Label("", id="playlist-status")
         with Vertical(id="playlist-table-container"):
-            table: DataTable[Any] = DataTable(id="playlist-table")
+            table: DataTable[Any] = NavDataTable(id="playlist-table")
             table.cursor_type = "row"
             yield table
         yield FilterBar("playlist-table", id="playlist-filter")

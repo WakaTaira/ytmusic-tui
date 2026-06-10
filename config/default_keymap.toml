@@ -22,7 +22,7 @@ toggle_shuffle = "s"
 cycle_repeat = "r"
 volume_up = "plus,equal"
 volume_down = "minus"
-focus_search = "slash"
+search = "slash"
 switch_home = "g"
 switch_library = "l"
 switch_queue = "q"
@@ -40,3 +40,6 @@ toggle_mute = "underscore"
 toggle_like = "f"
 start_radio = "R"
 switch_history = "H"
+
+# Unbound-but-bindable actions (no default key — uncomment to assign one):
+# search_page = "ctrl+s"  # go to the search page and focus its input (unbound by default)

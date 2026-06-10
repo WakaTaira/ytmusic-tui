@@ -15,6 +15,7 @@ from textual.widgets import Label, ListItem, ListView, Static
 
 from ytmusic_tui.api import AlbumInfo, PlaylistInfo
 from ytmusic_tui.queue import Track
+from ytmusic_tui.views.widgets import NavListView
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -199,7 +200,7 @@ class ActionPopup(Static):
     def compose(self) -> ComposeResult:
         """Build the popup layout."""
         yield Label("", id="popup-title")
-        yield ListView(id="popup-actions")
+        yield NavListView(id="popup-actions")
 
     def show(self, item: Track | PlaylistInfo | AlbumInfo, *, context: str = "") -> None:
         """Populate actions for *item* and display the popup."""
@@ -332,7 +333,7 @@ class ThemePopup(Static):
     def compose(self) -> ComposeResult:
         """Build the theme popup layout."""
         yield Label("Select Theme", id="theme-title")
-        yield ListView(id="theme-list")
+        yield NavListView(id="theme-list")
 
     def show(self, theme_names: list[str], current_theme: str = "") -> None:
         """Populate and display the theme popup.
@@ -446,7 +447,7 @@ class PlaylistPickerPopup(Static):
 
     def compose(self) -> ComposeResult:
         yield Label("Add to playlist", id="picker-title")
-        yield ListView(id="picker-list")
+        yield NavListView(id="picker-list")
 
     def show(self, playlists: list[tuple[str, str]], track: Any) -> None:
         self._playlists = list(playlists)

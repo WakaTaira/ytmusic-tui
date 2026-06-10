@@ -20,6 +20,7 @@ from ytmusic_tui.views.base import FetchView
 from ytmusic_tui.views.filter_bar import FilterBar
 from ytmusic_tui.views.guards import teardown_safe
 from ytmusic_tui.views.playlist import PlaylistView
+from ytmusic_tui.views.widgets import NavDataTable
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -200,7 +201,7 @@ class SearchView(FetchView):
                     for pane in row_panes:
                         with _SearchPane(pane):
                             yield Label(_PANE_TITLES[pane], classes="pane-title")
-                            table: DataTable[Any] = DataTable(id=_TABLE_IDS[pane])
+                            table: DataTable[Any] = NavDataTable(id=_TABLE_IDS[pane])
                             table.cursor_type = "row"
                             table.add_columns(*_PANE_COLUMNS[pane])
                             yield table

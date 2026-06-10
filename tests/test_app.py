@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,6 +22,9 @@ from ytmusic_tui.views.player import (
 from ytmusic_tui.views.playlist import PlaylistView
 from ytmusic_tui.views.queue import QueueView
 from ytmusic_tui.views.search import SearchView
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -259,6 +263,72 @@ class TestKeyBindings:
         binding_ids = {b.id for b in YtMusicTui.BINDINGS if isinstance(b, Binding)}
         assert "seek_forward" in binding_ids
         assert "seek_backward" in binding_ids
+
+    def test_search_action_has_renamed_id(self) -> None:
+        """The ``/`` filter binding must expose the ``search`` keymap id.
+
+        Renamed from ``focus_search`` to match spotify_player's "Search".
+        """
+        from textual.binding import Binding
+
+        from ytmusic_tui.app import YtMusicTui
+
+        actions = {b.id: b.action for b in YtMusicTui.BINDINGS if isinstance(b, Binding)}
+        assert actions.get("search") == "toggle_filter"
+        assert "focus_search" not in actions
+
+    def test_search_page_default_unbound(self) -> None:
+        """search_page ships without a key: no binding and not in defaults."""
+        from textual.binding import Binding
+
+        from ytmusic_tui.app import YtMusicTui
+        from ytmusic_tui.config import DEFAULT_KEYMAP
+
+        assert "search_page" not in DEFAULT_KEYMAP
+        binding_keys = [b.key for b in YtMusicTui.BINDINGS if isinstance(b, Binding)]
+        binding_actions = [b.action for b in YtMusicTui.BINDINGS if isinstance(b, Binding)]
+        # No compiled-in binding maps to the search_page action.
+        assert "search_page" not in binding_actions
+        # The example key in default_keymap.toml is not compiled in either.
+        assert "ctrl+s" not in binding_keys
+
+    @pytest.mark.asyncio
+    async def test_search_page_bindable_via_keymap(self, tmp_path: Path) -> None:
+        """A keymap.toml search_page entry binds the key to the search page."""
+        from textual.widgets import ContentSwitcher, Input
+
+        keymap_file = tmp_path / "keymap.toml"
+        keymap_file.write_text('[keybinds]\nsearch_page = "ctrl+s"\n')
+
+        app = _make_app(keymap_path=keymap_file)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("ctrl+s")
+            # Two pumps: one for on_show, one for the deferred focus_input
+            # scheduled via call_after_refresh.
+            await pilot.pause()
+            await pilot.pause()
+
+            switcher = app.query_one(ContentSwitcher)
+            assert switcher.current == "search"
+            search_input = app.query_one("#search-input", Input)
+            assert app.focused is search_input
+
+    @pytest.mark.asyncio
+    async def test_search_page_unbound_without_keymap_entry(self) -> None:
+        """Without a keymap entry, no key triggers the search page action."""
+        from textual.binding import Binding
+
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            # The live binding table carries no search_page action because
+            # _apply_keymap only binds it when keymap.toml opts in.
+            active_actions = {
+                b.action
+                for bindings in app._bindings.key_to_bindings.values()
+                for b in bindings
+                if isinstance(b, Binding)
+            }
+            assert "search_page" not in active_actions
 
 
 # ===================================================================

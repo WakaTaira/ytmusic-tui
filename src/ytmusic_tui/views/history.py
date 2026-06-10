@@ -13,6 +13,7 @@ from ytmusic_tui.formatting import format_duration as _format_duration
 from ytmusic_tui.views.base import FetchView
 from ytmusic_tui.views.filter_bar import FilterBar
 from ytmusic_tui.views.guards import teardown_safe
+from ytmusic_tui.views.widgets import NavDataTable
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -60,7 +61,7 @@ class HistoryView(FetchView):
         yield Label("Recently played", id="history-title")
         yield Label("", id="history-status")
         with Vertical(id="history-table-container"):
-            table: DataTable[Any] = DataTable(id="history-table")
+            table: DataTable[Any] = NavDataTable(id="history-table")
             table.cursor_type = "row"
             table.add_columns("Title", "Artist", "Album", "Duration")
             yield table

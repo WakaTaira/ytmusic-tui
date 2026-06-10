@@ -21,6 +21,7 @@ from ytmusic_tui.views.base import FetchView
 from ytmusic_tui.views.filter_bar import FilterBar
 from ytmusic_tui.views.guards import teardown_safe
 from ytmusic_tui.views.playlist import PlaylistView
+from ytmusic_tui.views.widgets import NavDataTable
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -68,7 +69,7 @@ class _SectionTable(Static):
     def compose(self) -> ComposeResult:
         """Render a section title and its items table."""
         yield Label(self._section_title, classes="section-title")
-        table: DataTable[Any] = DataTable(id=f"home-section-{self._section_index}")
+        table: DataTable[Any] = NavDataTable(id=f"home-section-{self._section_index}")
         table.cursor_type = "row"
         table.add_columns("Title", "Artist / Info", "Duration")
         yield table

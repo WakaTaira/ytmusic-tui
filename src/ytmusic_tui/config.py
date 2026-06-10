@@ -235,7 +235,7 @@ DEFAULT_KEYMAP: dict[str, str] = {
     "cycle_repeat": "r",
     "volume_up": "plus,equal",
     "volume_down": "minus",
-    "focus_search": "slash",
+    "search": "slash",
     "switch_home": "g",
     "switch_library": "l",
     "switch_queue": "q",

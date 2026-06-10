@@ -725,13 +725,13 @@ class TestKeybindings:
             app.player.adjust_volume.assert_called_with(-5)
 
     @pytest.mark.asyncio
-    async def test_action_focus_search(self) -> None:
-        """action_focus_search should switch to search and focus input."""
+    async def test_action_search_page(self) -> None:
+        """action_search_page should switch to search and focus input."""
         app = _make_app()
         async with app.run_test(size=(120, 40)) as _pilot:
             from textual.widgets import ContentSwitcher
 
-            app.action_focus_search()
+            app.action_search_page()
             await _pilot.pause()
 
             switcher = app.query_one(ContentSwitcher)
@@ -1508,3 +1508,73 @@ class TestPlayerBarMprisErrorNotify:
                 (msg, sev) for msg, sev in captured if "MPRIS" in msg and sev == "warning"
             ]
             assert mpris_warnings == []
+
+
+# ===================================================================
+# Vim-style j/k navigation (spotify_player parity)
+# ===================================================================
+
+
+class TestVimNavigation:
+    @pytest.mark.asyncio
+    async def test_jk_moves_cursor_in_focused_table(self) -> None:
+        """j/k should move the cursor down/up in a focused row table."""
+        from textual.widgets import DataTable
+
+        app = make_app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            app.queue_manager.set_playlist(_make_tracks(3))
+            app.action_switch_view("queue")
+            await pilot.pause()
+
+            view = app.query_one(QueueView)
+            view.refresh_queue()
+            await pilot.pause()
+
+            table = view.query_one("#queue-table", DataTable)
+            table.focus()
+            await pilot.pause()
+            assert table.cursor_row == 0
+
+            await pilot.press("j")
+            await pilot.pause()
+            assert table.cursor_row == 1
+
+            await pilot.press("j")
+            await pilot.pause()
+            assert table.cursor_row == 2
+
+            await pilot.press("k")
+            await pilot.pause()
+            assert table.cursor_row == 1
+
+    @pytest.mark.asyncio
+    async def test_jk_types_into_search_input_without_moving_cursor(self) -> None:
+        """Typing j/k into the search Input inserts the chars and never
+        moves a table cursor (bindings live on the table, not the App)."""
+        from textual.widgets import DataTable, Input
+
+        from ytmusic_tui.views.search import _TABLE_IDS
+
+        app = make_app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            app.action_switch_view("search")
+            await pilot.pause()
+
+            view = app.query_one(SearchView)
+            view.focus_input()
+            await pilot.pause()
+
+            search_input = view.query_one("#search-input", Input)
+            tracks_table = view.query_one(f"#{_TABLE_IDS[Pane.TRACKS]}", DataTable)
+            assert app.focused is search_input
+            assert tracks_table.cursor_row == 0
+
+            await pilot.press("j")
+            await pilot.press("k")
+            await pilot.pause()
+
+            # The Input received the literal characters ...
+            assert search_input.value == "jk"
+            # ... and the table cursor never moved.
+            assert tracks_table.cursor_row == 0
