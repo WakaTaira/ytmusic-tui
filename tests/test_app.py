@@ -292,6 +292,74 @@ class TestSessionProbe:
 
 
 # ===================================================================
+# Playback error surfacing
+# ===================================================================
+
+
+class TestPlaybackError:
+    @pytest.mark.asyncio
+    async def test_error_notifies_with_track_title(self) -> None:
+        from helpers import capture_notifications
+
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            captured = capture_notifications(app)
+            app.queue_manager.set_playlist(
+                [Track(video_id="vid", title="Dead Stream", artist="X")]
+            )
+            app._on_playback_error()
+
+        assert any(
+            "Dead Stream" in message and "press n to skip" in message and severity == "error"
+            for message, severity in captured
+        )
+
+    @pytest.mark.asyncio
+    async def test_error_notifies_without_track(self) -> None:
+        from helpers import capture_notifications
+
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            captured = capture_notifications(app)
+            app._on_playback_error()
+
+        assert captured == [("Playback failed", "error")]
+
+    @pytest.mark.asyncio
+    async def test_error_appends_description(self) -> None:
+        from helpers import capture_notifications
+
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            captured = capture_notifications(app)
+            app.queue_manager.set_playlist(
+                [Track(video_id="vid", title="Dead Stream", artist="X")]
+            )
+            app._on_playback_error("loading failed")
+
+        assert any(
+            "(loading failed)" in message and severity == "error" for message, severity in captured
+        )
+
+    @pytest.mark.asyncio
+    async def test_error_does_not_advance_queue(self) -> None:
+        app = _make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            app.queue_manager.set_playlist(
+                [
+                    Track(video_id="a", title="A", artist="X"),
+                    Track(video_id="b", title="B", artist="X"),
+                ]
+            )
+            app._on_playback_error("loading failed")
+
+        # Surfacing the error must not skip to the next track.
+        current = app.queue_manager.current_track
+        assert current is not None
+        assert current.video_id == "a"
+
+
+# ===================================================================
 # Seek actions
 # ===================================================================
 

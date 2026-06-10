@@ -61,6 +61,9 @@ _VOLUME_STEP = 5
 # Seek step in seconds (spotify_player compatible)
 _SEEK_STEP = 5.0
 
+# How long the playback-failure toast stays on screen (seconds)
+_PLAYBACK_ERROR_TIMEOUT = 8.0
+
 
 class PlaybackActions(_Base):
     """Transport control: play/pause, track skip, seek, shuffle, volume."""
@@ -73,6 +76,27 @@ class PlaybackActions(_Base):
         next_track = self.queue_manager.next_track()
         if next_track is not None:
             self.player.play(next_track.video_id)
+
+    def _on_playback_error(self, description: str = "") -> None:
+        """Surface an mpv playback failure to the user.
+
+        The queue is intentionally not advanced (see Player._handle_end_file):
+        a broken resolver would otherwise skip through every track. We just
+        show a single-line toast naming the failing track so the user is not
+        left staring at a silent player. *description* is mpv's optional short
+        error string; it is appended in parentheses when present.
+
+        Runs on the Textual thread — on_mount bridges mpv's event thread via
+        call_from_thread.
+        """
+        track = self.queue_manager.current_track
+        if track is not None:
+            message = f"Playback failed: {track.title} — press n to skip"
+        else:
+            message = "Playback failed"
+        if description:
+            message = f"{message} ({description})"
+        self.notify(message, severity="error", timeout=_PLAYBACK_ERROR_TIMEOUT)
 
     def action_toggle_pause(self) -> None:
         state = self.player.get_state()

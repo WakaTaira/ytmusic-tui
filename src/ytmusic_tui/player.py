@@ -58,6 +58,7 @@ class Player:
         )
         self._video_id: str = ""
         self.on_track_end: Callable[[], None] | None = None
+        self.on_track_error: Callable[[str], None] | None = None
 
         # Register end-of-file observer for queue integration
         @self._mpv.event_callback("end-file")  # type: ignore[untyped-decorator]
@@ -67,20 +68,51 @@ class Player:
         self._end_file_handler = _on_end_file
 
     def _handle_end_file(self, event: mpv.MpvEvent) -> None:
-        """Fire on_track_end only when a track finished naturally.
+        """Route an mpv end-file event to the right callback.
 
-        mpv emits end-file for *every* reason a file stops, including
-        being replaced by a new loadfile (ABORTED) — reacting to those
-        would auto-advance the queue right after the user picks a track,
-        playing the wrong song. ERROR is also ignored on purpose: with a
-        broken stream resolver it would machine-gun through the queue.
+        mpv emits end-file for *every* reason a file stops:
+
+        * ``EOF`` — the track finished naturally; fire ``on_track_end`` so
+          the queue advances.
+        * ``ERROR`` — the stream could not be played (e.g. a stale resolver
+          facing YouTube's EJS challenges). We deliberately do **not**
+          advance the queue, because a broken resolver would machine-gun
+          through every track. Instead we fire ``on_track_error`` with a
+          short description so the user gets visible feedback rather than
+          silence. The description comes from mpv's integer error code
+          (``event.data.error``) via :meth:`mpv.ErrorCode.human_readable`;
+          python-mpv 1.0.8 exposes no human-readable ``file_error`` string,
+          so we translate the code ourselves and fall back to an empty
+          string if it is unavailable.
+        * Any other reason (ABORTED on loadfile replacement, QUIT,
+          REDIRECT, ...) is ignored: reacting to ABORTED auto-advanced the
+          queue right after the user picked a track, playing the wrong song.
         """
         data = getattr(event, "data", None)
         reason = getattr(data, "reason", None)
-        if reason != mpv.MpvEventEndFile.EOF:
+        if reason == mpv.MpvEventEndFile.EOF:
+            if self.on_track_end is not None:
+                self.on_track_end()
             return
-        if self.on_track_end is not None:
-            self.on_track_end()
+        if reason == mpv.MpvEventEndFile.ERROR:
+            if self.on_track_error is not None:
+                self.on_track_error(self._end_file_error(data))
+            return
+
+    @staticmethod
+    def _end_file_error(data: object) -> str:
+        """Translate an end-file event's mpv error code to a short string.
+
+        Returns the empty string when the code is missing, zero, or cannot
+        be translated, so callers can treat the description as optional.
+        """
+        code = getattr(data, "error", None)
+        if not isinstance(code, int) or code == 0:
+            return ""
+        try:
+            return str(mpv.ErrorCode.human_readable(code))
+        except Exception:
+            return ""
 
     # -- Playback control --------------------------------------------------
 

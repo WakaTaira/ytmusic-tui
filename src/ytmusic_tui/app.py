@@ -222,6 +222,12 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
 
     def on_mount(self) -> None:
         self.player.on_track_end = self._on_track_end
+        # mpv fires end-file callbacks on its own event thread, so the
+        # error handler must re-enter the Textual app via call_from_thread,
+        # just like the MPRIS callbacks below.
+        self.player.on_track_error = lambda description: self.call_from_thread(
+            self._on_playback_error, description
+        )
 
         textual_theme = build_textual_theme(self.config.ui.theme)
         self.register_theme(textual_theme)

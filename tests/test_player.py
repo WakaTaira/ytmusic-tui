@@ -168,9 +168,12 @@ class TestEndFileHandling:
     """
 
     @staticmethod
-    def _event(reason: int | None) -> MagicMock:
+    def _event(reason: int | None, error: int | None = None) -> MagicMock:
         event = MagicMock()
         event.data.reason = reason
+        # MagicMock would synthesize a non-int .error; force a concrete value
+        # so _end_file_error sees a real code (or None for "no code").
+        event.data.error = error
         return event
 
     @patch("ytmusic_tui.player.mpv.MPV")
@@ -178,12 +181,15 @@ class TestEndFileHandling:
         import mpv as mpv_mod
 
         player = Player()
-        calls: list[str] = []
-        player.on_track_end = lambda: calls.append("end")
+        ended: list[str] = []
+        errored: list[str] = []
+        player.on_track_end = lambda: ended.append("end")
+        player.on_track_error = lambda desc: errored.append(desc)
 
         player._handle_end_file(self._event(mpv_mod.MpvEventEndFile.EOF))
 
-        assert calls == ["end"]
+        assert ended == ["end"]
+        assert errored == []
         player.shutdown()
 
     @patch("ytmusic_tui.player.mpv.MPV")
@@ -191,40 +197,82 @@ class TestEndFileHandling:
         import mpv as mpv_mod
 
         player = Player()
-        calls: list[str] = []
-        player.on_track_end = lambda: calls.append("end")
+        ended: list[str] = []
+        errored: list[str] = []
+        player.on_track_end = lambda: ended.append("end")
+        player.on_track_error = lambda desc: errored.append(desc)
 
         player._handle_end_file(self._event(mpv_mod.MpvEventEndFile.ABORTED))
         player._handle_end_file(self._event(mpv_mod.MpvEventEndFile.REDIRECT))
         player._handle_end_file(self._event(mpv_mod.MpvEventEndFile.QUIT))
 
-        assert calls == []
+        assert ended == []
+        assert errored == []
         player.shutdown()
 
     @patch("ytmusic_tui.player.mpv.MPV")
-    def test_error_does_not_fire(self, mock_mpv_cls: MagicMock) -> None:
-        """A failing stream must not machine-gun through the queue."""
+    def test_error_fires_track_error_not_track_end(self, mock_mpv_cls: MagicMock) -> None:
+        """A failing stream notifies the user but must not advance the queue."""
         import mpv as mpv_mod
 
         player = Player()
-        calls: list[str] = []
-        player.on_track_end = lambda: calls.append("end")
+        ended: list[str] = []
+        errored: list[str] = []
+        player.on_track_end = lambda: ended.append("end")
+        player.on_track_error = lambda desc: errored.append(desc)
 
         player._handle_end_file(self._event(mpv_mod.MpvEventEndFile.ERROR))
 
-        assert calls == []
+        assert ended == []
+        assert errored == [""]  # fired once; no usable error code on this event
+        player.shutdown()
+
+    @patch("ytmusic_tui.player.mpv.MPV")
+    def test_error_passes_human_readable_description(self, mock_mpv_cls: MagicMock) -> None:
+        """The mpv error code is translated to a short description string."""
+        import mpv as mpv_mod
+
+        expected = mpv_mod.ErrorCode.human_readable(mpv_mod.ErrorCode.LOADING_FAILED)
+        player = Player()
+        errored: list[str] = []
+        player.on_track_error = lambda desc: errored.append(desc)
+
+        player._handle_end_file(
+            self._event(
+                mpv_mod.MpvEventEndFile.ERROR,
+                error=mpv_mod.ErrorCode.LOADING_FAILED,
+            )
+        )
+
+        assert errored == [expected]
+        assert expected  # sanity: a non-empty, human-readable string
+        player.shutdown()
+
+    @patch("ytmusic_tui.player.mpv.MPV")
+    def test_error_without_callback_is_noop(self, mock_mpv_cls: MagicMock) -> None:
+        """ERROR with no on_track_error hook must not crash."""
+        import mpv as mpv_mod
+
+        player = Player()
+        player.on_track_error = None
+        player.on_track_end = lambda: pytest.fail("queue must not advance on ERROR")
+
+        player._handle_end_file(self._event(mpv_mod.MpvEventEndFile.ERROR))
         player.shutdown()
 
     @patch("ytmusic_tui.player.mpv.MPV")
     def test_malformed_event_is_ignored(self, mock_mpv_cls: MagicMock) -> None:
         player = Player()
-        calls: list[str] = []
-        player.on_track_end = lambda: calls.append("end")
+        ended: list[str] = []
+        errored: list[str] = []
+        player.on_track_end = lambda: ended.append("end")
+        player.on_track_error = lambda desc: errored.append(desc)
 
         player._handle_end_file(self._event(None))
         player._handle_end_file(MagicMock(data=None))
 
-        assert calls == []
+        assert ended == []
+        assert errored == []
         player.shutdown()
 
     @patch("ytmusic_tui.player.mpv.MPV")
