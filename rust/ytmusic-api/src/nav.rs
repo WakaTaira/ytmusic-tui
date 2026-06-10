@@ -113,6 +113,77 @@ pub const PLAY_BUTTON_VIDEO_ID: &[Step] = &[
 pub const MRLIR: &str = "musicResponsiveListItemRenderer";
 /// `musicTwoRowItemRenderer`
 pub const MTRIR: &str = "musicTwoRowItemRenderer";
+/// `musicMultiRowListItemRenderer` (home episode rows).
+pub const MMRIR: &str = "musicMultiRowListItemRenderer";
+
+/// `["navigationEndpoint", "watchEndpoint", "videoId"]` — a two-row card's
+/// play target (ytmusicapi's `NAVIGATION_VIDEO_ID`).
+pub const NAVIGATION_VIDEO_ID: &[Step] =
+    &[k("navigationEndpoint"), k("watchEndpoint"), k("videoId")];
+
+/// `["navigationEndpoint", "watchEndpoint", "playlistId"]`
+/// (ytmusicapi's `NAVIGATION_PLAYLIST_ID`).
+pub const NAVIGATION_PLAYLIST_ID: &[Step] =
+    &[k("navigationEndpoint"), k("watchEndpoint"), k("playlistId")];
+
+/// `["navigationEndpoint", "watchPlaylistEndpoint", "playlistId"]`
+/// (ytmusicapi's `NAVIGATION_WATCH_PLAYLIST_ID`).
+pub const NAVIGATION_WATCH_PLAYLIST_ID: &[Step] = &[
+    k("navigationEndpoint"),
+    k("watchPlaylistEndpoint"),
+    k("playlistId"),
+];
+
+/// `["subtitle", "runs"]` — the runs array of a two-row card subtitle.
+pub const SUBTITLE_RUNS: &[Step] = &[k("subtitle"), k("runs")];
+
+/// `header.musicCarouselShelfBasicHeaderRenderer.title.runs[0].text` — a home
+/// carousel's section title (ytmusicapi's `CAROUSEL_TITLE + "text"`).
+pub const CAROUSEL_TITLE_TEXT: &[Step] = &[
+    k("header"),
+    k("musicCarouselShelfBasicHeaderRenderer"),
+    k("title"),
+    k("runs"),
+    i(0),
+    k("text"),
+];
+
+/// `title.runs[0].navigationEndpoint.browseEndpoint.browseId` — a two-row card's
+/// browse id (ytmusicapi's `TITLE + NAVIGATION_BROWSE_ID`).
+pub const TITLE_RUN0_BROWSE_ID: &[Step] = &[
+    k("title"),
+    k("runs"),
+    i(0),
+    k("navigationEndpoint"),
+    k("browseEndpoint"),
+    k("browseId"),
+];
+
+/// The `audioPlaylistId` reachable from a two-row card's thumbnail overlay:
+/// `thumbnailOverlay.musicItemThumbnailOverlayRenderer.content
+///  .musicPlayButtonRenderer.playNavigationEndpoint.watchPlaylistEndpoint.playlistId`
+/// (the authenticated `WATCH_PID` branch of `parse_album_playlistid_if_exists`).
+pub const THUMBNAIL_OVERLAY_WATCH_PID: &[Step] = &[
+    k("thumbnailOverlay"),
+    k("musicItemThumbnailOverlayRenderer"),
+    k("content"),
+    k("musicPlayButtonRenderer"),
+    k("playNavigationEndpoint"),
+    k("watchPlaylistEndpoint"),
+    k("playlistId"),
+];
+
+/// The unauthenticated fallback for the above (`WATCH_PLAYLIST_ID` branch):
+/// `...playNavigationEndpoint.watchEndpoint.playlistId`.
+pub const THUMBNAIL_OVERLAY_WATCH_PLAYLIST_ID: &[Step] = &[
+    k("thumbnailOverlay"),
+    k("musicItemThumbnailOverlayRenderer"),
+    k("content"),
+    k("musicPlayButtonRenderer"),
+    k("playNavigationEndpoint"),
+    k("watchEndpoint"),
+    k("playlistId"),
+];
 
 #[cfg(test)]
 mod tests {

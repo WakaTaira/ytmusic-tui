@@ -295,3 +295,77 @@ const PLAY_BUTTON_VIDEO_TYPE: &[Step] = &[
     Step::Key("watchEndpointMusicConfig"),
     Step::Key("musicVideoType"),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A filtered search response uses the NON-tabbed envelope: `contents` holds
+    /// the `sectionListRenderer` directly (no `tabbedSearchResultsRenderer`). The
+    /// committed fixtures are all tabbed, so this negative fixture covers the
+    /// `section_list` else-arm (review-debt from M3d-1).
+    #[test]
+    fn parses_non_tabbed_filtered_envelope() {
+        let response = json!({
+            "contents": {
+                "sectionListRenderer": { "contents": [
+                    { "musicShelfRenderer": { "contents": [
+                        { "musicResponsiveListItemRenderer": {
+                            "flexColumns": [
+                                { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [
+                                    { "text": "Filtered Song" }
+                                ] } } }
+                            ],
+                            "overlay": { "musicItemThumbnailOverlayRenderer": { "content": {
+                                "musicPlayButtonRenderer": { "playNavigationEndpoint": {
+                                    "watchEndpoint": { "videoId": "VID12345678" } } } } } }
+                        } }
+                    ] } }
+                ] }
+            }
+        });
+
+        // filter="songs" fixes the result_type to "song" for the non-tabbed path.
+        let items = parse_search_response(&response, Some("songs"));
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["resultType"], "song");
+        assert_eq!(items[0]["title"], "Filtered Song");
+        assert_eq!(items[0]["videoId"], "VID12345678");
+    }
+
+    /// The tabbed envelope (default search) still resolves through the if-arm.
+    /// Guards against a regression that would route everything to the else-arm.
+    #[test]
+    fn parses_tabbed_default_envelope() {
+        let response = json!({
+            "contents": { "tabbedSearchResultsRenderer": { "tabs": [
+                { "tabRenderer": { "content": { "sectionListRenderer": { "contents": [
+                    { "musicShelfRenderer": { "contents": [
+                        { "musicResponsiveListItemRenderer": {
+                            "flexColumns": [
+                                { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [
+                                    { "text": "Tabbed Song",
+                                      "navigationEndpoint": { "watchEndpoint": {
+                                          "videoId": "TAB12345678" } } }
+                                ] } } }
+                            ],
+                            "overlay": { "musicItemThumbnailOverlayRenderer": { "content": {
+                                "musicPlayButtonRenderer": { "playNavigationEndpoint": {
+                                    "watchEndpoint": { "videoId": "TAB12345678",
+                                        "watchEndpointMusicSupportedConfigs": {
+                                            "watchEndpointMusicConfig": {
+                                                "musicVideoType": "MUSIC_VIDEO_TYPE_ATV" } } } } } } } }
+                        } }
+                    ] } }
+                ] } } } }
+            ] } }
+        });
+
+        // No filter: the result type is derived per item (ATV videoType → "song").
+        let items = parse_search_response(&response, None);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["resultType"], "song");
+        assert_eq!(items[0]["videoId"], "TAB12345678");
+    }
+}

@@ -156,7 +156,11 @@ fn is_views(text: &str) -> bool {
 }
 
 /// `^(\d+:)*\d+:\d+$` — a clock duration like "2:04" or "1:02:30".
-fn is_duration(text: &str) -> bool {
+///
+/// `pub(super)` so the shared stage-1 helpers (`stage1`) reuse this single
+/// definition instead of re-porting the regex (de-dups the former
+/// `playlist::is_duration_text`).
+pub(super) fn is_duration(text: &str) -> bool {
     let segments: Vec<&str> = text.split(':').collect();
     // Need at least two colon-separated groups (so "45" alone is NOT a duration,
     // matching the regex which requires at least one ':').
@@ -178,7 +182,10 @@ fn is_year(text: &str) -> bool {
 /// Returns `None` for falsy / non-digit input (ytmusicapi returns `None`); the
 /// stage-2 layer treats a `duration_seconds` of `null` by falling back to the
 /// `duration` string, so the contract is preserved either way.
-fn parse_duration_seconds(text: &str) -> Option<i64> {
+///
+/// `pub(super)` so the shared stage-1 helpers reuse this single definition
+/// (the playlist parser previously carried a byte-identical copy).
+pub(super) fn parse_duration_seconds(text: &str) -> Option<i64> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return None;

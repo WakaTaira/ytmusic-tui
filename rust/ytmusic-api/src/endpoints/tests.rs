@@ -11,8 +11,13 @@ use std::sync::Mutex;
 
 use serde_json::Value;
 
-use super::{PostRequest, get_album, get_artist, get_playlist_tracks, search_all};
+use super::{
+    PostRequest, get_album, get_artist, get_history, get_home, get_library_albums,
+    get_library_artists, get_library_playlists, get_liked_songs, get_lyrics, get_playlist_tracks,
+    get_radio, search_all,
+};
 use crate::error::ApiError;
+use crate::models::HomeSectionItem;
 
 /// A fake transport that returns a fixed JSON response and records the last
 /// `(endpoint, body)` it was asked to post — so flow tests can assert both the
@@ -56,6 +61,43 @@ impl PostRequest for FailingPost {
             status: 500,
             message: "boom".to_owned(),
         })
+    }
+}
+
+/// A fake transport that returns a response chosen by endpoint, and records the
+/// ordered list of `(endpoint, body)` calls — for the multi-request flows
+/// (lyrics: `next` then `browse`).
+struct MapPost {
+    by_endpoint: std::collections::HashMap<String, Value>,
+    calls: Mutex<Vec<(String, Value)>>,
+}
+
+impl MapPost {
+    fn new(pairs: &[(&str, Value)]) -> Self {
+        Self {
+            by_endpoint: pairs
+                .iter()
+                .map(|(e, v)| ((*e).to_owned(), v.clone()))
+                .collect(),
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn calls(&self) -> Vec<(String, Value)> {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
+impl PostRequest for MapPost {
+    async fn post_request(&self, endpoint: &str, body: Value) -> Result<Value, ApiError> {
+        self.calls.lock().unwrap().push((endpoint.to_owned(), body));
+        match self.by_endpoint.get(endpoint) {
+            Some(v) => Ok(v.clone()),
+            None => Err(ApiError::Http {
+                status: 404,
+                message: format!("no fixture for endpoint {endpoint}"),
+            }),
+        }
     }
 }
 
@@ -222,6 +264,283 @@ fn playlist_tracks_keeps_existing_vl_prefix() {
 }
 
 // ---------------------------------------------------------------------------
+// liked songs (get_playlist("LM"))
+// ---------------------------------------------------------------------------
+
+#[test]
+fn liked_songs_returns_expected() {
+    let client = FakePost::new(fixture("liked_songs.json"));
+    let tracks = block_on(get_liked_songs(&client, 100)).expect("liked ok");
+
+    // Ground truth from the live api.py pipeline over liked_songs.json.
+    assert_eq!(tracks.len(), 3);
+    assert_eq!(tracks[0].video_id, "7s4RmXxcZvM");
+    assert_eq!(tracks[0].title, "「宝島」(吹奏楽) ピアノで弾きました");
+    assert_eq!(tracks[0].artist, "Fujii Kaze");
+    assert_eq!(tracks[0].album, "");
+    assert_eq!(tracks[0].duration_seconds, 179.0);
+
+    assert_eq!(tracks[1].video_id, "KwZFalJdsbQ");
+    assert_eq!(tracks[1].artist, "Test Uploader C");
+    assert_eq!(tracks[1].duration_seconds, 193.0);
+
+    assert_eq!(tracks[2].video_id, "hlr_7Za6v0M");
+    assert_eq!(tracks[2].album, "Returns To Dreamland");
+    assert_eq!(tracks[2].duration_seconds, 115.0);
+
+    // get_liked_songs reuses the playlist flow: "LM" → "VLLM" via browse.
+    let (endpoint, body) = client.last();
+    assert_eq!(endpoint, "browse");
+    assert_eq!(body["browseId"], "VLLM");
+}
+
+#[test]
+fn liked_songs_respects_limit() {
+    let client = FakePost::new(fixture("liked_songs.json"));
+    let tracks = block_on(get_liked_songs(&client, 2)).expect("liked ok");
+    assert_eq!(tracks.len(), 2, "limit caps the liked list");
+}
+
+// ---------------------------------------------------------------------------
+// library playlists
+// ---------------------------------------------------------------------------
+
+#[test]
+fn library_playlists_returns_expected() {
+    let client = FakePost::new(fixture("library_playlists.json"));
+    let playlists = block_on(get_library_playlists(&client, 25)).expect("ok");
+
+    // Ground truth (api.py over library_playlists.json): the "New playlist"
+    // pseudo-item is skipped, leaving 3 playlists.
+    assert_eq!(playlists.len(), 3);
+    assert_eq!(playlists[0].playlist_id, "LM");
+    assert_eq!(playlists[0].title, "Liked Music");
+    assert_eq!(playlists[0].description, "Auto playlist");
+    assert_eq!(playlists[0].track_count, 0);
+
+    assert_eq!(
+        playlists[1].playlist_id,
+        "PLv_jJ3zdS10pmtSFiE8PgXa7v0OWhN8yA"
+    );
+    assert_eq!(playlists[1].title, "GT");
+    assert_eq!(playlists[1].track_count, 2); // "TestUser • 2 tracks"
+
+    assert_eq!(playlists[2].title, "2025 Recap");
+    assert_eq!(playlists[2].track_count, 0); // "Made for TestUser • 99 songs" (not a 3-run count)
+
+    let (endpoint, body) = client.last();
+    assert_eq!(endpoint, "browse");
+    assert_eq!(body["browseId"], "FEmusic_liked_playlists");
+}
+
+#[test]
+fn library_playlists_respects_limit() {
+    let client = FakePost::new(fixture("library_playlists.json"));
+    let playlists = block_on(get_library_playlists(&client, 2)).expect("ok");
+    assert_eq!(playlists.len(), 2);
+}
+
+// ---------------------------------------------------------------------------
+// library albums
+// ---------------------------------------------------------------------------
+
+#[test]
+fn library_albums_returns_expected() {
+    let client = FakePost::new(fixture("library_albums.json"));
+    let albums = block_on(get_library_albums(&client, 25)).expect("ok");
+
+    assert_eq!(albums.len(), 3);
+    let expected = [
+        ("MPREb_6Hlu7bz5KzT", "Die Lit", "Playboi Carti", "2018"),
+        (
+            "MPREb_ixfbA4zK0Nj",
+            "MUSIC - SORRY 4 DA WAIT",
+            "Playboi Carti",
+            "2025",
+        ),
+        ("MPREb_Zfk2NiycExr", "MUSIC", "Playboi Carti", "2025"),
+    ];
+    for (album, (bid, title, artist, year)) in albums.iter().zip(expected) {
+        assert_eq!(album.browse_id, bid);
+        assert_eq!(album.title, title);
+        assert_eq!(album.artist, artist);
+        assert_eq!(album.year, year);
+        assert!(
+            album.tracks.is_empty(),
+            "library albums carry no track list"
+        );
+    }
+
+    let (endpoint, body) = client.last();
+    assert_eq!(endpoint, "browse");
+    assert_eq!(body["browseId"], "FEmusic_liked_albums");
+}
+
+// ---------------------------------------------------------------------------
+// library artists
+// ---------------------------------------------------------------------------
+
+#[test]
+fn library_artists_returns_expected() {
+    let client = FakePost::new(fixture("library_artists.json"));
+    let artists = block_on(get_library_artists(&client, 25)).expect("ok");
+
+    assert_eq!(artists.len(), 3);
+    let expected = [
+        ("MPLAUCRB-a6u9flpg0xuBqCf9QlQ", "Playboi Carti"),
+        ("MPLAUCf_gP4AMRSgAfyzbkeS9k4g", "Travis Scott"),
+        ("MPLAUC1_liDR4fRFJgH4HoJeV8cw", "Future"),
+    ];
+    for (artist, (cid, name)) in artists.iter().zip(expected) {
+        assert_eq!(artist.channel_id, cid);
+        assert_eq!(artist.name, name);
+        // new_minimal: identity-only, no sections.
+        assert_eq!(artist.description, "");
+        assert!(artist.top_songs.is_empty());
+        assert!(artist.albums.is_empty());
+        assert!(artist.related_artists.is_empty());
+    }
+
+    let (endpoint, body) = client.last();
+    assert_eq!(endpoint, "browse");
+    assert_eq!(body["browseId"], "FEmusic_library_corpus_track_artists");
+}
+
+// ---------------------------------------------------------------------------
+// history
+// ---------------------------------------------------------------------------
+
+#[test]
+fn history_flattens_dated_shelves() {
+    let client = FakePost::new(fixture("history.json"));
+    let tracks = block_on(get_history(&client)).expect("history ok");
+
+    // Ground truth (api.py over history.json): two dated shelves, 2 tracks each,
+    // flattened in order. History rows are video-style: the trailing view-count
+    // run ("6.7M views") classifies as artist text (no album/clickable artist),
+    // so it is joined into `artist` exactly as the Python pipeline does.
+    assert_eq!(tracks.len(), 4);
+
+    assert_eq!(tracks[0].video_id, "tR2oqBzMwcE");
+    assert_eq!(
+        tracks[0].title,
+        "[Armored Core Ⅵ] Mechanized Memories  - in the end -  機械化された記憶　lyrics 和訳"
+    );
+    assert_eq!(tracks[0].artist, "Test Uploader A, 6.7M views");
+    assert_eq!(tracks[0].album, "");
+    assert_eq!(tracks[0].duration_seconds, 329.0);
+
+    // A real-artist row carries an album and a clean artist (no view-count run).
+    assert_eq!(tracks[1].video_id, "wzKviWpfgS0");
+    assert_eq!(tracks[1].artist, "Yuki Chiba");
+    assert_eq!(tracks[1].album, "Okuman Choja");
+    assert_eq!(tracks[1].duration_seconds, 168.0);
+
+    // Second shelf flattened after the first.
+    assert_eq!(tracks[2].video_id, "OeAxWQI8hng");
+    assert_eq!(tracks[2].artist, "XXXTENTACION, 2.7M views");
+    assert_eq!(tracks[3].video_id, "-7HMCgJpXjM");
+    assert_eq!(tracks[3].album, "MUSIC");
+    assert_eq!(tracks[3].duration_seconds, 152.0);
+
+    let (endpoint, body) = client.last();
+    assert_eq!(endpoint, "browse");
+    assert_eq!(body["browseId"], "FEmusic_history");
+}
+
+// ---------------------------------------------------------------------------
+// home
+// ---------------------------------------------------------------------------
+
+#[test]
+fn home_returns_mixed_sections() {
+    let client = FakePost::new(fixture("home.json"));
+    let sections = block_on(get_home(&client)).expect("home ok");
+
+    // Ground truth (api.py over home.json): 2 carousels — a song carousel
+    // (3 Tracks) and a recap-playlist carousel (3 PlaylistInfos).
+    assert_eq!(sections.len(), 2);
+
+    // Section 0: "Listen again" — three song cards → Track items.
+    assert_eq!(sections[0].title, "Listen again");
+    assert_eq!(sections[0].items.len(), 3);
+    let HomeSectionItem::Track(t0) = &sections[0].items[0] else {
+        panic!("expected a Track");
+    };
+    assert_eq!(t0.video_id, "wzKviWpfgS0");
+    assert_eq!(t0.title, "まずはイメージ - Mazu Wa Image");
+    assert_eq!(t0.artist, "Yuki Chiba");
+    let HomeSectionItem::Track(t1) = &sections[0].items[1] else {
+        panic!("expected a Track");
+    };
+    assert_eq!(t1.video_id, "NBHr-EnB4oU");
+    assert_eq!(t1.artist, "farmhouse, Kee Rooz, RhymeTube");
+    let HomeSectionItem::Track(t2) = &sections[0].items[2] else {
+        panic!("expected a Track");
+    };
+    assert_eq!(t2.video_id, "pagEova9QDU");
+
+    // Section 1: "Recaps" — three playlist cards → PlaylistInfo items.
+    assert_eq!(sections[1].title, "Recaps");
+    assert_eq!(sections[1].items.len(), 3);
+    let HomeSectionItem::Playlist(p0) = &sections[1].items[0] else {
+        panic!("expected a PlaylistInfo");
+    };
+    assert_eq!(p0.playlist_id, "LRSRX_C6NActwVAgHdqS087Aj05fk-3ErGguA");
+    assert_eq!(p0.title, "March-May Recap '26");
+    let HomeSectionItem::Playlist(p2) = &sections[1].items[2] else {
+        panic!("expected a PlaylistInfo");
+    };
+    assert_eq!(p2.title, "2025 Recap");
+
+    let (endpoint, body) = client.last();
+    assert_eq!(endpoint, "browse");
+    assert_eq!(body["browseId"], "FEmusic_home");
+}
+
+// ---------------------------------------------------------------------------
+// radio (next, radio=True)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn radio_returns_seeded_queue() {
+    let client = FakePost::new(fixture("watch_radio.json"));
+    let tracks = block_on(get_radio(&client, "dQw4w9WgXcQ", 50)).expect("radio ok");
+
+    // Ground truth (api.py over watch_radio.json): the seed track first, then
+    // the radio continuation. Watch items use `length` + singular `thumbnail`.
+    assert_eq!(tracks.len(), 3);
+    assert_eq!(tracks[0].video_id, "dQw4w9WgXcQ");
+    assert_eq!(tracks[0].title, "Never Gonna Give You Up (7'' Mix)");
+    assert_eq!(tracks[0].artist, "Rick Astley");
+    assert_eq!(tracks[0].album, "");
+    assert_eq!(tracks[0].duration_seconds, 214.0);
+
+    assert_eq!(tracks[1].video_id, "rZlQ28OeGMI");
+    assert_eq!(tracks[1].artist, "Rick Astley");
+    assert_eq!(tracks[1].duration_seconds, 195.0);
+
+    assert_eq!(tracks[2].video_id, "9SJG2LKGspI");
+    assert_eq!(tracks[2].artist, "Test Uploader D");
+    assert_eq!(tracks[2].duration_seconds, 150.0);
+
+    // The radio flow posts `next` with the seed videoId, derived playlistId, and
+    // the "wAEB" radio params.
+    let (endpoint, body) = client.last();
+    assert_eq!(endpoint, "next");
+    assert_eq!(body["videoId"], "dQw4w9WgXcQ");
+    assert_eq!(body["playlistId"], "RDAMVMdQw4w9WgXcQ");
+    assert_eq!(body["params"], "wAEB");
+}
+
+#[test]
+fn radio_respects_limit() {
+    let client = FakePost::new(fixture("watch_radio.json"));
+    let tracks = block_on(get_radio(&client, "dQw4w9WgXcQ", 2)).expect("radio ok");
+    assert_eq!(tracks.len(), 2, "limit caps the radio queue");
+}
+
+// ---------------------------------------------------------------------------
 // album
 // ---------------------------------------------------------------------------
 
@@ -319,4 +638,73 @@ fn artist_strips_mpla_prefix_in_request() {
     // ...but the request id has MPLA stripped.
     let (_, body) = client.last();
     assert_eq!(body["browseId"], "UC_test");
+}
+
+// ---------------------------------------------------------------------------
+// lyrics (two-call: next → browse)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lyrics_returns_text_via_two_calls() {
+    // First the watch panel (`next`) supplies the lyrics browse id; then the
+    // lyrics `browse` supplies the text.
+    let client = MapPost::new(&[
+        ("next", fixture("lyrics_watch.json")),
+        ("browse", fixture("lyrics_browse.json")),
+    ]);
+    let lyrics = block_on(get_lyrics(&client, "bSnlKl_PoQU")).expect("lyrics ok");
+
+    let lyrics = lyrics.expect("Bohemian Rhapsody has lyrics");
+    // Ground truth (api.py over the same fixtures): 1905 chars, known opener.
+    assert_eq!(lyrics.chars().count(), 1905);
+    assert!(
+        lyrics.starts_with("Is this the real life? Is this just fantasy?"),
+        "unexpected opener: {:?}",
+        &lyrics[..lyrics
+            .char_indices()
+            .nth(45)
+            .map_or(lyrics.len(), |(i, _)| i)]
+    );
+
+    // The flow posts `next` (with the lyrics browse id discovered there) then a
+    // `browse` for that id.
+    let calls = client.calls();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].0, "next");
+    assert_eq!(calls[0].1["videoId"], "bSnlKl_PoQU");
+    assert_eq!(calls[1].0, "browse");
+    assert!(
+        calls[1].1["browseId"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("MPLY")),
+        "second call should browse the lyrics id, got {:?}",
+        calls[1].1["browseId"]
+    );
+}
+
+#[test]
+fn lyrics_absent_is_none_not_error() {
+    // A watch panel whose only tab is the non-lyrics "Up next" tab: the flow must
+    // return Ok(None) — absence is a value — and must NOT make a second request.
+    let watch = serde_json::json!({
+        "contents": { "singleColumnMusicWatchNextResultsRenderer": { "tabbedRenderer": {
+            "watchNextTabbedResultsRenderer": { "tabs": [
+                { "tabRenderer": {
+                    "title": "Up next",
+                    "endpoint": { "browseEndpoint": {
+                        "browseId": "FEmusic_whatever",
+                        "browseEndpointContextSupportedConfigs": {
+                            "browseEndpointContextMusicConfig": {
+                                "pageType": "MUSIC_PAGE_TYPE_TRACK_RELATED" } } } }
+                } }
+            ] } } } }
+    });
+    let client = MapPost::new(&[("next", watch)]);
+    let lyrics = block_on(get_lyrics(&client, "novid")).expect("no-lyrics is not an error");
+    assert_eq!(lyrics, None, "missing lyrics tab → None");
+
+    // Only the watch request was made (no browse for a non-existent lyrics id).
+    let calls = client.calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, "next");
 }
