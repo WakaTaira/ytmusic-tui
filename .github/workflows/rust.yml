@@ -30,8 +30,8 @@ jobs:
         with:
           workspaces: rust
 
-      - name: Install libmpv (required for later milestones with FFI)
-        run: sudo apt-get update && sudo apt-get install -y libmpv2
+      - name: Install libmpv (dev package — the linker needs the unversioned libmpv.so)
+        run: sudo apt-get update && sudo apt-get install -y libmpv-dev
 
       - name: Check formatting
         run: cargo fmt --all --check
