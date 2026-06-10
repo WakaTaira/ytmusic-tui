@@ -60,7 +60,8 @@ class Player:
         self.on_track_end: Callable[[], None] | None = None
         self.on_track_error: Callable[[str], None] | None = None
 
-        # Register end-of-file observer for queue integration
+        # Register end-of-file observer for queue integration.
+        # python-mpv's event_callback decorator is untyped.
         @self._mpv.event_callback("end-file")  # type: ignore[untyped-decorator]
         def _on_end_file(event: mpv.MpvEvent) -> None:
             self._handle_end_file(event)

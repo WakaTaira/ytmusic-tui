@@ -137,6 +137,8 @@ class PlayerBar(Static):
     _current_state: reactive[PlayerState] = reactive(PlayerState, init=False)
 
     def __init__(self, **kwargs: object) -> None:
+        # Static.__init__ has a typed signature; **kwargs: object is the
+        # loosest forwarding type, so the spread does not match.
         super().__init__(**kwargs)  # type: ignore[arg-type]
         # Ensures the MPRIS connection-lost warning is shown at most once per
         # session regardless of how many 1 Hz poll ticks fire.

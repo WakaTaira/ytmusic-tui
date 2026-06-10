@@ -688,6 +688,8 @@ class MusicAPI:
         a usable playlist ID (ytmusicapi returns an error dict instead of
         a string in that case).
         """
+        # ytmusicapi types `privacy_status` as a Literal; this wrapper
+        # accepts a plain str, so cast at the client boundary.
         result = self._client.create_playlist(
             title, description, privacy_status=cast("Any", privacy)
         )
