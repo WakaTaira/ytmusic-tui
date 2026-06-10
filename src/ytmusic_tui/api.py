@@ -261,19 +261,32 @@ class MusicAPI:
     """
 
     def __init__(self, auth_path: str | Path) -> None:
-        """Create an authenticated YTMusic client.
+        """Prepare an authenticated YTMusic client.
+
+        The underlying client is created lazily on first use: YTMusic()
+        raises at construction time for malformed auth files (e.g. a
+        browser.json without the `authorization` header is misdetected
+        as OAuth), and the app must still be able to start and show an
+        actionable error instead of crashing with a traceback.
 
         Args:
             auth_path: Path to the browser authentication JSON file.
         """
-        self._client = YTMusic(str(auth_path))
+        self._auth_path = str(auth_path)
+        self._client_instance: YTMusic | None = None
+
+    @property
+    def _client(self) -> YTMusic:
+        if self._client_instance is None:
+            self._client_instance = YTMusic(self._auth_path)
+        return self._client_instance
 
     # ------------------------------------------------------------------
     # Session
     # ------------------------------------------------------------------
 
     def is_session_valid(self) -> bool:
-        """Best-effort check that the cookies still carry a signed-in session.
+        """Best-effort check that the auth file carries a signed-in session.
 
         When browser cookies go stale, YouTube serves logged-out pages
         with HTTP 200 instead of raising auth errors: library endpoints
@@ -281,7 +294,12 @@ class MusicAPI:
         canary because it only parses for a signed-in session.
         """
         try:
-            self._client.get_account_info()
+            client = self._client
+        except Exception:
+            # The auth file is unusable (e.g. misdetected as OAuth).
+            return False
+        try:
+            client.get_account_info()
         except (KeyError, TypeError):
             # Signed-out responses lack the account header structure.
             return False

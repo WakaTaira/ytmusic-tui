@@ -87,8 +87,30 @@ class TestClassifyApiError:
 class TestValidateAuthFile:
     def test_valid_file(self, tmp_path: Path) -> None:
         auth_file = tmp_path / "browser.json"
-        auth_file.write_text(json.dumps({"cookie": "abc"}))
+        auth_file.write_text(json.dumps({"cookie": "abc", "authorization": "SAPISIDHASH x"}))
         assert validate_auth_file(auth_file) is None
+
+    def test_capitalized_headers_are_valid(self, tmp_path: Path) -> None:
+        auth_file = tmp_path / "browser.json"
+        auth_file.write_text(json.dumps({"Cookie": "abc", "Authorization": "SAPISIDHASH x"}))
+        assert validate_auth_file(auth_file) is None
+
+    def test_missing_authorization_header(self, tmp_path: Path) -> None:
+        """Telemetry requests (/api/stats/...) lack the authorization
+        header; ytmusicapi then misdetects the file as OAuth."""
+        auth_file = tmp_path / "browser.json"
+        auth_file.write_text(json.dumps({"cookie": "abc"}))
+        result = validate_auth_file(auth_file)
+        assert result is not None
+        assert "authorization" in result
+        assert "browse" in result
+
+    def test_missing_cookie_header(self, tmp_path: Path) -> None:
+        auth_file = tmp_path / "browser.json"
+        auth_file.write_text(json.dumps({"authorization": "SAPISIDHASH x"}))
+        result = validate_auth_file(auth_file)
+        assert result is not None
+        assert "cookie" in result
 
     def test_missing_file(self, tmp_path: Path) -> None:
         result = validate_auth_file(tmp_path / "missing.json")
@@ -142,7 +164,7 @@ class TestRunAuthSetup:
 
         def fake_setup(filepath: str, headers_raw: str) -> str:
             assert "SAPISID" in headers_raw
-            payload = json.dumps({"cookie": "SAPISID=abc"})
+            payload = json.dumps({"cookie": "SAPISID=abc", "authorization": "SAPISIDHASH x"})
             target.write_text(payload)
             return payload
 
@@ -205,7 +227,7 @@ class TestRunAuthSetup:
         target = tmp_path / "nested" / "dir" / "browser.json"
 
         def fake_setup(filepath: str, headers_raw: str) -> str:
-            payload = json.dumps({"cookie": "x"})
+            payload = json.dumps({"cookie": "x", "authorization": "SAPISIDHASH x"})
             target.write_text(payload)
             return payload
 
@@ -214,3 +236,27 @@ class TestRunAuthSetup:
 
         assert code == 0
         assert target.parent.is_dir()
+
+    def test_bad_result_restores_previous_credentials(self, tmp_path) -> None:
+        """A paste without the authorization header (e.g. a telemetry
+        request) must not destroy working credentials."""
+        import io
+        import json
+        from unittest.mock import patch
+
+        from ytmusic_tui.auth import run_auth_setup
+
+        target = tmp_path / "browser.json"
+        original = json.dumps({"cookie": "good", "authorization": "SAPISIDHASH good"})
+        target.write_text(original)
+
+        def fake_setup(filepath: str, headers_raw: str) -> str:
+            bad = json.dumps({"cookie": "new-but-incomplete"})
+            target.write_text(bad)
+            return bad
+
+        with patch("ytmusicapi.setup", side_effect=fake_setup):
+            code = run_auth_setup(target, input_stream=io.StringIO(self._headers()))
+
+        assert code == 1
+        assert target.read_text() == original

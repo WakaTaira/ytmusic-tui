@@ -212,18 +212,44 @@ class TestSessionValidity:
 
         assert MusicAPI("/fake/path").is_session_valid() is True
 
+    @patch("ytmusic_tui.api.YTMusic")
+    def test_unusable_auth_file_is_invalid(self, mock_ytmusic_cls: MagicMock) -> None:
+        """YTMusic() itself raising (e.g. OAuth misdetection) means the
+        session cannot possibly be valid."""
+        mock_ytmusic_cls.side_effect = Exception("oauth JSON provided via auth argument")
+
+        assert MusicAPI("/fake/path").is_session_valid() is False
+
+    @patch("ytmusic_tui.api.YTMusic")
+    def test_construction_never_raises(self, mock_ytmusic_cls: MagicMock) -> None:
+        """MusicAPI() must not raise even for unusable auth files; the
+        error surfaces on first use inside classified worker paths."""
+        mock_ytmusic_cls.side_effect = Exception("oauth JSON provided via auth argument")
+
+        api = MusicAPI("/fake/path")  # must not raise
+
+        import pytest as _pytest
+
+        with _pytest.raises(Exception, match="oauth JSON"):
+            api.search("query")
+
 
 class TestMusicAPIInit:
     """Test client construction."""
 
     @patch("ytmusic_tui.api.YTMusic")
-    def test_creates_client_with_auth_path(self, mock_ytmusic_cls: MagicMock) -> None:
-        _api = MusicAPI("/fake/browser.json")
+    def test_client_created_lazily_with_auth_path(self, mock_ytmusic_cls: MagicMock) -> None:
+        api = MusicAPI("/fake/browser.json")
+        # Construction must not touch YTMusic: a malformed auth file
+        # would otherwise crash the app before it can show an error.
+        mock_ytmusic_cls.assert_not_called()
+        _ = api._client
         mock_ytmusic_cls.assert_called_once_with("/fake/browser.json")
 
     @patch("ytmusic_tui.api.YTMusic")
     def test_accepts_path_object(self, mock_ytmusic_cls: MagicMock) -> None:
-        _api = MusicAPI(Path("/fake/browser.json"))
+        api = MusicAPI(Path("/fake/browser.json"))
+        _ = api._client
         mock_ytmusic_cls.assert_called_once_with("/fake/browser.json")
 
 
