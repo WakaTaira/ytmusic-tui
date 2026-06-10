@@ -16,3 +16,19 @@ path = "src/lib.rs"
 
 [dependencies]
 rand = "0.9"
+
+# libmpv binding for the audio player (M2). 6.0.0 builds against system
+# libmpv >= 2.x and exposes the end-file reason as a discriminable value,
+# which is the non-negotiable selection criterion (see spikes/mpv_spike).
+# `default-features = false` drops the `render` (OpenGL) feature: the player
+# needs only audio playback + the event loop.
+libmpv2 = { version = "6.0.0", default-features = false }
+
+# Direct dependency on the -sys crate (pinned to the version libmpv2 6.0.0
+# uses) for the safe `mpv_error_str(code) -> &'static str` helper that turns a
+# raw mpv error int into a human-readable string. libmpv2 re-exports only types
+# from -sys, not this function, so a direct dep is required.
+libmpv2-sys = "4.0.1"
+
+# Typed error definitions for the player module.
+thiserror = "2"
