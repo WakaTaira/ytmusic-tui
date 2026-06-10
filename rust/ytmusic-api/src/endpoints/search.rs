@@ -9,8 +9,9 @@
 use serde_json::{Map, Value, json};
 
 use super::songruns::parse_song_runs;
+use super::stage1::{flex_runs, item_text};
 use crate::nav::{
-    MRLIR, NAVIGATION_BROWSE_ID, PLAY_BUTTON_VIDEO_ID, Step, THUMBNAILS, nav, nav_array, nav_str,
+    MRLIR, NAVIGATION_BROWSE_ID, PLAY_BUTTON_VIDEO_ID, Step, THUMBNAILS, nav, nav_str,
 };
 
 /// Walk a raw `search` InnerTube response into a flat list of ytmusicapi-shaped
@@ -257,29 +258,6 @@ fn insert_thumbnails(data: &Value, out: &mut Map<String, Value>) {
     if let Some(thumbs) = nav(data, THUMBNAILS) {
         out.insert("thumbnails".to_owned(), thumbs.clone());
     }
-}
-
-/// `get_item_text(item, index, run_index)` — the text of run `run_index` in
-/// flex column `index`.
-fn item_text(data: &Value, index: usize, run_index: usize) -> Option<&str> {
-    flex_runs(data, index)?
-        .get(run_index)?
-        .get("text")?
-        .as_str()
-}
-
-/// The runs array of flex column `index`, mirroring `get_flex_column_item`.
-fn flex_runs(data: &Value, index: usize) -> Option<&Vec<Value>> {
-    nav_array(
-        data,
-        &[
-            Step::Key("flexColumns"),
-            Step::Index(index),
-            Step::Key("musicResponsiveListItemFlexColumnRenderer"),
-            Step::Key("text"),
-            Step::Key("runs"),
-        ],
-    )
 }
 
 /// `[*PLAY_BUTTON, "playNavigationEndpoint", *NAVIGATION_VIDEO_TYPE]` — the

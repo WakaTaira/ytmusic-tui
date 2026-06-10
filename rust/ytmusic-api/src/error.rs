@@ -75,4 +75,14 @@ pub enum ApiError {
     /// succeeded (HTTP 200) but the JSON did not carry the expected structure.
     #[error("failed to parse response: {0}")]
     Parse(String),
+
+    /// A mutation request completed (HTTP 200) but the service rejected it
+    /// logically — no `playlistId` returned, `status` was not
+    /// `STATUS_SUCCEEDED`, or the removal target was absent.
+    ///
+    /// Mirrors `api.py`'s `MutationFailedError`: the variant carries the
+    /// verbatim user-facing string already suitable for display in a toast.
+    /// `classify_api_error` surfaces it unchanged.
+    #[error("{0}")]
+    MutationFailed(String),
 }

@@ -368,3 +368,171 @@ async fn get_lyrics_against_real_api() {
         .expect("no-lyrics is not an error");
     eprintln!("lyrics[dQw4w9WgXcQ]: present = {}", none.is_some());
 }
+
+// ---------------------------------------------------------------------------
+// M3d-3 mutation smoke tests against the live API.
+//
+// Protocol:
+//  (a) get_like_status — read-only, no state change.
+//  (b) rate_track — read current status first, then set the SAME value.
+//  (c) Full playlist lifecycle in ONE test: create → add → remove → delete.
+//      The account is left clean after the test.
+//
+// These never print cookie material.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "hits the live YouTube Music API; requires real browser.json"]
+async fn get_like_status_against_real_api() {
+    let client = live_client();
+    // "Never Gonna Give You Up" — a stable public videoId.
+    // The status may be any of LIKE / INDIFFERENT / DISLIKE (or None).
+    let status = client
+        .get_like_status("dQw4w9WgXcQ")
+        .await
+        .expect("get_like_status succeeds");
+    eprintln!("like_status[dQw4w9WgXcQ]: {status:?}");
+    // The value is optional but the call must succeed.
+    match &status {
+        Some(s) => assert!(
+            matches!(s.as_str(), "LIKE" | "INDIFFERENT" | "DISLIKE"),
+            "unexpected likeStatus value: {s:?}"
+        ),
+        None => eprintln!("  (status not available — watch panel did not return it)"),
+    }
+}
+
+#[tokio::test]
+#[ignore = "hits the live YouTube Music API; requires real browser.json"]
+async fn rate_track_idempotent_against_real_api() {
+    let client = live_client();
+    let video_id = "dQw4w9WgXcQ";
+
+    // Step 1: read current status.
+    let current = client
+        .get_like_status(video_id)
+        .await
+        .expect("get_like_status succeeds");
+    eprintln!("rate_track: current likeStatus = {current:?}");
+
+    // Step 2: set the same status (idempotent — no observable state change).
+    // If status is None, default to INDIFFERENT (safest no-op).
+    let status_to_set = current.as_deref().unwrap_or("INDIFFERENT");
+    client
+        .rate_track(video_id, status_to_set)
+        .await
+        .expect("rate_track succeeds");
+    eprintln!("rate_track: set status={status_to_set:?} on {video_id} (idempotent)");
+
+    // Step 3: confirm the status is still the same.
+    let after = client
+        .get_like_status(video_id)
+        .await
+        .expect("get_like_status after rate_track succeeds");
+    eprintln!("rate_track: after likeStatus = {after:?}");
+    assert_eq!(
+        after.as_deref(),
+        Some(status_to_set),
+        "status changed unexpectedly after idempotent set"
+    );
+}
+
+#[tokio::test]
+#[ignore = "hits the live YouTube Music API; requires real browser.json; MUTATES then restores account state"]
+async fn playlist_lifecycle_against_real_api() {
+    // Use the audio-native track (lYBUbBu4W08), NOT the music video (dQw4w9WgXcQ).
+    // YouTube Music silently substitutes music-video IDs with their audio
+    // counterpart when adding to a playlist, so the videoId that appears in
+    // `get_playlist_tracks` will be lYBUbBu4W08 regardless of which one was
+    // requested.  Using the audio track directly keeps the poll and remove logic
+    // straightforward — the same videoId that was added is the one visible in
+    // the playlist and the one remove_playlist_items searches for.
+    const TEST_VIDEO_ID: &str = "lYBUbBu4W08"; // Rick Astley — Never Gonna Give You Up (audio)
+
+    let client = live_client();
+
+    // --- Step 1: create a temporary playlist. ---
+    let title = "rust-spike-tmp-M3d3-lifecycle";
+    let playlist_id = client
+        .create_playlist(title, "Temporary test playlist — safe to delete", "PRIVATE")
+        .await
+        .expect("create_playlist succeeds");
+    assert!(
+        !playlist_id.is_empty(),
+        "create_playlist returned empty playlistId"
+    );
+    eprintln!("playlist_lifecycle: created playlist {playlist_id:?}");
+
+    // Run add → poll → remove in a block so we can always delete afterwards.
+    // YouTube Music's eventual consistency means add_playlist_items succeeds
+    // before the track is visible to get_playlist_tracks; poll until it appears.
+    let video_ids = vec![TEST_VIDEO_ID.to_owned()];
+    let middle_result: Result<(), String> = async {
+        // --- Step 2: add one item. ---
+        client
+            .add_playlist_items(&playlist_id, &video_ids)
+            .await
+            .map_err(|e| format!("add_playlist_items failed: {e}"))?;
+        eprintln!("playlist_lifecycle: added {TEST_VIDEO_ID} to {playlist_id}");
+
+        // --- Step 2b: poll until the added track is visible. ---
+        // YouTube Music has multi-second eventual consistency on newly-created
+        // playlists: the track may not appear immediately after add_playlist_items
+        // reports success. Poll with a generous budget.
+        const MAX_ATTEMPTS: u32 = 10;
+        const POLL_SLEEP_SECS: u64 = 3;
+        let mut appeared = false;
+        for attempt in 1..=MAX_ATTEMPTS {
+            tokio::time::sleep(tokio::time::Duration::from_secs(POLL_SLEEP_SECS)).await;
+            let tracks = client
+                .get_playlist_tracks(&playlist_id)
+                .await
+                .map_err(|e| format!("get_playlist_tracks (poll attempt {attempt}) failed: {e}"))?;
+            if tracks.iter().any(|t| t.video_id == TEST_VIDEO_ID) {
+                eprintln!(
+                    "playlist_lifecycle: track appeared after attempt {attempt} / {MAX_ATTEMPTS}"
+                );
+                appeared = true;
+                break;
+            }
+            eprintln!(
+                "playlist_lifecycle: track not yet visible, {} tracks returned \
+                 (attempt {attempt}/{MAX_ATTEMPTS}), waiting {POLL_SLEEP_SECS}s …",
+                tracks.len()
+            );
+        }
+        if !appeared {
+            return Err(format!(
+                "added track {TEST_VIDEO_ID} never appeared in playlist {playlist_id} \
+                 after {MAX_ATTEMPTS} attempts ({} s total)",
+                MAX_ATTEMPTS * POLL_SLEEP_SECS as u32
+            ));
+        }
+
+        // --- Step 3: remove the item. ---
+        client
+            .remove_playlist_items(&playlist_id, &video_ids)
+            .await
+            .map_err(|e| format!("remove_playlist_items failed: {e}"))?;
+        eprintln!("playlist_lifecycle: removed {TEST_VIDEO_ID} from {playlist_id}");
+
+        Ok(())
+    }
+    .await;
+
+    // --- Step 4: ALWAYS delete the playlist (leave account clean). ---
+    let delete_result = client.delete_playlist(&playlist_id).await;
+    match &delete_result {
+        Ok(()) => eprintln!("playlist_lifecycle: deleted {playlist_id}"),
+        Err(e) => {
+            eprintln!("playlist_lifecycle: WARNING — delete_playlist({playlist_id}) failed: {e}")
+        }
+    }
+
+    // Now surface any failure from the middle steps.
+    if let Err(msg) = middle_result {
+        panic!("playlist_lifecycle failed (playlist {playlist_id} was still deleted): {msg}");
+    }
+    delete_result.expect("delete_playlist succeeds");
+    eprintln!("playlist_lifecycle: account left clean — test complete");
+}

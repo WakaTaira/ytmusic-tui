@@ -17,7 +17,7 @@
 use serde_json::{Value, json};
 
 use super::songruns::parse_song_runs;
-use super::stage1::item_text;
+use super::stage1::{item_text, leading_count};
 use crate::models::{AlbumInfo, ArtistInfo, PlaylistInfo};
 use crate::nav::{
     MRLIR, MTRIR, NAVIGATION_BROWSE_ID, Step, THUMBNAIL_RENDERER, THUMBNAILS, nav, nav_array,
@@ -200,19 +200,6 @@ fn library_first_section(response: &Value) -> Option<&Value> {
         }
     }
     sections.first()
-}
-
-/// The leading run of a `"<n> tracks"` / `"<n> songs"` token, mirroring
-/// ytmusicapi's `re.search(r"\d+ ", ...)` guard followed by `.split(" ")[0]`.
-fn leading_count(text: &str) -> Option<&str> {
-    let first = text.split(' ').next()?;
-    if !first.is_empty() && first.bytes().all(|b| b.is_ascii_digit()) {
-        // Require a following space (the `\d+ ` pattern).
-        if text.len() > first.len() {
-            return Some(first);
-        }
-    }
-    None
 }
 
 /// `title.runs[0].navigationEndpoint.browseEndpoint.browseId` — the card's

@@ -69,8 +69,17 @@ fn parse_watch_item(result: &Value) -> Option<Value> {
 ///
 /// `videoId`/`title`/`length`/`thumbnail` direct; `artists`/`album` from
 /// `parse_song_runs(longBylineText.runs)` (no `skip_type_spec`, matching
-/// ytmusicapi). `likeStatus`, `videoType`, and the menu-derived fields are
-/// dropped — stage 2 never reads them.
+/// ytmusicapi). `likeStatus` is now threaded through so `get_like_status` can
+/// read it; `videoType` and the non-`likeStatus` menu fields are still dropped
+/// (stage 2 never reads them).
+///
+/// The `likeStatus` logic mirrors `parsers/watch.py::parse_watch_track`:
+/// walk `MENU_ITEMS` looking for a `toggleMenuServiceItemRenderer` whose
+/// `defaultServiceEndpoint` carries a `likeEndpoint`; the status field of
+/// that endpoint is the *switch-to* status (the current status is the
+/// opposite — `parse_like_status` applies `["LIKE","INDIFFERENT"][idx - 1]`
+/// so LIKE → INDIFFERENT and INDIFFERENT → LIKE, treating DISLIKE as
+/// INDIFFERENT per the ytmusicapi note about ambiguous data on this endpoint).
 fn parse_watch_track(data: &Value) -> Value {
     let mut out = Map::new();
 
@@ -96,6 +105,17 @@ fn parse_watch_track(data: &Value) -> Value {
     if let Some(thumbs) = nav(data, &[Step::Key("thumbnail"), Step::Key("thumbnails")]) {
         out.insert("thumbnail".to_owned(), thumbs.clone());
     }
+
+    // likeStatus: scan menu items for a toggleMenuServiceItemRenderer with a
+    // likeEndpoint.  `parse_like_status(service)` = ["LIKE","INDIFFERENT"]
+    // [index - 1], flipping the switch-to status to the current status.
+    // The spec says INDIFFERENT may also encode DISLIKE; we surface it as-is.
+    if let Some(status) = parse_like_status_from_menu(data) {
+        out.insert("likeStatus".to_owned(), Value::String(status));
+    } else {
+        out.insert("likeStatus".to_owned(), Value::Null);
+    }
+
     // artists / album / (year) from the byline runs.
     if let Some(runs) = nav_array(data, &[Step::Key("longBylineText"), Step::Key("runs")]) {
         let parsed = parse_song_runs(runs, false);
@@ -108,6 +128,53 @@ fn parse_watch_track(data: &Value) -> Value {
 
     Value::Object(out)
 }
+
+/// Walk `MENU_ITEMS` for a `toggleMenuServiceItemRenderer` whose
+/// `defaultServiceEndpoint.likeEndpoint.status` exists, then invert via
+/// `parse_like_status` → `["LIKE", "INDIFFERENT"][idx - 1]`.
+///
+/// Mirrors ytmusicapi `parsers/watch.py`: iterates ALL menu items and skips
+/// any that are not a like-toggle (e.g. "Play next", "Add to queue" appear
+/// first in real watch responses). Returns `None` when no matching item is
+/// found (empty menu, or no likeEndpoint in any toggle).
+fn parse_like_status_from_menu(data: &Value) -> Option<String> {
+    let items = nav_array(data, MENU_ITEMS)?;
+    for item in items {
+        // Skip items that are not a toggleMenuServiceItemRenderer (e.g.
+        // menuNavigationItemRenderer for "Play next", "Add to queue", etc.).
+        let Some(toggle) = item.get("toggleMenuServiceItemRenderer") else {
+            continue;
+        };
+        // Skip toggle items whose defaultServiceEndpoint lacks a likeEndpoint
+        // (e.g. a subscribe-toggle or a save-to-library toggle).
+        let Some(service) = toggle.get("defaultServiceEndpoint") else {
+            continue;
+        };
+        let Some(like_ep) = service.get("likeEndpoint") else {
+            continue;
+        };
+        let Some(switch_to) = like_ep.get("status").and_then(Value::as_str) else {
+            continue;
+        };
+        // `parse_like_status`: the status stored is the *target* after clicking;
+        // the current status is the one that would switch to it.
+        // ["LIKE", "INDIFFERENT"][index("LIKE","INDIFFERENT").index(switch_to) - 1]
+        let statuses = ["LIKE", "INDIFFERENT"];
+        if let Some(idx) = statuses.iter().position(|&s| s == switch_to) {
+            // Python: `status[status.index(service[...]) - 1]`
+            let current_idx = (idx + statuses.len() - 1) % statuses.len();
+            return Some(statuses[current_idx].to_owned());
+        }
+    }
+    None
+}
+
+/// `menu.menuRenderer.items` path.
+const MENU_ITEMS: &[Step] = &[
+    Step::Key("menu"),
+    Step::Key("menuRenderer"),
+    Step::Key("items"),
+];
 
 /// `playlistPanelVideoRenderer`.
 const PPVR: &str = "playlistPanelVideoRenderer";
