@@ -5,3 +5,4 @@ pub mod layout;
 pub mod navigation;
 pub mod player;
 pub mod queue;
+pub mod views;

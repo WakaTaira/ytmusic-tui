@@ -80,6 +80,10 @@ pub enum AppCommand {
     SetVolume(i64),
     /// Adjust the volume by a relative delta.
     AdjustVolume(i64),
+    /// Validate the auth session (the "logged-out HTTP 200" canary). Replies
+    /// with [`AppEvent::SessionInvalid`] only when the session is *not* valid;
+    /// a valid session produces no event (the UI assumes valid by default).
+    CheckSession,
     /// Shut the runtime down cleanly; the command loop exits after this.
     Quit,
 }
@@ -104,6 +108,11 @@ pub enum AppEvent {
     TrackEnded,
     /// The current stream failed; the string is a short description.
     TrackError(String),
+    /// The auth session is invalid (YouTube served a logged-out page with HTTP
+    /// 200). The UI renders a one-line warning prompting `ytmusic-tui auth`.
+    /// Only emitted in response to [`AppCommand::CheckSession`] when the canary
+    /// fails — a valid session is silent.
+    SessionInvalid,
 }
 
 /// Handles for the spawned background threads, joined on shutdown.
@@ -256,6 +265,7 @@ fn run_runtime(
             match command {
                 AppCommand::Quit => break,
                 AppCommand::FetchHome => handle_fetch_home(client.as_ref(), events).await,
+                AppCommand::CheckSession => handle_check_session(client.as_ref(), events).await,
                 AppCommand::Play(video_id) => {
                     report_player_result(player.play(&video_id), events);
                 }
@@ -288,6 +298,22 @@ async fn handle_fetch_home(client: Option<&InnerTubeClient>, events: &StdSender<
         Err(err) => AppEvent::ApiError(ytmusic_api::classify_api_error(&err)),
     };
     let _ = events.send(event);
+}
+
+/// Run the session canary and emit [`AppEvent::SessionInvalid`] only on failure.
+///
+/// A missing client (auth not loaded) is treated as invalid, so the UI shows
+/// the same "sign in" prompt whether the auth file was absent or expired. A
+/// valid session is silent — the UI assumes validity unless told otherwise,
+/// matching `is_session_valid`'s "assume valid on transient error" contract.
+async fn handle_check_session(client: Option<&InnerTubeClient>, events: &StdSender<AppEvent>) {
+    let valid = match client {
+        Some(client) => client.is_session_valid().await,
+        None => false,
+    };
+    if !valid {
+        let _ = events.send(AppEvent::SessionInvalid);
+    }
 }
 
 /// Surface a failed player operation as an [`AppEvent::TrackError`] toast.
