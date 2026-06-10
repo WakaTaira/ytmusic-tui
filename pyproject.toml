@@ -21,7 +21,9 @@ dependencies = [
     "python-mpv>=1.0.7",
     "yt-dlp>=2024.0.0",
     "tomli>=2.0.0;python_version<'3.11'",
-    "dbus-next>=0.2.3;sys_platform=='linux'",
+    # MPRIS2 support. Pinned to 5.x because mpris.py vendors a fixed copy
+    # of the 5.x _MessageWriter.write_callback (EAGAIN tolerance).
+    "dbus-fast>=5.0,<6;sys_platform=='linux'",
 ]
 
 [project.scripts]
@@ -61,6 +63,11 @@ select = [
     "RUF",  # ruff-specific rules
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# D-Bus interfaces declare their wire signatures ("s", "b", "a{sv}", ...)
+# as return annotations; pyflakes sees them as undefined forward references.
+"src/ytmusic_tui/mpris.py" = ["F821", "F722"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["ytmusic_tui"]
 
@@ -75,3 +82,9 @@ python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+# D-Bus interfaces declare wire signatures ("s", "b", "a{sv}", ...) as
+# return annotations; they are a runtime DSL, not Python types.
+module = "ytmusic_tui.mpris"
+disable_error_code = ["name-defined", "valid-type"]

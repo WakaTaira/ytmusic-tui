@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -34,6 +34,9 @@ from ytmusic_tui.views.playlist import PlaylistView
 from ytmusic_tui.views.popup import ActionKind, ActionPopup, PlaylistPickerPopup, ThemePopup
 from ytmusic_tui.views.queue import QueueView
 from ytmusic_tui.views.search import SearchView
+
+if TYPE_CHECKING:
+    from ytmusic_tui.mpris import MprisService
 
 # Default browser auth JSON path (used when no config loaded)
 _DEFAULT_AUTH_PATH = Path.home() / ".config" / "ytmusic-tui" / "browser.json"
@@ -126,7 +129,7 @@ class YtMusicTui(App):
 
         self.player.set_volume(self.config.player.volume)
 
-        self._mpris = None
+        self._mpris: MprisService | None = None
 
     # -----------------------------------------------------------------
     # Keymap
@@ -149,7 +152,9 @@ class YtMusicTui(App):
             old = new_bindings[idx]
             if old.key != key:
                 new_bindings[idx] = Binding(
-                    key, old.action, old.description,
+                    key,
+                    old.action,
+                    old.description,
                     show=old.show,
                     key_display=old.key_display if old.key_display else None,
                 )
@@ -157,7 +162,9 @@ class YtMusicTui(App):
         self._bindings.key_to_bindings.clear()
         for binding in new_bindings:
             self._bindings.bind(
-                binding.key, binding.action, binding.description,
+                binding.key,
+                binding.action,
+                binding.description,
                 show=binding.show,
                 key_display=binding.key_display if binding.key_display else "",
             )
@@ -210,12 +217,15 @@ class YtMusicTui(App):
 
         try:
             from ytmusic_tui.mpris import MprisService
+
             self._mpris = MprisService()
+            # MPRIS callbacks fire on the D-Bus event loop thread, so they
+            # must re-enter the Textual app via call_from_thread.
             self._mpris.start(
-                on_play_pause=self.action_toggle_pause,
-                on_next=self.action_next_track,
-                on_previous=self.action_previous_track,
-                on_stop=lambda: self.player.stop(),
+                on_play_pause=lambda: self.call_from_thread(self.action_toggle_pause),
+                on_next=lambda: self.call_from_thread(self.action_next_track),
+                on_previous=lambda: self.call_from_thread(self.action_previous_track),
+                on_stop=lambda: self.call_from_thread(self.player.stop),
             )
         except Exception:
             self._mpris = None
@@ -301,9 +311,14 @@ class YtMusicTui(App):
         switcher = self.query_one(ContentSwitcher)
         current_id = switcher.current
         view_map: dict[str, type] = {
-            "home": HomeView, "search": SearchView, "library": LibraryView,
-            "playlist": PlaylistView, "queue": QueueView,
-            "album": AlbumView, "artist": ArtistView, "lyrics": LyricsView,
+            "home": HomeView,
+            "search": SearchView,
+            "library": LibraryView,
+            "playlist": PlaylistView,
+            "queue": QueueView,
+            "album": AlbumView,
+            "artist": ArtistView,
+            "lyrics": LyricsView,
         }
         view_cls = view_map.get(current_id or "")
         if view_cls is None:
@@ -342,10 +357,12 @@ class YtMusicTui(App):
         current = self.queue_manager.current_track
         if current is None:
             return
-        self._navigate_to(PageState(
-            page_type="lyrics",
-            context={"video_id": current.video_id},
-        ))
+        self._navigate_to(
+            PageState(
+                page_type="lyrics",
+                context={"video_id": current.video_id},
+            )
+        )
 
     def action_open_album(self, browse_id: str) -> None:
         self._navigate_to(PageState(page_type="album", context={"browse_id": browse_id}))
@@ -424,9 +441,14 @@ class YtMusicTui(App):
         switcher = self.query_one(ContentSwitcher)
         current_id = switcher.current
         view_map: dict[str, type] = {
-            "home": HomeView, "search": SearchView, "library": LibraryView,
-            "playlist": PlaylistView, "queue": QueueView,
-            "album": AlbumView, "artist": ArtistView, "lyrics": LyricsView,
+            "home": HomeView,
+            "search": SearchView,
+            "library": LibraryView,
+            "playlist": PlaylistView,
+            "queue": QueueView,
+            "album": AlbumView,
+            "artist": ArtistView,
+            "lyrics": LyricsView,
         }
         view_cls = view_map.get(current_id or "")
         if view_cls is None:
@@ -474,6 +496,7 @@ class YtMusicTui(App):
 
     def _handle_play_all(self, item: object) -> None:
         from ytmusic_tui.api import AlbumInfo, PlaylistInfo
+
         if isinstance(item, PlaylistInfo):
             self._play_all_playlist(item.playlist_id)
         elif isinstance(item, AlbumInfo):
@@ -503,6 +526,7 @@ class YtMusicTui(App):
 
     def _handle_open(self, item: object) -> None:
         from ytmusic_tui.api import AlbumInfo, PlaylistInfo
+
         if isinstance(item, PlaylistInfo):
             self.action_switch_view("playlist")
             self.query_one(PlaylistView)._show_track_list(item)
@@ -531,7 +555,8 @@ class YtMusicTui(App):
         self.query_one(PlaylistPickerPopup).show(playlists, track)
 
     def on_playlist_picker_popup_playlist_chosen(
-        self, event: PlaylistPickerPopup.PlaylistChosen,
+        self,
+        event: PlaylistPickerPopup.PlaylistChosen,
     ) -> None:
         track = event.track
         if not isinstance(track, Track) or not track.video_id:
@@ -584,6 +609,7 @@ class YtMusicTui(App):
 
     def _reload_playlist_view(self, playlist_id: str) -> None:
         from ytmusic_tui.api import PlaylistInfo
+
         pv = self.query_one(PlaylistView)
         title = getattr(pv, "_current_playlist_title", "")
         pv._show_track_list(PlaylistInfo(playlist_id=playlist_id, title=title))
