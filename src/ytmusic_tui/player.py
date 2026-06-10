@@ -60,11 +60,26 @@ class Player:
 
         # Register end-of-file observer for queue integration
         @self._mpv.event_callback("end-file")  # type: ignore[untyped-decorator]
-        def _on_end_file(_event: mpv.MpvEvent) -> None:
-            if self.on_track_end is not None:
-                self.on_track_end()
+        def _on_end_file(event: mpv.MpvEvent) -> None:
+            self._handle_end_file(event)
 
         self._end_file_handler = _on_end_file
+
+    def _handle_end_file(self, event: mpv.MpvEvent) -> None:
+        """Fire on_track_end only when a track finished naturally.
+
+        mpv emits end-file for *every* reason a file stops, including
+        being replaced by a new loadfile (ABORTED) — reacting to those
+        would auto-advance the queue right after the user picks a track,
+        playing the wrong song. ERROR is also ignored on purpose: with a
+        broken stream resolver it would machine-gun through the queue.
+        """
+        data = getattr(event, "data", None)
+        reason = getattr(data, "reason", None)
+        if reason != mpv.MpvEventEndFile.EOF:
+            return
+        if self.on_track_end is not None:
+            self.on_track_end()
 
     # -- Playback control --------------------------------------------------
 

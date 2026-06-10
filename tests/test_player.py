@@ -157,3 +157,81 @@ class TestPlayer:
         player = Player()
         player.shutdown()
         mock_mpv.terminate.assert_called_once()
+
+
+class TestEndFileHandling:
+    """on_track_end must fire only on natural end-of-file (EOF).
+
+    mpv emits end-file for every stop reason; reacting to ABORTED
+    (loadfile replacement / stop command) auto-advanced the queue right
+    after the user picked a track, playing the wrong song.
+    """
+
+    @staticmethod
+    def _event(reason: int | None) -> MagicMock:
+        event = MagicMock()
+        event.data.reason = reason
+        return event
+
+    @patch("ytmusic_tui.player.mpv.MPV")
+    def test_eof_fires_track_end(self, mock_mpv_cls: MagicMock) -> None:
+        import mpv as mpv_mod
+
+        player = Player()
+        calls: list[str] = []
+        player.on_track_end = lambda: calls.append("end")
+
+        player._handle_end_file(self._event(mpv_mod.MpvEventEndFile.EOF))
+
+        assert calls == ["end"]
+        player.shutdown()
+
+    @patch("ytmusic_tui.player.mpv.MPV")
+    def test_aborted_does_not_fire(self, mock_mpv_cls: MagicMock) -> None:
+        import mpv as mpv_mod
+
+        player = Player()
+        calls: list[str] = []
+        player.on_track_end = lambda: calls.append("end")
+
+        player._handle_end_file(self._event(mpv_mod.MpvEventEndFile.ABORTED))
+        player._handle_end_file(self._event(mpv_mod.MpvEventEndFile.REDIRECT))
+        player._handle_end_file(self._event(mpv_mod.MpvEventEndFile.QUIT))
+
+        assert calls == []
+        player.shutdown()
+
+    @patch("ytmusic_tui.player.mpv.MPV")
+    def test_error_does_not_fire(self, mock_mpv_cls: MagicMock) -> None:
+        """A failing stream must not machine-gun through the queue."""
+        import mpv as mpv_mod
+
+        player = Player()
+        calls: list[str] = []
+        player.on_track_end = lambda: calls.append("end")
+
+        player._handle_end_file(self._event(mpv_mod.MpvEventEndFile.ERROR))
+
+        assert calls == []
+        player.shutdown()
+
+    @patch("ytmusic_tui.player.mpv.MPV")
+    def test_malformed_event_is_ignored(self, mock_mpv_cls: MagicMock) -> None:
+        player = Player()
+        calls: list[str] = []
+        player.on_track_end = lambda: calls.append("end")
+
+        player._handle_end_file(self._event(None))
+        player._handle_end_file(MagicMock(data=None))
+
+        assert calls == []
+        player.shutdown()
+
+    @patch("ytmusic_tui.player.mpv.MPV")
+    def test_eof_without_callback_is_noop(self, mock_mpv_cls: MagicMock) -> None:
+        import mpv as mpv_mod
+
+        player = Player()
+        player.on_track_end = None
+        player._handle_end_file(self._event(mpv_mod.MpvEventEndFile.EOF))
+        player.shutdown()
