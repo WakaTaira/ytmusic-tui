@@ -208,3 +208,111 @@ class TestPlaylistPickerPopup:
         assert popup._playlists == []
         assert popup._track is None
 
+# ---------------------------------------------------------------------------
+# User feedback for playlist operations (worker -> notify)
+# ---------------------------------------------------------------------------
+
+
+def _capture_notifications(app) -> list[tuple[str, str]]:
+    """Replace app.notify with a recorder; returns the capture list."""
+    captured: list[tuple[str, str]] = []
+
+    def _notify(message: str, *, severity: str = "information", **kwargs) -> None:
+        captured.append((message, severity))
+
+    app.notify = _notify
+    return captured
+
+
+class TestPlaylistOpsFeedback:
+    """Playlist mutations must give visible success/failure feedback
+    instead of silently swallowing errors."""
+
+    @pytest.mark.asyncio
+    async def test_add_to_existing_notifies_success(self) -> None:
+        app = make_app(
+            configure_api=lambda api: setattr(api.add_playlist_items, "return_value", True)
+        )
+        async with app.run_test(size=(120, 40)) as pilot:
+            captured = _capture_notifications(app)
+            app._add_to_existing_playlist("PL123", _make_track())
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+        assert ("Added to playlist", "information") in captured
+
+    @pytest.mark.asyncio
+    async def test_add_to_existing_notifies_failure(self) -> None:
+        app = make_app(
+            configure_api=lambda api: setattr(api.add_playlist_items, "return_value", False)
+        )
+        async with app.run_test(size=(120, 40)) as pilot:
+            captured = _capture_notifications(app)
+            app._add_to_existing_playlist("PL123", _make_track())
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+        assert ("Could not add to playlist", "error") in captured
+
+    @pytest.mark.asyncio
+    async def test_add_to_existing_classifies_auth_error(self) -> None:
+        def _configure(api) -> None:
+            api.add_playlist_items.side_effect = Exception("401 Unauthorized")
+
+        app = make_app(configure_api=_configure)
+        async with app.run_test(size=(120, 40)) as pilot:
+            captured = _capture_notifications(app)
+            app._add_to_existing_playlist("PL123", _make_track())
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+        assert any(
+            "Auth expired" in message and severity == "error"
+            for message, severity in captured
+        )
+
+    @pytest.mark.asyncio
+    async def test_create_and_add_notifies_success(self) -> None:
+        def _configure(api) -> None:
+            api.create_playlist.return_value = "PLnew"
+            api.add_playlist_items.return_value = True
+
+        app = make_app(configure_api=_configure)
+        async with app.run_test(size=(120, 40)) as pilot:
+            captured = _capture_notifications(app)
+            app._create_and_add(_make_track())
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+        assert ("Created playlist and added track", "information") in captured
+
+    @pytest.mark.asyncio
+    async def test_create_and_add_notifies_create_failure(self) -> None:
+        def _configure(api) -> None:
+            api.create_playlist.return_value = None
+
+        app = make_app(configure_api=_configure)
+        async with app.run_test(size=(120, 40)) as pilot:
+            captured = _capture_notifications(app)
+            app._create_and_add(_make_track())
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+        assert ("Could not create playlist", "error") in captured
+
+    @pytest.mark.asyncio
+    async def test_play_all_playlist_notifies_on_api_error(self) -> None:
+        def _configure(api) -> None:
+            api.get_playlist_tracks.side_effect = Exception("Connection refused")
+
+        app = make_app(configure_api=_configure)
+        async with app.run_test(size=(120, 40)) as pilot:
+            captured = _capture_notifications(app)
+            app._play_all_playlist("PL123")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+        assert any(
+            "Network error" in message and severity == "error"
+            for message, severity in captured
+        )

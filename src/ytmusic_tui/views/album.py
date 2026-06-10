@@ -8,6 +8,7 @@ from textual import work
 from textual.containers import Vertical
 from textual.widgets import DataTable, Label, Static
 
+from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.formatting import format_duration as _format_duration
 from ytmusic_tui.views.filter_bar import FilterBar
 
@@ -111,7 +112,7 @@ class AlbumView(Static):
             album: AlbumInfo = api.get_album(browse_id)
             self.app.call_from_thread(self._populate, album)
         except Exception as exc:
-            self.app.call_from_thread(self._set_status, f"Error: {exc}")
+            self.app.call_from_thread(self._set_status, classify_api_error(exc))
 
     def _populate(self, album: AlbumInfo) -> None:
         """Fill the view with album data."""

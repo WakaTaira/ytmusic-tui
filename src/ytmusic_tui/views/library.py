@@ -15,6 +15,7 @@ from textual import work
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Label, Static
 
+from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.formatting import format_duration as _format_duration
 from ytmusic_tui.layout import Orientation
 from ytmusic_tui.views.filter_bar import FilterBar
@@ -258,7 +259,7 @@ class LibraryView(Static):
             playlists: list[PlaylistInfo] = api.get_library_playlists()
             self.app.call_from_thread(self._populate_playlists, playlists)
         except Exception as exc:
-            self.app.call_from_thread(self._set_status, f"Error: {exc}")
+            self.app.call_from_thread(self._set_status, classify_api_error(exc))
 
     @work(thread=True)
     def _fetch_albums(self) -> None:
@@ -271,7 +272,7 @@ class LibraryView(Static):
             albums: list[AlbumInfo] = api.get_library_albums()
             self.app.call_from_thread(self._populate_albums, albums)
         except Exception as exc:
-            self.app.call_from_thread(self._set_status, f"Error: {exc}")
+            self.app.call_from_thread(self._set_status, classify_api_error(exc))
 
     @work(thread=True)
     def _fetch_artists(self) -> None:
@@ -284,7 +285,7 @@ class LibraryView(Static):
             artists: list[ArtistInfo] = api.get_library_artists()
             self.app.call_from_thread(self._populate_artists, artists)
         except Exception as exc:
-            self.app.call_from_thread(self._set_status, f"Error: {exc}")
+            self.app.call_from_thread(self._set_status, classify_api_error(exc))
 
     # ------------------------------------------------------------------
     # Population callbacks
@@ -367,7 +368,7 @@ class LibraryView(Static):
             tracks: list[Track] = api.get_playlist_tracks(playlist_id)
             self.app.call_from_thread(self._populate_tracks, tracks)
         except Exception as exc:
-            self.app.call_from_thread(self._set_status, f"Error: {exc}")
+            self.app.call_from_thread(self._set_status, classify_api_error(exc))
 
     def _populate_tracks(self, tracks: list[Track]) -> None:
         """Fill the playlists pane with track data."""

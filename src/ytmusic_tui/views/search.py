@@ -14,6 +14,7 @@ from textual import work
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Input, Label, Static
 
+from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.formatting import format_duration as _format_duration
 from ytmusic_tui.layout import Orientation
 from ytmusic_tui.views.filter_bar import FilterBar
@@ -251,7 +252,7 @@ class SearchView(Static):
             results: SearchResults = api.search_all(query, limit=20, filter=category)
             self.app.call_from_thread(self._populate_all_results, results)
         except Exception as exc:
-            self.app.call_from_thread(self._set_status, f"Error: {exc}")
+            self.app.call_from_thread(self._set_status, classify_api_error(exc))
 
     # -----------------------------------------------------------------
     # Status / populate

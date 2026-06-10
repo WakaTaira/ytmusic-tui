@@ -12,6 +12,8 @@ from textual import work
 from textual.containers import VerticalScroll
 from textual.widgets import Label, Static
 
+from ytmusic_tui.auth import classify_api_error
+
 if TYPE_CHECKING:
     from textual.app import ComposeResult
 
@@ -83,7 +85,7 @@ class LyricsView(Static):
             else:
                 self.app.call_from_thread(self._show_status, "No lyrics available")
         except Exception as exc:
-            self.app.call_from_thread(self._show_status, f"Error: {exc}")
+            self.app.call_from_thread(self._show_status, classify_api_error(exc))
 
     def _display_lyrics(self, text: str) -> None:
         self._show_status("")

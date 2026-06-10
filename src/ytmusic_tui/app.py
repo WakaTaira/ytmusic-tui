@@ -12,7 +12,7 @@ from textual.binding import Binding
 from textual.widgets import ContentSwitcher, Header
 
 from ytmusic_tui.api import MusicAPI
-from ytmusic_tui.auth import classify_api_error, is_auth_error, validate_auth_file
+from ytmusic_tui.auth import classify_api_error, validate_auth_file
 from ytmusic_tui.config import (
     THEMES,
     AppConfig,
@@ -385,8 +385,9 @@ class YtMusicTui(App):
                 if cid:
                     self.call_from_thread(self.action_open_artist, cid)
                     return
-        except Exception:
-            pass
+            self.call_from_thread(self.notify, f"Artist not found: {artist_name}", severity="warning")
+        except Exception as exc:
+            self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
 
     def action_open_current_album(self) -> None:
         current = self.queue_manager.current_track
@@ -404,8 +405,9 @@ class YtMusicTui(App):
                 if bid:
                     self.call_from_thread(self.action_open_album, bid)
                     return
-        except Exception:
-            pass
+            self.call_from_thread(self.notify, f"Album not found: {album_name}", severity="warning")
+        except Exception as exc:
+            self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
 
     # -----------------------------------------------------------------
     # Popup actions
@@ -508,8 +510,8 @@ class YtMusicTui(App):
             tracks = self.music_api.get_playlist_tracks(playlist_id)
             if tracks:
                 self.call_from_thread(self._queue_and_play, tracks)
-        except Exception:
-            pass
+        except Exception as exc:
+            self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
 
     @work(thread=True)
     def _play_all_album(self, browse_id: str) -> None:
@@ -517,8 +519,8 @@ class YtMusicTui(App):
             album = self.music_api.get_album(browse_id)
             if album.tracks:
                 self.call_from_thread(self._queue_and_play, album.tracks)
-        except Exception:
-            pass
+        except Exception as exc:
+            self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
 
     def _queue_and_play(self, tracks: list[Track]) -> None:
         self.queue_manager.set_playlist(tracks, start_index=0)
@@ -548,8 +550,8 @@ class YtMusicTui(App):
             playlists = self.music_api.get_library_playlists(limit=50)
             items = [(p.playlist_id, p.title) for p in playlists]
             self.call_from_thread(self._open_playlist_picker, items, track)
-        except Exception:
-            pass
+        except Exception as exc:
+            self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
 
     def _open_playlist_picker(self, playlists: list[tuple[str, str]], track: Track) -> None:
         self.query_one(PlaylistPickerPopup).show(playlists, track)
@@ -571,17 +573,31 @@ class YtMusicTui(App):
     def _create_and_add(self, track: Track) -> None:
         try:
             new_id = self.music_api.create_playlist("New Playlist")
-            if new_id:
-                self.music_api.add_playlist_items(new_id, [track.video_id])
-        except Exception:
-            pass
+            if not new_id:
+                self.call_from_thread(
+                    self.notify, "Could not create playlist", severity="error"
+                )
+                return
+            if self.music_api.add_playlist_items(new_id, [track.video_id]):
+                self.call_from_thread(self.notify, "Created playlist and added track")
+            else:
+                self.call_from_thread(
+                    self.notify, "Playlist created, but adding the track failed", severity="error"
+                )
+        except Exception as exc:
+            self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
 
     @work(thread=True)
     def _add_to_existing_playlist(self, playlist_id: str, track: Track) -> None:
         try:
-            self.music_api.add_playlist_items(playlist_id, [track.video_id])
-        except Exception:
-            pass
+            if self.music_api.add_playlist_items(playlist_id, [track.video_id]):
+                self.call_from_thread(self.notify, "Added to playlist")
+            else:
+                self.call_from_thread(
+                    self.notify, "Could not add to playlist", severity="error"
+                )
+        except Exception as exc:
+            self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
 
     # -----------------------------------------------------------------
     # Remove actions
@@ -602,10 +618,14 @@ class YtMusicTui(App):
             playlist_id = getattr(pv, "_current_playlist_id", "")
             if not playlist_id:
                 return
-            self.music_api.remove_playlist_items(playlist_id, [track.video_id])
+            if not self.music_api.remove_playlist_items(playlist_id, [track.video_id]):
+                self.call_from_thread(
+                    self.notify, "Could not remove from playlist", severity="error"
+                )
+                return
             self.call_from_thread(self._reload_playlist_view, playlist_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
 
     def _reload_playlist_view(self, playlist_id: str) -> None:
         from ytmusic_tui.api import PlaylistInfo

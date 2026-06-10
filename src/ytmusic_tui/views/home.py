@@ -14,6 +14,7 @@ from textual import work
 from textual.containers import VerticalScroll
 from textual.widgets import DataTable, Label, Static
 
+from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.formatting import format_duration as _format_duration
 from ytmusic_tui.views.filter_bar import FilterBar
 
@@ -161,14 +162,14 @@ class HomeView(Static):
         """Fetch home sections in a background thread."""
         api = getattr(self.app, "music_api", None)
         if api is None:
-            self.app.call_from_thread(self._show_error, "API not initialized")
+            self.app.call_from_thread(self._show_error, "Error: API not initialized")
             return
 
         try:
             sections = api.get_home()
             self.app.call_from_thread(self._render_sections, sections)
         except Exception as exc:
-            self.app.call_from_thread(self._show_error, str(exc))
+            self.app.call_from_thread(self._show_error, classify_api_error(exc))
 
     def _render_sections(self, sections: list[HomeSection]) -> None:
         """Populate the scroll container with fetched sections."""
@@ -198,9 +199,13 @@ class HomeView(Static):
             focusable[0].focus()
 
     def _show_error(self, message: str) -> None:
-        """Display an error in the status label."""
+        """Display an error in the status label.
+
+        The message is shown as-is; classify_api_error already returns
+        user-ready text.
+        """
         status = self.query_one("#home-status", Label)
-        status.update(f"Error: {message}")
+        status.update(message)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle Enter on a row in any section table.

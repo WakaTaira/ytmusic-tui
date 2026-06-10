@@ -22,10 +22,7 @@ class AuthError(Exception):
 def is_auth_error(exc: Exception) -> bool:
     """Return True if *exc* looks like an authentication failure."""
     msg = str(exc)
-    for pattern in _AUTH_ERROR_PATTERNS:
-        if pattern in msg:
-            return True
-    return False
+    return any(pattern in msg for pattern in _AUTH_ERROR_PATTERNS)
 
 
 def classify_api_error(exc: Exception) -> str:

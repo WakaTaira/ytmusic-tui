@@ -9,6 +9,7 @@ from textual import work
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import DataTable, Label, Static
 
+from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.formatting import format_duration as _format_duration
 from ytmusic_tui.views.filter_bar import FilterBar
 
@@ -136,7 +137,7 @@ class ArtistView(Static):
             artist: ArtistInfo = api.get_artist(channel_id)
             self.app.call_from_thread(self._populate, artist)
         except Exception as exc:
-            self.app.call_from_thread(self._set_status, f"Error: {exc}")
+            self.app.call_from_thread(self._set_status, classify_api_error(exc))
 
     def _populate(self, artist: ArtistInfo) -> None:
         """Fill all sections with artist data."""

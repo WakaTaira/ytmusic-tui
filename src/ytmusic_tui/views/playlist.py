@@ -8,6 +8,7 @@ from textual import work
 from textual.containers import Vertical
 from textual.widgets import DataTable, Label, Static
 
+from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.formatting import format_duration as _format_duration
 from ytmusic_tui.views.filter_bar import FilterBar
 
@@ -93,7 +94,7 @@ class PlaylistView(Static):
             playlists: list[PlaylistInfo] = api.get_library_playlists()
             self.app.call_from_thread(self._populate_playlists, playlists)
         except Exception as exc:
-            self.app.call_from_thread(self._set_status, f"Error: {exc}")
+            self.app.call_from_thread(self._set_status, classify_api_error(exc))
 
     def _populate_playlists(self, playlists: list[PlaylistInfo]) -> None:
         """Fill the table with playlist data."""
@@ -136,7 +137,7 @@ class PlaylistView(Static):
             tracks: list[Track] = api.get_playlist_tracks(playlist_id)
             self.app.call_from_thread(self._populate_tracks, tracks)
         except Exception as exc:
-            self.app.call_from_thread(self._set_status, f"Error: {exc}")
+            self.app.call_from_thread(self._set_status, classify_api_error(exc))
 
     def _populate_tracks(self, tracks: list[Track]) -> None:
         """Fill the table with track data."""
