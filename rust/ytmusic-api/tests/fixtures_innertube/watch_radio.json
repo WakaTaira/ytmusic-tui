@@ -114,13 +114,13 @@
                                         }
                                       },
                                       {
-                                        "text": " • "
+                                        "text": " \u2022 "
                                       },
                                       {
                                         "text": "1.7B views"
                                       },
                                       {
-                                        "text": " • "
+                                        "text": " \u2022 "
                                       },
                                       {
                                         "text": "19M likes"
@@ -129,7 +129,28 @@
                                   },
                                   "menu": {
                                     "menuRenderer": {
-                                      "items": []
+                                      "items": [
+                                        {
+                                          "menuNavigationItemRenderer": {}
+                                        },
+                                        {
+                                          "toggleMenuServiceItemRenderer": {
+                                            "defaultIcon": {
+                                              "iconType": "LIKE"
+                                            },
+                                            "defaultServiceEndpoint": {
+                                              "likeEndpoint": {
+                                                "status": "INDIFFERENT"
+                                              }
+                                            },
+                                            "toggledServiceEndpoint": {
+                                              "likeEndpoint": {
+                                                "status": "LIKE"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ]
                                     }
                                   }
                                 }
@@ -224,13 +245,13 @@
                                         }
                                       },
                                       {
-                                        "text": " • "
+                                        "text": " \u2022 "
                                       },
                                       {
                                         "text": "917K views"
                                       },
                                       {
-                                        "text": " • "
+                                        "text": " \u2022 "
                                       },
                                       {
                                         "text": "16K likes"
@@ -332,13 +353,13 @@
                                     }
                                   },
                                   {
-                                    "text": " • "
+                                    "text": " \u2022 "
                                   },
                                   {
                                     "text": "1.2M views"
                                   },
                                   {
-                                    "text": " • "
+                                    "text": " \u2022 "
                                   },
                                   {
                                     "text": "22K likes"

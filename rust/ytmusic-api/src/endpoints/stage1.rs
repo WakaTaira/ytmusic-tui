@@ -16,6 +16,13 @@ use crate::nav::{
     MRLIR, NAVIGATION_BROWSE_ID, PLAY_BUTTON_VIDEO_ID, Step, THUMBNAILS, nav, nav_array, nav_str,
 };
 
+/// `menu.menuRenderer.items` — the menu items array on a list-item renderer.
+const MENU_ITEMS: &[Step] = &[
+    Step::Key("menu"),
+    Step::Key("menuRenderer"),
+    Step::Key("items"),
+];
+
 /// Port of `parse_playlist_items`: convert each MRLIR row into a track dict.
 ///
 /// `is_album` selects the preset-column behavior album track lists require.
@@ -137,7 +144,61 @@ fn parse_playlist_item(data: &Value, is_album: bool) -> Option<Value> {
         out.insert("thumbnails".to_owned(), thumbs.clone());
     }
 
+    // setVideoId: scan menu items for the menuServiceItemRenderer whose
+    // serviceEndpoint carries a playlistEditEndpoint.  This is the `setVideoId`
+    // required by the remove-items mutation endpoint.
+    //
+    // Path mirrors `parsers/playlists.py::parse_playlist_item`:
+    //   menu.menuRenderer.items[].menuServiceItemRenderer.serviceEndpoint
+    //     .playlistEditEndpoint.actions[0].setVideoId
+    //
+    // The videoId extracted here from `removedVideoId` is also verified
+    // against the item's primary videoId as a sanity check, but `setVideoId`
+    // is the only key callers need.
+    if let Some(set_video_id) = extract_set_video_id(data) {
+        out.insert(
+            "setVideoId".to_owned(),
+            Value::String(set_video_id.to_owned()),
+        );
+    }
+
     Some(Value::Object(out))
+}
+
+/// Extract `setVideoId` from the MRLIR's menu items.
+///
+/// Mirrors `parse_playlist_item`'s menu scan for `menuServiceItemRenderer`
+/// items whose `serviceEndpoint` has a `playlistEditEndpoint`:
+///   `menu.menuRenderer.items[i].menuServiceItemRenderer.serviceEndpoint
+///    .playlistEditEndpoint.actions[0].setVideoId`
+///
+/// Iterates ALL menu items and skips non-matching ones (items that lack
+/// `menuServiceItemRenderer` or whose endpoint is not a `playlistEditEndpoint`).
+/// Returns the first `setVideoId` found, or `None` when the menu is absent
+/// or no playlist-edit endpoint is present in any item.
+fn extract_set_video_id(data: &Value) -> Option<&str> {
+    let items = nav_array(data, MENU_ITEMS)?;
+    for item in items {
+        // Skip items that are not a menuServiceItemRenderer (e.g.
+        // toggleMenuServiceItemRenderer, menuNavigationItemRenderer, etc.).
+        let Some(msir) = item.get("menuServiceItemRenderer") else {
+            continue;
+        };
+        let set_id = nav_str(
+            msir,
+            &[
+                Step::Key("serviceEndpoint"),
+                Step::Key("playlistEditEndpoint"),
+                Step::Key("actions"),
+                Step::Index(0),
+                Step::Key("setVideoId"),
+            ],
+        );
+        if set_id.is_some() {
+            return set_id;
+        }
+    }
+    None
 }
 
 /// `parse_song_artists(data, index)` → `parse_artists_runs(runs)`.
@@ -243,4 +304,17 @@ pub(super) fn flex_runs(data: &Value, index: usize) -> Option<&Vec<Value>> {
 /// `pub(super)` so the library-artists parser reads column text directly.
 pub(super) fn item_text(data: &Value, index: usize, run_index: usize) -> Option<&str> {
     flex_run(data, index, run_index)?.get("text")?.as_str()
+}
+
+/// The leading run of a `"<n> tracks"` / `"<n> songs"` token, mirroring
+/// ytmusicapi's `re.search(r"\d+ ", ...)` guard followed by `.split(" ")[0]`.
+///
+/// `pub(super)` so the library card and home card parsers both use one copy.
+pub(super) fn leading_count(text: &str) -> Option<&str> {
+    let first = text.split(' ').next()?;
+    if !first.is_empty() && first.bytes().all(|b| b.is_ascii_digit()) && text.len() > first.len() {
+        Some(first)
+    } else {
+        None
+    }
 }

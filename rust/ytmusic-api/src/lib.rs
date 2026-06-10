@@ -21,6 +21,7 @@
 //! "logged out", returning `false` rather than erroring.
 
 mod auth;
+mod classify;
 mod client;
 mod context;
 mod endpoints;
@@ -30,6 +31,7 @@ mod nav;
 pub mod parse;
 
 pub use auth::{BrowserAuth, YTM_ORIGIN, sapisid_authorization};
+pub use classify::classify_api_error;
 pub use client::{AccountInfo, InnerTubeClient};
 pub use context::{CLIENT_NAME, build_context};
 pub use error::{ApiError, AuthLoadError};

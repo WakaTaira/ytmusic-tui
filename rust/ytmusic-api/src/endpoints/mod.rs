@@ -32,6 +32,7 @@ mod history;
 mod home;
 mod library;
 mod lyrics;
+mod mutations;
 mod playlist;
 mod radio;
 mod search;
@@ -343,6 +344,108 @@ pub(crate) async fn get_lyrics(
     Ok(lyrics::lyrics_text(&lyrics_response))
 }
 
+/// Rate a track (thumbs up / down / remove).
+///
+/// Mirrors `api.py::rate_track`: `status` must be `"LIKE"`, `"INDIFFERENT"`,
+/// or `"DISLIKE"`. Returns `Ok(())` on success; transport / auth / parse errors
+/// propagate as [`ApiError`].
+pub(crate) async fn rate_track(
+    client: &impl PostRequest,
+    video_id: &str,
+    status: &str,
+) -> Result<(), ApiError> {
+    mutations::rate_track(client, video_id, status).await
+}
+
+/// Return the like status of a track.
+///
+/// Mirrors `api.py::get_like_status`. Returns `None` when the status cannot
+/// be determined (video not in the watch panel or `likeStatus` is null).
+pub(crate) async fn get_like_status(
+    client: &impl PostRequest,
+    video_id: &str,
+) -> Result<Option<String>, ApiError> {
+    mutations::get_like_status(client, video_id).await
+}
+
+/// Create a new playlist and return its ID.
+///
+/// Mirrors `api.py::create_playlist`. `privacy` is one of `"PUBLIC"`,
+/// `"PRIVATE"`, `"UNLISTED"`. Fails with
+/// [`ApiError::MutationFailed`]`("Playlist was not created")` when the API
+/// does not return a `playlistId`.
+pub(crate) async fn create_playlist(
+    client: &impl PostRequest,
+    title: &str,
+    description: &str,
+    privacy: &str,
+) -> Result<String, ApiError> {
+    mutations::create_playlist(client, title, description, privacy).await
+}
+
+/// Add tracks to an existing playlist.
+///
+/// Mirrors `api.py::add_playlist_items`. Fails with
+/// [`ApiError::MutationFailed`]`("Tracks were not added to the playlist")`
+/// when the service does not confirm `STATUS_SUCCEEDED`.
+pub(crate) async fn add_playlist_items(
+    client: &impl PostRequest,
+    playlist_id: &str,
+    video_ids: &[String],
+) -> Result<(), ApiError> {
+    mutations::add_playlist_items(client, playlist_id, video_ids).await
+}
+
+/// Remove tracks from a playlist.
+///
+/// Two-step flow: fetch the playlist to resolve `setVideoId`s, then send the
+/// remove actions. Fails with [`ApiError::MutationFailed`] when no target
+/// `videoId` was found in the playlist or the service rejects the request.
+pub(crate) async fn remove_playlist_items(
+    client: &impl PostRequest,
+    playlist_id: &str,
+    video_ids: &[String],
+) -> Result<(), ApiError> {
+    mutations::remove_playlist_items(client, playlist_id, video_ids).await
+}
+
+/// Delete a playlist.
+///
+/// Mirrors `ytmusicapi.mixins.playlists.delete_playlist`: POST
+/// `playlist/delete` with `{playlistId}` (VL prefix stripped).
+///
+/// Success predicate mirrors the Python source exactly:
+/// - If the response has a `"status"` key, it must contain `"SUCCEEDED"`.
+/// - If there is no `"status"` key, the full-response shape (which YouTube
+///   returns for newer API versions as a `command` object) is treated as
+///   success — matching Python's `return response["status"] if "status" in
+///   response else response` (a truthy dict = success).
+///
+/// Fails with [`ApiError::MutationFailed`]`("Playlist was not deleted")`
+/// only when `"status"` is present and does NOT contain `"SUCCEEDED"`.
+///
+/// Used primarily by the integration-test lifecycle cleanup; exposed here so
+/// the TUI layer (M5) can offer a delete-playlist action.
+pub(crate) async fn delete_playlist(
+    client: &impl PostRequest,
+    playlist_id: &str,
+) -> Result<(), ApiError> {
+    let bare_id = playlist_id.strip_prefix("VL").unwrap_or(playlist_id);
+    let response = client
+        .post_request("playlist/delete", json!({ "playlistId": bare_id }))
+        .await?;
+    match response.get("status").and_then(Value::as_str) {
+        // Explicit SUCCEEDED status — always ok.
+        Some(s) if s.contains("SUCCEEDED") => Ok(()),
+        // No "status" key → newer command-object response shape; treat as ok.
+        None => Ok(()),
+        // "status" present but not SUCCEEDED → genuine failure.
+        Some(_) => Err(ApiError::MutationFailed(
+            "Playlist was not deleted".to_owned(),
+        )),
+    }
+}
+
 /// The InnerTube `params` blob for a search filter, mirroring the non-spelling
 /// branch of `get_search_params` for the four routed filters.
 ///
@@ -434,5 +537,48 @@ impl InnerTubeClient {
     /// Get an artist page. See [`get_artist`].
     pub async fn get_artist(&self, channel_id: &str) -> Result<ArtistInfo, ApiError> {
         get_artist(self, channel_id).await
+    }
+
+    /// Rate a track. See [`rate_track`].
+    pub async fn rate_track(&self, video_id: &str, status: &str) -> Result<(), ApiError> {
+        rate_track(self, video_id, status).await
+    }
+
+    /// Get the like status of a track. See [`get_like_status`].
+    pub async fn get_like_status(&self, video_id: &str) -> Result<Option<String>, ApiError> {
+        get_like_status(self, video_id).await
+    }
+
+    /// Create a playlist and return its ID. See [`create_playlist`].
+    pub async fn create_playlist(
+        &self,
+        title: &str,
+        description: &str,
+        privacy: &str,
+    ) -> Result<String, ApiError> {
+        create_playlist(self, title, description, privacy).await
+    }
+
+    /// Add tracks to a playlist. See [`add_playlist_items`].
+    pub async fn add_playlist_items(
+        &self,
+        playlist_id: &str,
+        video_ids: &[String],
+    ) -> Result<(), ApiError> {
+        add_playlist_items(self, playlist_id, video_ids).await
+    }
+
+    /// Remove tracks from a playlist. See [`remove_playlist_items`].
+    pub async fn remove_playlist_items(
+        &self,
+        playlist_id: &str,
+        video_ids: &[String],
+    ) -> Result<(), ApiError> {
+        remove_playlist_items(self, playlist_id, video_ids).await
+    }
+
+    /// Delete a playlist. See [`delete_playlist`].
+    pub async fn delete_playlist(&self, playlist_id: &str) -> Result<(), ApiError> {
+        delete_playlist(self, playlist_id).await
     }
 }

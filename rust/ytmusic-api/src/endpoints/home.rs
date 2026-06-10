@@ -13,6 +13,7 @@
 use serde_json::{Map, Value, json};
 
 use super::songruns::parse_song_runs;
+use super::stage1::leading_count;
 use crate::nav::{
     CAROUSEL_TITLE_TEXT, MMRIR, MRLIR, MTRIR, NAVIGATION_PLAYLIST_ID, NAVIGATION_VIDEO_ID,
     NAVIGATION_WATCH_PLAYLIST_ID, PLAY_BUTTON_VIDEO_ID, SUBTITLE_RUNS, Step,
@@ -371,15 +372,6 @@ fn merge_object(out: &mut Map<String, Value>, value: Value) {
             out.insert(k, v);
         }
     }
-}
-
-/// The leading run of a `"<n> songs"` token (ytmusicapi's `r"\d+ "` + split).
-fn leading_count(text: &str) -> Option<&str> {
-    let first = text.split(' ').next()?;
-    if !first.is_empty() && first.bytes().all(|b| b.is_ascii_digit()) && text.len() > first.len() {
-        return Some(first);
-    }
-    None
 }
 
 #[cfg(test)]
