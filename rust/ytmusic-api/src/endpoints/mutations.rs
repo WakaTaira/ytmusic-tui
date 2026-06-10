@@ -184,10 +184,11 @@ pub(crate) async fn create_playlist(
 /// The InnerTube endpoint is `browse/edit_playlist`; the request body is
 /// `{playlistId, actions: [{action: "ACTION_ADD_VIDEO", addedVideoId}…]}`.
 ///
-/// The success predicate mirrors api.py: `response["status"]` must contain
-/// the substring `"SUCCEEDED"` (ytmusicapi checks `"SUCCEEDED" in status`).
-/// On failure → `ApiError::MutationFailed("Tracks were not added to the
-/// playlist")`.
+/// The success predicate runs on the RAW InnerTube response and mirrors
+/// ytmusicapi's substring check (`"SUCCEEDED" in status`); api.py's exact
+/// `== "STATUS_SUCCEEDED"` comparison runs on ytmusicapi's wrapped return —
+/// the net contract is identical. On failure →
+/// `ApiError::MutationFailed("Tracks were not added to the playlist")`.
 pub(crate) async fn add_playlist_items(
     client: &impl PostRequest,
     playlist_id: &str,

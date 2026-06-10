@@ -17,7 +17,8 @@ use crate::nav::{
 };
 
 /// `menu.menuRenderer.items` — the menu items array on a list-item renderer.
-const MENU_ITEMS: &[Step] = &[
+/// Shared with the radio/watch parser (same path on playlistPanel renderers).
+pub(super) const MENU_ITEMS: &[Step] = &[
     Step::Key("menu"),
     Step::Key("menuRenderer"),
     Step::Key("items"),

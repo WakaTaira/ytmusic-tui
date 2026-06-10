@@ -11,6 +11,7 @@
 use serde_json::{Map, Value};
 
 use super::songruns::parse_song_runs;
+use super::stage1::MENU_ITEMS;
 use crate::nav::{Step, TITLE_TEXT, nav, nav_array, nav_str};
 
 /// Walk a raw `next` (radio) response into a list of watch-shaped track dicts.
@@ -168,13 +169,6 @@ fn parse_like_status_from_menu(data: &Value) -> Option<String> {
     }
     None
 }
-
-/// `menu.menuRenderer.items` path.
-const MENU_ITEMS: &[Step] = &[
-    Step::Key("menu"),
-    Step::Key("menuRenderer"),
-    Step::Key("items"),
-];
 
 /// `playlistPanelVideoRenderer`.
 const PPVR: &str = "playlistPanelVideoRenderer";
