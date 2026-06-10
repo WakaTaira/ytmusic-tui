@@ -124,16 +124,20 @@ class TestLikeStatus:
         client = MagicMock()
         mock_cls.return_value = client
 
-        assert MusicAPI("/fake").rate_track("v", "LIKE") is True
+        # Success returns None; the call reaching the client is the contract.
+        assert MusicAPI("/fake").rate_track("v", "LIKE") is None
         client.rate_song.assert_called_once_with("v", "LIKE")
 
     @patch("ytmusic_tui.api.YTMusic")
-    def test_rate_track_failure(self, mock_cls: MagicMock) -> None:
+    def test_rate_track_propagates_error(self, mock_cls: MagicMock) -> None:
+        """A transport/auth error must propagate so the worker can
+        classify it, instead of being swallowed into a False sentinel."""
         client = MagicMock()
         client.rate_song.side_effect = Exception("api error")
         mock_cls.return_value = client
 
-        assert MusicAPI("/fake").rate_track("v", "LIKE") is False
+        with pytest.raises(Exception, match="api error"):
+            MusicAPI("/fake").rate_track("v", "LIKE")
 
 
 # ---------------------------------------------------------------------------
@@ -227,8 +231,15 @@ class TestLikeAction:
         app.music_api.rate_track.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_like_failure_notifies_error(self) -> None:
-        app = make_app(configure_api=lambda api: setattr(api.rate_track, "return_value", False))
+    async def test_like_failure_notifies_classified_error(self) -> None:
+        """A rate failure now propagates as an exception, so the toast is
+        the classified message (auth-aware), not a generic "Could not
+        update like"."""
+
+        def _configure(api: MagicMock) -> None:
+            api.rate_track.side_effect = Exception("403 Forbidden")
+
+        app = make_app(configure_api=_configure)
         async with app.run_test(size=(120, 40)) as pilot:
             captured = capture_notifications(app)
             app.queue_manager.add(make_track())
@@ -236,7 +247,9 @@ class TestLikeAction:
             await app.workers.wait_for_complete()
             await pilot.pause()
 
-        assert ("Could not update like", "error") in captured
+        assert any(
+            "Auth expired" in message and severity == "error" for message, severity in captured
+        )
 
 
 class TestRadioAction:

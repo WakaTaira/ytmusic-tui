@@ -30,6 +30,14 @@ def classify_api_error(exc: Exception) -> str:
     if is_auth_error(exc):
         return "Auth expired — run: ytmusic-tui auth"
 
+    # A MutationFailedError already carries a precise, user-facing message
+    # ("Track was not found in the playlist", etc.): surface it verbatim.
+    # Local import keeps auth.py free of a module-level api dependency.
+    from ytmusic_tui.api import MutationFailedError
+
+    if isinstance(exc, MutationFailedError):
+        return str(exc)
+
     msg = str(exc).lower()
     if "oauth json provided" in msg or "oauth_credentials" in msg:
         # ytmusicapi misclassifies browser files lacking the

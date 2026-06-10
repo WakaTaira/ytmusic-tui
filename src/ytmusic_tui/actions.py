@@ -200,11 +200,10 @@ class BrowseActions(_Base):
     @work(thread=True)
     def _lookup_and_open_artist(self, artist_name: str) -> None:
         try:
-            raw = self.music_api._client.search(artist_name, filter="artists", limit=5)
-            for item in raw:
-                cid = item.get("browseId")
-                if cid:
-                    self.call_from_thread(self.action_open_artist, cid)
+            artists = self.music_api.search_all(artist_name, limit=5, filter="artists").artists
+            for artist in artists:
+                if artist.channel_id:
+                    self.call_from_thread(self.action_open_artist, artist.channel_id)
                     return
             self.call_from_thread(
                 self.notify, f"Artist not found: {artist_name}", severity="warning"
@@ -228,11 +227,9 @@ class BrowseActions(_Base):
         try:
             status = self.music_api.get_like_status(video_id)
             new_status = "INDIFFERENT" if status == "LIKE" else "LIKE"
-            if self.music_api.rate_track(video_id, new_status):
-                message = "Liked" if new_status == "LIKE" else "Like removed"
-                self.call_from_thread(self.notify, message)
-            else:
-                self.call_from_thread(self.notify, "Could not update like", severity="error")
+            self.music_api.rate_track(video_id, new_status)
+            message = "Liked" if new_status == "LIKE" else "Like removed"
+            self.call_from_thread(self.notify, message)
         except Exception as exc:
             self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
 
@@ -256,11 +253,10 @@ class BrowseActions(_Base):
     def _lookup_and_open_album(self, album_name: str, artist_name: str = "") -> None:
         try:
             q = f"{album_name} {artist_name}".strip()
-            raw = self.music_api._client.search(q, filter="albums", limit=5)
-            for item in raw:
-                bid = item.get("browseId")
-                if bid:
-                    self.call_from_thread(self.action_open_album, bid)
+            albums = self.music_api.search_all(q, limit=5, filter="albums").albums
+            for album in albums:
+                if album.browse_id:
+                    self.call_from_thread(self.action_open_album, album.browse_id)
                     return
             self.call_from_thread(
                 self.notify, f"Album not found: {album_name}", severity="warning"
@@ -449,27 +445,27 @@ class PopupActions(_Base):
     def _create_and_add(self, track: Track) -> None:
         try:
             new_id = self.music_api.create_playlist("New Playlist")
-            if not new_id:
-                self.call_from_thread(self.notify, "Could not create playlist", severity="error")
-                return
-            if self.music_api.add_playlist_items(new_id, [track.video_id]):
-                self.call_from_thread(self.notify, "Created playlist and added track")
-            else:
-                self.call_from_thread(
-                    self.notify,
-                    "Playlist created, but adding the track failed",
-                    severity="error",
-                )
         except Exception as exc:
             self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
+            return
+        try:
+            self.music_api.add_playlist_items(new_id, [track.video_id])
+        except Exception as exc:
+            # The playlist now exists but is empty — the message must say
+            # so, or the user cannot explain the stray playlist later.
+            self.call_from_thread(
+                self.notify,
+                f"Playlist created, but adding the track failed ({classify_api_error(exc)})",
+                severity="error",
+            )
+            return
+        self.call_from_thread(self.notify, "Created playlist and added track")
 
     @work(thread=True)
     def _add_to_existing_playlist(self, playlist_id: str, track: Track) -> None:
         try:
-            if self.music_api.add_playlist_items(playlist_id, [track.video_id]):
-                self.call_from_thread(self.notify, "Added to playlist")
-            else:
-                self.call_from_thread(self.notify, "Could not add to playlist", severity="error")
+            self.music_api.add_playlist_items(playlist_id, [track.video_id])
+            self.call_from_thread(self.notify, "Added to playlist")
         except Exception as exc:
             self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
 
@@ -490,11 +486,7 @@ class PopupActions(_Base):
             playlist_id = pv.current_playlist_id
             if not playlist_id:
                 return
-            if not self.music_api.remove_playlist_items(playlist_id, [track.video_id]):
-                self.call_from_thread(
-                    self.notify, "Could not remove from playlist", severity="error"
-                )
-                return
+            self.music_api.remove_playlist_items(playlist_id, [track.video_id])
             self.call_from_thread(self._reload_playlist_view, playlist_id)
         except Exception as exc:
             self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
