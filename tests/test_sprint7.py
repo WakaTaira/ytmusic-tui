@@ -344,8 +344,19 @@ class TestNewBindings:
             assert actions.get("H") == "switch_view('history')"
 
     def test_new_actions_remappable_via_keymap(self) -> None:
+        """New actions must be remappable, i.e. their Binding carries an id.
+
+        The keymap name (binding id) may differ from Textual's action
+        string: switch_history's id maps the "switch_view('history')"
+        action.
+        """
+        from textual.binding import Binding
+
         from ytmusic_tui.app import YtMusicTui
 
+        bindings_by_id = {
+            b.id: b for b in YtMusicTui.BINDINGS if isinstance(b, Binding) and b.id is not None
+        }
         for name in ("toggle_like", "start_radio", "toggle_mute", "seek_start"):
-            assert YtMusicTui._ACTION_TO_TEXTUAL[name] == name
-        assert YtMusicTui._ACTION_TO_TEXTUAL["switch_history"] == "switch_view('history')"
+            assert name in bindings_by_id
+        assert bindings_by_id["switch_history"].action == "switch_view('history')"

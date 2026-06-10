@@ -170,6 +170,10 @@ class TestLyricsKeybinding:
         assert DEFAULT_KEYMAP["open_lyrics"] == "L"
 
     def test_lyrics_in_action_map(self) -> None:
+        """open_lyrics must be remappable: a Binding carries id="open_lyrics"."""
+        from textual.binding import Binding
+
         from ytmusic_tui.app import YtMusicTui
 
-        assert "open_lyrics" in YtMusicTui._ACTION_TO_TEXTUAL
+        binding_ids = {b.id for b in YtMusicTui.BINDINGS if isinstance(b, Binding)}
+        assert "open_lyrics" in binding_ids

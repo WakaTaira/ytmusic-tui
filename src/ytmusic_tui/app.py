@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING, ClassVar
 
 from textual import work
 from textual.app import App, ComposeResult
-from textual.binding import Binding
+from textual.binding import Binding, BindingType
 from textual.css.query import NoMatches
-from textual.widgets import ContentSwitcher, Header, Static
+from textual.widgets import ContentSwitcher, Header
 
 from ytmusic_tui.actions import BrowseActions, PlaybackActions, PopupActions
 from ytmusic_tui.api import MusicAPI
@@ -39,9 +39,26 @@ from ytmusic_tui.views.search import SearchView
 
 if TYPE_CHECKING:
     from ytmusic_tui.mpris import MprisService
+    from ytmusic_tui.views.base import FetchView
 
 # Default browser auth JSON path (used when no config loaded)
 _DEFAULT_AUTH_PATH = Path.home() / ".config" / "ytmusic-tui" / "browser.json"
+
+# Single source of truth mapping a ContentSwitcher pane id to its view
+# class. Both action_toggle_filter and PopupActions._get_focused_item
+# resolve the focused view through current_view(), which consults this
+# registry. The keys mirror the ``id=`` values used in compose().
+VIEW_REGISTRY: dict[str, type[FetchView]] = {
+    "home": HomeView,
+    "search": SearchView,
+    "library": LibraryView,
+    "playlist": PlaylistView,
+    "queue": QueueView,
+    "album": AlbumView,
+    "artist": ArtistView,
+    "lyrics": LyricsView,
+    "history": HistoryView,
+}
 
 
 class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
@@ -50,34 +67,59 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
     TITLE = "ytmusic-tui"
     CSS_PATH = "app.tcss"
 
-    # Narrower than App's BindingType list: _apply_keymap relies on
-    # every entry being a full Binding.
-    BINDINGS: ClassVar[list[Binding]] = [  # type: ignore[assignment]
-        Binding("space", "toggle_pause", "Play/Pause", show=True),
-        Binding("n", "next_track", "Next", show=True),
-        Binding("p", "previous_track", "Prev", show=True),
-        Binding("s", "toggle_shuffle", "Shuffle", show=True),
-        Binding("r", "cycle_repeat", "Repeat", show=True),
-        Binding("plus,equal", "volume_up", "Vol+", show=False),
-        Binding("minus", "volume_down", "Vol-", show=False),
-        Binding("greater_than_sign", "seek_forward", "Seek +5s", show=False),
-        Binding("less_than_sign", "seek_backward", "Seek -5s", show=False),
-        Binding("circumflex_accent", "seek_start", "Seek 0:00", show=False),
-        Binding("underscore", "toggle_mute", "Mute", show=False),
-        Binding("f", "toggle_like", "Like", show=True),
-        Binding("R", "start_radio", "Radio", show=True, key_display="R"),
-        Binding("H", "switch_view('history')", "History", show=False, key_display="H"),
-        Binding("slash", "toggle_filter", "Filter", show=True),
-        Binding("g", "switch_view('home')", "Home", show=True),
-        Binding("l", "switch_view('library')", "Library", show=True),
-        Binding("q", "switch_view('queue')", "Queue", show=True),
-        Binding("Q", "quit", "Quit", show=True, key_display="Q"),
-        Binding("a", "open_current_artist", "Artist", show=True),
-        Binding("A", "open_current_album", "Album", show=True, key_display="A"),
-        Binding("escape", "go_back", "Back", show=False),
-        Binding("full_stop", "open_action_popup", "Actions", show=True),
-        Binding("T", "open_theme_popup", "Theme", show=True, key_display="T"),
-        Binding("L", "open_lyrics", "Lyrics", show=True, key_display="L"),
+    # Each remappable binding carries an ``id`` matching its canonical
+    # keymap action name (the keys of config.DEFAULT_KEYMAP). The id is
+    # what keymap.toml overrides target, so the keymap name can differ
+    # freely from Textual's action string (e.g. id="focus_search" binds
+    # the "toggle_filter" action; id="switch_home" binds
+    # "switch_view('home')"). _apply_keymap feeds these ids to
+    # App.set_keymap.
+    #
+    # The number-key bindings (1-8) and the secondary "Quit" alias are
+    # deliberately id-less: they are not exposed in keymap.toml, so they
+    # keep their compiled-in keys regardless of any override.
+    #
+    # Annotated with App's own ClassVar[list[BindingType]] (not the
+    # narrower list[Binding]) so no type-ignore is needed for the
+    # invariant-list override; _apply_keymap narrows to Binding at the
+    # read site with isinstance.
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("space", "toggle_pause", "Play/Pause", show=True, id="toggle_pause"),
+        Binding("n", "next_track", "Next", show=True, id="next_track"),
+        Binding("p", "previous_track", "Prev", show=True, id="previous_track"),
+        Binding("s", "toggle_shuffle", "Shuffle", show=True, id="toggle_shuffle"),
+        Binding("r", "cycle_repeat", "Repeat", show=True, id="cycle_repeat"),
+        Binding("plus,equal", "volume_up", "Vol+", show=False, id="volume_up"),
+        Binding("minus", "volume_down", "Vol-", show=False, id="volume_down"),
+        Binding("greater_than_sign", "seek_forward", "Seek +5s", show=False, id="seek_forward"),
+        Binding("less_than_sign", "seek_backward", "Seek -5s", show=False, id="seek_backward"),
+        Binding("circumflex_accent", "seek_start", "Seek 0:00", show=False, id="seek_start"),
+        Binding("underscore", "toggle_mute", "Mute", show=False, id="toggle_mute"),
+        Binding("f", "toggle_like", "Like", show=True, id="toggle_like"),
+        Binding("R", "start_radio", "Radio", show=True, key_display="R", id="start_radio"),
+        Binding(
+            "H",
+            "switch_view('history')",
+            "History",
+            show=False,
+            key_display="H",
+            id="switch_history",
+        ),
+        Binding("slash", "toggle_filter", "Filter", show=True, id="focus_search"),
+        Binding("g", "switch_view('home')", "Home", show=True, id="switch_home"),
+        Binding("l", "switch_view('library')", "Library", show=True, id="switch_library"),
+        Binding("q", "switch_view('queue')", "Queue", show=True, id="switch_queue"),
+        Binding("Q", "quit", "Quit", show=True, key_display="Q", id="quit"),
+        Binding("a", "open_current_artist", "Artist", show=True, id="open_current_artist"),
+        Binding(
+            "A", "open_current_album", "Album", show=True, key_display="A", id="open_current_album"
+        ),
+        Binding("escape", "go_back", "Back", show=False, id="go_back"),
+        Binding("full_stop", "open_action_popup", "Actions", show=True, id="open_action_popup"),
+        Binding(
+            "T", "open_theme_popup", "Theme", show=True, key_display="T", id="open_theme_popup"
+        ),
+        Binding("L", "open_lyrics", "Lyrics", show=True, key_display="L", id="open_lyrics"),
         Binding("1", "switch_view('home')", "Home", show=False),
         Binding("2", "switch_view('search')", "Search", show=False),
         Binding("3", "switch_view('library')", "Library", show=False),
@@ -88,34 +130,6 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
         Binding("8", "open_lyrics", "Lyrics", show=False),
     ]
 
-    _ACTION_TO_TEXTUAL: ClassVar[dict[str, str]] = {
-        "toggle_pause": "toggle_pause",
-        "next_track": "next_track",
-        "previous_track": "previous_track",
-        "toggle_shuffle": "toggle_shuffle",
-        "cycle_repeat": "cycle_repeat",
-        "volume_up": "volume_up",
-        "volume_down": "volume_down",
-        "seek_forward": "seek_forward",
-        "seek_backward": "seek_backward",
-        "seek_start": "seek_start",
-        "toggle_mute": "toggle_mute",
-        "toggle_like": "toggle_like",
-        "start_radio": "start_radio",
-        "switch_history": "switch_view('history')",
-        "focus_search": "toggle_filter",
-        "switch_home": "switch_view('home')",
-        "switch_library": "switch_view('library')",
-        "switch_queue": "switch_view('queue')",
-        "quit": "quit",
-        "open_current_artist": "open_current_artist",
-        "open_current_album": "open_current_album",
-        "go_back": "go_back",
-        "open_action_popup": "open_action_popup",
-        "open_theme_popup": "open_theme_popup",
-        "open_lyrics": "open_lyrics",
-    }
-
     def __init__(
         self,
         auth_path: str | Path | None = None,
@@ -125,8 +139,7 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
         super().__init__()
         self.config = config if config is not None else load_config()
 
-        self._keymap = load_keymap(keymap_path=keymap_path)
-        self._apply_keymap(self._keymap)
+        self._apply_keymap(load_keymap(keymap_path=keymap_path))
 
         self._orientation: Orientation = Orientation.HORIZONTAL
 
@@ -151,38 +164,25 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
     # -----------------------------------------------------------------
 
     def _apply_keymap(self, keymap: dict[str, str]) -> None:
-        action_index: dict[str, int] = {}
-        for idx, binding in enumerate(self.BINDINGS):
-            action_index.setdefault(binding.action, idx)
+        """Apply a loaded keymap via Textual's official keymap mechanism.
 
-        new_bindings: list[Binding] = list(self.BINDINGS)
+        ``keymap`` maps canonical action names to key strings (the shape
+        returned by :func:`config.load_keymap`). Each name is matched
+        against a ``Binding.id`` in :attr:`BINDINGS`; unknown names (e.g.
+        stale entries in a user keymap.toml) are dropped. The surviving
+        entries are handed to :meth:`App.set_keymap`, which overrides the
+        compiled-in key per binding id and refreshes the Footer.
 
-        for action_name, key in keymap.items():
-            textual_action = self._ACTION_TO_TEXTUAL.get(action_name)
-            if textual_action is None:
-                continue
-            target_idx = action_index.get(textual_action)
-            if target_idx is None:
-                continue
-            old = new_bindings[target_idx]
-            if old.key != key:
-                new_bindings[target_idx] = Binding(
-                    key,
-                    old.action,
-                    old.description,
-                    show=old.show,
-                    key_display=old.key_display if old.key_display else None,
-                )
-
-        self._bindings.key_to_bindings.clear()
-        for binding in new_bindings:
-            self._bindings.bind(
-                binding.key,
-                binding.action,
-                binding.description,
-                show=binding.show,
-                key_display=binding.key_display if binding.key_display else "",
-            )
+        Safe to call from ``__init__``: ``set_keymap`` only stores the
+        mapping and the override is applied lazily when active bindings
+        are computed (after mount).
+        """
+        binding_ids = {
+            binding.id
+            for binding in self.BINDINGS
+            if isinstance(binding, Binding) and binding.id is not None
+        }
+        self.set_keymap({name: key for name, key in keymap.items() if name in binding_ids})
 
     # -----------------------------------------------------------------
     # Responsive layout
@@ -320,26 +320,27 @@ class YtMusicTui(PlaybackActions, BrowseActions, PopupActions, App[None]):
         self.action_switch_view("search")
         self.query_one(SearchView).focus_input()
 
-    def action_toggle_filter(self) -> None:
+    def current_view(self) -> FetchView | None:
+        """Return the currently displayed view, or ``None`` if unresolved.
+
+        Resolves the ContentSwitcher's active pane id through
+        :data:`VIEW_REGISTRY` and queries the live widget. Shared by
+        :meth:`action_toggle_filter` and
+        ``PopupActions._get_focused_item`` so the pane-id -> class ->
+        widget lookup lives in exactly one place.
+        """
         switcher = self.query_one(ContentSwitcher)
-        current_id = switcher.current
-        view_map: dict[str, type[Static]] = {
-            "home": HomeView,
-            "search": SearchView,
-            "library": LibraryView,
-            "playlist": PlaylistView,
-            "queue": QueueView,
-            "album": AlbumView,
-            "artist": ArtistView,
-            "lyrics": LyricsView,
-            "history": HistoryView,
-        }
-        view_cls = view_map.get(current_id or "")
+        view_cls = VIEW_REGISTRY.get(switcher.current or "")
         if view_cls is None:
-            return
+            return None
         try:
-            view = self.query_one(view_cls)
-        except Exception:
+            return self.query_one(view_cls)
+        except NoMatches:
+            return None
+
+    def action_toggle_filter(self) -> None:
+        view = self.current_view()
+        if view is None:
             return
         toggle = getattr(view, "toggle_filter", None)
         if toggle is not None:

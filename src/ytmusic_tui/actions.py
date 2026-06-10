@@ -18,19 +18,13 @@ import contextlib
 from typing import TYPE_CHECKING, Any, cast
 
 from textual import work
-from textual.widgets import ContentSwitcher, Static
+from textual.widgets import ContentSwitcher
 
 from ytmusic_tui.api import AlbumInfo, PlaylistInfo
 from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.config import THEMES, build_textual_theme
 from ytmusic_tui.navigation import PageState
 from ytmusic_tui.queue import Track
-from ytmusic_tui.views.album import AlbumView
-from ytmusic_tui.views.artist import ArtistView
-from ytmusic_tui.views.history import HistoryView
-from ytmusic_tui.views.home import HomeView
-from ytmusic_tui.views.library import LibraryView
-from ytmusic_tui.views.lyrics import LyricsView
 from ytmusic_tui.views.playlist import PlaylistView
 from ytmusic_tui.views.popup import (
     NEW_PLAYLIST_SENTINEL,
@@ -40,7 +34,6 @@ from ytmusic_tui.views.popup import (
     ThemePopup,
 )
 from ytmusic_tui.views.queue import QueueView
-from ytmusic_tui.views.search import SearchView
 
 if TYPE_CHECKING:
     from textual.app import App
@@ -50,6 +43,7 @@ if TYPE_CHECKING:
     from ytmusic_tui.navigation import NavigationManager
     from ytmusic_tui.player import Player
     from ytmusic_tui.queue import QueueManager
+    from ytmusic_tui.views.base import FetchView
 
     _Base = App[None]
 else:
@@ -285,6 +279,7 @@ class PopupActions(_Base):
         def _refresh_queue_view_if_active(self) -> None: ...
         def action_switch_view(self, view_id: str) -> None: ...
         def action_open_album(self, browse_id: str) -> None: ...
+        def current_view(self) -> FetchView | None: ...
 
     def action_open_action_popup(self) -> None:
         item = self._get_focused_item()
@@ -313,29 +308,14 @@ class PopupActions(_Base):
         )
 
     def _get_focused_item(self) -> Track | PlaylistInfo | AlbumInfo | None:
-        switcher = self.query_one(ContentSwitcher)
-        current_id = switcher.current
-        view_map: dict[str, type[Static]] = {
-            "home": HomeView,
-            "search": SearchView,
-            "library": LibraryView,
-            "playlist": PlaylistView,
-            "queue": QueueView,
-            "album": AlbumView,
-            "artist": ArtistView,
-            "lyrics": LyricsView,
-            "history": HistoryView,
-        }
-        view_cls = view_map.get(current_id or "")
-        if view_cls is None:
-            return None
-        try:
-            view = self.query_one(view_cls)
-        except Exception:
+        view = self.current_view()
+        if view is None:
             return None
         getter = getattr(view, "get_focused_item", None)
         if getter is None:
             return None
+        # getattr returns Any; cast pins the dynamic call back to the
+        # declared return type instead of letting Any leak to callers.
         return cast("Track | PlaylistInfo | AlbumInfo | None", getter())
 
     def on_action_popup_action_selected(self, event: ActionPopup.ActionSelected) -> None:

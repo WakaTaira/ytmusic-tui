@@ -247,11 +247,18 @@ class TestKeyBindings:
             assert actions.get("less_than_sign") == "seek_backward"
 
     def test_seek_actions_remappable_via_keymap(self) -> None:
-        """seek_forward / seek_backward must be exposed to keymap.toml."""
+        """seek_forward / seek_backward must be exposed to keymap.toml.
+
+        Remappability is expressed by a Binding carrying an ``id`` equal
+        to the keymap action name (set_keymap overrides by binding id).
+        """
+        from textual.binding import Binding
+
         from ytmusic_tui.app import YtMusicTui
 
-        assert YtMusicTui._ACTION_TO_TEXTUAL["seek_forward"] == "seek_forward"
-        assert YtMusicTui._ACTION_TO_TEXTUAL["seek_backward"] == "seek_backward"
+        binding_ids = {b.id for b in YtMusicTui.BINDINGS if isinstance(b, Binding)}
+        assert "seek_forward" in binding_ids
+        assert "seek_backward" in binding_ids
 
 
 # ===================================================================
