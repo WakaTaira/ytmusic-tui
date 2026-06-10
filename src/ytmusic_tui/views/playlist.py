@@ -51,6 +51,7 @@ class PlaylistView(Static):
         self._tracks: list[Track] = []
         self._viewing_tracks: bool = False
         self._current_playlist_title: str = ""
+        self._current_playlist_id: str = ""
 
     def compose(self) -> ComposeResult:
         """Build the playlist layout: status label, data table, and filter bar."""
@@ -113,6 +114,7 @@ class PlaylistView(Static):
         """Switch to track list view for the given playlist."""
         self._viewing_tracks = True
         self._current_playlist_title = playlist.title
+        self._current_playlist_id = playlist.playlist_id
         table = self.query_one("#playlist-table", DataTable)
         table.clear(columns=True)
         table.add_columns("Title", "Artist", "Album", "Duration")

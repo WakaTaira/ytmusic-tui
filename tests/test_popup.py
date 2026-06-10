@@ -110,12 +110,12 @@ class TestActionBuilders:
         assert ActionKind.GO_TO_ALBUM in kinds
         assert ActionKind.ADD_TO_PLAYLIST in kinds
 
-    def test_actions_for_track_add_to_playlist_disabled(self) -> None:
-        """Add to playlist should be disabled (stretch goal)."""
+    def test_actions_for_track_add_to_playlist_enabled(self) -> None:
+        """Add to playlist should be enabled."""
         track = _make_track()
         actions = actions_for_track(track)
         add_pl = next(a for a in actions if a.kind is ActionKind.ADD_TO_PLAYLIST)
-        assert add_pl.enabled is False
+        assert add_pl.enabled is True
 
     def test_actions_for_playlist_count(self) -> None:
         """PlaylistInfo should have 2 actions."""
@@ -297,13 +297,17 @@ class TestActionPopup:
             popup.show(track)
             await _pilot.pause()
 
-            # The "Add to playlist" action at index 4 is disabled.
-            # Simulate selecting it via on_list_view_selected.
+            # Manually inject a disabled action for testing
+            popup._actions[4] = PopupAction(
+                kind=ActionKind.ADD_TO_PLAYLIST,
+                label="Add to playlist",
+                enabled=False,
+            )
+
             mock_event = MagicMock()
             mock_event.list_view = MagicMock()
-            mock_event.list_view.index = 4  # "Add to playlist" (disabled)
+            mock_event.list_view.index = 4
 
-            # Spy on post_message
             original_post = popup.post_message
             messages: list[object] = []
 
@@ -316,7 +320,6 @@ class TestActionPopup:
             popup.on_list_view_selected(mock_event)
             await _pilot.pause()
 
-            # No ActionSelected message should have been posted
             action_msgs = [m for m in messages if isinstance(m, ActionPopup.ActionSelected)]
             assert len(action_msgs) == 0
 

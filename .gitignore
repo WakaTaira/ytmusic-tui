@@ -39,6 +39,7 @@ client_secret.json
 # Internal docs (not for public repo)
 CLAUDE.md
 DESIGN.md
+HANDOFF.md
 initial-prompt.md
 loop-prompt.md
 runner.sh

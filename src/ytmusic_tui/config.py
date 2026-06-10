@@ -267,6 +267,7 @@ DEFAULT_KEYMAP: dict[str, str] = {
     "go_back": "escape",
     "open_action_popup": "full_stop",
     "open_theme_popup": "T",
+    "open_lyrics": "L",
 }
 
 

@@ -35,6 +35,8 @@ class ActionKind(Enum):
     ADD_TO_PLAYLIST = auto()
     PLAY_ALL = auto()
     OPEN = auto()
+    REMOVE_FROM_QUEUE = auto()
+    REMOVE_FROM_PLAYLIST = auto()
 
 
 @dataclass(frozen=True)
@@ -58,11 +60,7 @@ def actions_for_track(track: Track) -> list[PopupAction]:
         PopupAction(kind=ActionKind.ADD_TO_QUEUE, label="Add to queue"),
         PopupAction(kind=ActionKind.GO_TO_ARTIST, label="Go to artist"),
         PopupAction(kind=ActionKind.GO_TO_ALBUM, label="Go to album"),
-        PopupAction(
-            kind=ActionKind.ADD_TO_PLAYLIST,
-            label="Add to playlist",
-            enabled=False,
-        ),
+        PopupAction(kind=ActionKind.ADD_TO_PLAYLIST, label="Add to playlist"),
     ]
 
 
@@ -83,8 +81,32 @@ def actions_for_album(album: AlbumInfo) -> list[PopupAction]:
     ]
 
 
+def actions_for_queue_track(track: Track) -> list[PopupAction]:
+    """Return the action list for a Track in the queue view."""
+    return [
+        PopupAction(kind=ActionKind.PLAY, label="Play"),
+        PopupAction(kind=ActionKind.REMOVE_FROM_QUEUE, label="Remove from queue"),
+        PopupAction(kind=ActionKind.GO_TO_ARTIST, label="Go to artist"),
+        PopupAction(kind=ActionKind.GO_TO_ALBUM, label="Go to album"),
+        PopupAction(kind=ActionKind.ADD_TO_PLAYLIST, label="Add to playlist"),
+    ]
+
+
+def actions_for_playlist_track(track: Track) -> list[PopupAction]:
+    """Return the action list for a Track inside a playlist detail view."""
+    return [
+        PopupAction(kind=ActionKind.PLAY, label="Play"),
+        PopupAction(kind=ActionKind.ADD_TO_QUEUE, label="Add to queue"),
+        PopupAction(kind=ActionKind.REMOVE_FROM_PLAYLIST, label="Remove from playlist"),
+        PopupAction(kind=ActionKind.GO_TO_ARTIST, label="Go to artist"),
+        PopupAction(kind=ActionKind.GO_TO_ALBUM, label="Go to album"),
+    ]
+
+
 def build_actions(
     item: Track | PlaylistInfo | AlbumInfo,
+    *,
+    context: str = "",
 ) -> list[PopupAction]:
     """Build the appropriate action list based on the item type."""
     from ytmusic_tui.api import AlbumInfo as _AlbumInfo
@@ -92,6 +114,10 @@ def build_actions(
     from ytmusic_tui.queue import Track as _Track
 
     if isinstance(item, _Track):
+        if context == "queue":
+            return actions_for_queue_track(item)
+        if context == "playlist_tracks":
+            return actions_for_playlist_track(item)
         return actions_for_track(item)
     if isinstance(item, _PlaylistInfo):
         return actions_for_playlist(item)
@@ -152,14 +178,11 @@ class ActionPopup(Static):
     class ActionSelected(Message):
         """Emitted when the user selects an action."""
 
-        def __init__(
-            self,
-            action: PopupAction,
-            item: Any,
-        ) -> None:
+        def __init__(self, action: PopupAction, item: Any, context: str = "") -> None:
             super().__init__()
             self.action = action
             self.item = item
+            self.context = context
 
     class Dismissed(Message):
         """Emitted when the popup is closed without an action."""
@@ -168,16 +191,18 @@ class ActionPopup(Static):
         super().__init__(**kwargs)
         self._actions: list[PopupAction] = []
         self._item: Any = None
+        self._popup_context: str = ""
 
     def compose(self) -> ComposeResult:
         """Build the popup layout."""
         yield Label("", id="popup-title")
         yield ListView(id="popup-actions")
 
-    def show(self, item: Track | PlaylistInfo | AlbumInfo) -> None:
+    def show(self, item: Track | PlaylistInfo | AlbumInfo, *, context: str = "") -> None:
         """Populate actions for *item* and display the popup."""
         self._item = item
-        self._actions = build_actions(item)
+        self._popup_context = context
+        self._actions = build_actions(item, context=context)
 
         # Update title
         title = _item_title(item)
@@ -229,8 +254,9 @@ class ActionPopup(Static):
             return
 
         item = self._item
+        context = self._popup_context
         self.remove_class("visible")
-        self.post_message(self.ActionSelected(action=action, item=item))
+        self.post_message(self.ActionSelected(action=action, item=item, context=context))
 
     def on_key(self, event: object) -> None:
         """Handle Escape to dismiss the popup."""
@@ -352,6 +378,112 @@ class ThemePopup(Static):
 
     def on_key(self, event: object) -> None:
         """Handle Escape to dismiss the popup."""
+        key = getattr(event, "key", "")
+        if key == "escape":
+            self.dismiss()
+            stop = getattr(event, "stop", None)
+            if callable(stop):
+                stop()
+
+
+# ---------------------------------------------------------------------------
+# PlaylistPickerPopup
+# ---------------------------------------------------------------------------
+
+
+class PlaylistPickerPopup(Static):
+    """Overlay popup for selecting a playlist to add a track to."""
+
+    DEFAULT_CSS = """
+    PlaylistPickerPopup {
+        layer: overlay;
+        dock: bottom;
+        offset-y: -4;
+        height: auto;
+        max-height: 14;
+        background: $surface;
+        border-top: solid $accent;
+        padding: 0 1;
+        display: none;
+    }
+    PlaylistPickerPopup.visible {
+        display: block;
+    }
+    PlaylistPickerPopup #picker-title {
+        height: 1;
+        text-style: bold;
+        color: $accent;
+    }
+    PlaylistPickerPopup ListView {
+        height: auto;
+        max-height: 10;
+        background: $surface;
+    }
+    PlaylistPickerPopup ListItem {
+        height: 1;
+        padding: 0 1;
+    }
+    """
+
+    class PlaylistChosen(Message):
+        """Emitted when a playlist is selected."""
+
+        def __init__(self, playlist_id: str | None, track: Any) -> None:
+            super().__init__()
+            self.playlist_id = playlist_id
+            self.track = track
+
+    class Dismissed(Message):
+        """Emitted when the popup is closed."""
+
+    _NEW_PLAYLIST_SENTINEL = "__new__"
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self._playlists: list[tuple[str, str]] = []
+        self._track: Any = None
+
+    def compose(self) -> ComposeResult:
+        yield Label("Add to playlist", id="picker-title")
+        yield ListView(id="picker-list")
+
+    def show(self, playlists: list[tuple[str, str]], track: Any) -> None:
+        self._playlists = list(playlists)
+        self._track = track
+        list_view = self.query_one("#picker-list", ListView)
+        list_view.clear()
+        list_view.append(ListItem(Label("+ New playlist...")))
+        for _pid, title in self._playlists:
+            list_view.append(ListItem(Label(title)))
+        self.add_class("visible")
+        list_view.focus()
+
+    def dismiss(self) -> None:
+        self.remove_class("visible")
+        self._playlists = []
+        self._track = None
+        self.post_message(self.Dismissed())
+
+    @property
+    def is_visible(self) -> bool:
+        return self.has_class("visible")
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        index = event.list_view.index
+        if index is None or index < 0:
+            return
+        if index == 0:
+            playlist_id = self._NEW_PLAYLIST_SENTINEL
+        else:
+            adj = index - 1
+            if adj >= len(self._playlists):
+                return
+            playlist_id = self._playlists[adj][0]
+        track = self._track
+        self.remove_class("visible")
+        self.post_message(self.PlaylistChosen(playlist_id=playlist_id, track=track))
+
+    def on_key(self, event: object) -> None:
         key = getattr(event, "key", "")
         if key == "escape":
             self.dismiss()

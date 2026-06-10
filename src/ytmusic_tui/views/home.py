@@ -121,8 +121,40 @@ class HomeView(Static):
     def on_show(self) -> None:
         """Auto-focus the first table when the view becomes visible."""
         tables = self.query("DataTable")
-        if tables:
-            tables.first().focus()
+        focusable = [t for t in tables if t.can_focus]
+        if focusable:
+            focusable[0].focus()
+
+    def on_key(self, event: object) -> None:
+        """Handle Tab/Shift-Tab to cycle between section tables."""
+        key = getattr(event, "key", "")
+        if key == "tab":
+            self._focus_adjacent_section(forward=True)
+        elif key == "shift+tab":
+            self._focus_adjacent_section(forward=False)
+
+    def _focus_adjacent_section(self, *, forward: bool) -> None:
+        """Move focus to the next/previous section's DataTable."""
+        tables = self.query("DataTable")
+        focusable = [t for t in tables if t.can_focus]
+        if not focusable:
+            return
+
+        focused = self.app.focused
+        current_idx = -1
+        for i, table in enumerate(focusable):
+            if table is focused:
+                current_idx = i
+                break
+
+        if forward:
+            next_idx = (current_idx + 1) % len(focusable)
+        else:
+            next_idx = (current_idx - 1) % len(focusable)
+
+        target = focusable[next_idx]
+        target.focus()
+        target.scroll_visible(animate=False)
 
     @work(thread=True)
     def _fetch_home(self) -> None:
@@ -158,6 +190,12 @@ class HomeView(Static):
                 section_index=idx,
             )
             content.mount(widget)
+
+        # Focus the first table after rendering
+        tables = self.query("DataTable")
+        focusable = [t for t in tables if t.can_focus]
+        if focusable:
+            focusable[0].focus()
 
     def _show_error(self, message: str) -> None:
         """Display an error in the status label."""

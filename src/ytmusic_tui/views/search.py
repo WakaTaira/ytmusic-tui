@@ -29,6 +29,21 @@ if TYPE_CHECKING:
 # Helpers
 # ---------------------------------------------------------------------------
 
+_CATEGORY_PREFIXES = {"#songs:", "#albums:", "#artists:", "#playlists:"}
+
+
+def _parse_search_prefix(raw: str) -> tuple[str | None, str]:
+    """Parse an optional ``#category:query`` prefix."""
+    lower = raw.lower()
+    for prefix in _CATEGORY_PREFIXES:
+        if lower.startswith(prefix):
+            category = prefix[1:-1]
+            query = raw[len(prefix) :].strip()
+            if query:
+                return category, query
+            return None, raw
+    return None, raw
+
 
 # ---------------------------------------------------------------------------
 # Pane index

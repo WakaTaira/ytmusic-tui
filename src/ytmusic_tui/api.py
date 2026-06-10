@@ -526,6 +526,79 @@ class MusicAPI:
         return tracks
 
     # ------------------------------------------------------------------
+    # Lyrics
+    # ------------------------------------------------------------------
+
+    def get_lyrics(self, video_id: str) -> str | None:
+        """Fetch lyrics for a track."""
+        try:
+            watch = self._client.get_watch_playlist(video_id)
+            lyrics_id = watch.get("lyrics")
+            if not lyrics_id:
+                return None
+            lyrics_data = self._client.get_lyrics(lyrics_id)
+            if isinstance(lyrics_data, dict):
+                return lyrics_data.get("lyrics") or None
+        except Exception:
+            pass
+        return None
+
+    # ------------------------------------------------------------------
+    # Playlist mutation
+    # ------------------------------------------------------------------
+
+    def create_playlist(
+        self, title: str, description: str = "", privacy: str = "PRIVATE"
+    ) -> str | None:
+        """Create a new playlist."""
+        try:
+            result = self._client.create_playlist(title, description, privacy_status=privacy)
+            if isinstance(result, str):
+                return result
+        except Exception:
+            pass
+        return None
+
+    def add_playlist_items(self, playlist_id: str, video_ids: list[str]) -> bool:
+        """Add tracks to an existing playlist."""
+        try:
+            result = self._client.add_playlist_items(playlist_id, video_ids)
+            if isinstance(result, dict) and result.get("status") == "STATUS_SUCCEEDED":
+                return True
+            if isinstance(result, str) and result == "STATUS_SUCCEEDED":
+                return True
+        except Exception:
+            pass
+        return False
+
+    def remove_playlist_items(self, playlist_id: str, video_ids: list[str]) -> bool:
+        """Remove tracks from a playlist."""
+        try:
+            playlist_data = self._client.get_playlist(playlist_id)
+            raw_tracks = playlist_data.get("tracks") or []
+            to_remove = []
+            target_set = set(video_ids)
+            for t in raw_tracks:
+                vid = t.get("videoId")
+                if vid in target_set:
+                    set_vid = t.get("setVideoId")
+                    if set_vid:
+                        to_remove.append({"videoId": vid, "setVideoId": set_vid})
+                        target_set.discard(vid)
+                if not target_set:
+                    break
+            if not to_remove:
+                return False
+            result = self._client.remove_playlist_items(playlist_id, to_remove)
+            if isinstance(result, str) and result == "STATUS_SUCCEEDED":
+                return True
+            if isinstance(result, dict) and result.get("status") == "STATUS_SUCCEEDED":
+                return True
+        except Exception:
+            pass
+        return False
+
+    # ------------------------------------------------------------------
     # Album
     # ------------------------------------------------------------------
 

@@ -263,6 +263,17 @@ class PlayerBar(Static):
                     shuffle=shuffle,
                     repeat_mode=repeat_mode,
                 )
+
+                # Push state to MPRIS if available
+                mpris = getattr(app, "_mpris", None)
+                if mpris is not None:
+                    current_track = queue.current_track if queue else None
+                    mpris.update(
+                        state,
+                        track=current_track,
+                        shuffle=shuffle,
+                        repeat_mode=repeat_mode,
+                    )
         except Exception:
             # Swallow errors during polling to avoid crashing the timer
             pass
