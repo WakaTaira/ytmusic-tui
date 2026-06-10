@@ -42,6 +42,7 @@ DESIGN.md
 HANDOFF.md
 REFACTOR_DIRECTIVE.md
 RUST_MIGRATION_DIRECTIVE.md
+RUST_MIGRATION_PROGRESS.md
 initial-prompt.md
 loop-prompt.md
 runner.sh
