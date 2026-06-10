@@ -21,6 +21,15 @@ ytmusic-api = { path = "../ytmusic-api" }
 
 rand = "0.9"
 
+# TOML parsing for config.toml and keymap.toml.  `features = ["parse"]` is the
+# default; no extra features needed — we only deserialize, never serialize.
+toml = { version = "0.8", default-features = false, features = ["parse"] }
+
+# Typed deserialization via #[derive(Deserialize)].  The "derive" feature is the
+# only thing we need; serde_json comes in via ytmusic-api so we reuse that dep
+# transitively, but we declare serde directly so the feature is stable.
+serde = { version = "1", features = ["derive"] }
+
 # libmpv binding for the audio player (M2). 6.0.0 builds against system
 # libmpv >= 2.x and exposes the end-file reason as a discriminable value,
 # which is the non-negotiable selection criterion (see spikes/mpv_spike).
@@ -36,3 +45,7 @@ libmpv2-sys = "4.0.1"
 
 # Typed error definitions for the player module.
 thiserror = "2"
+
+[dev-dependencies]
+# Temporary directory support for config-loading tests.
+tempfile = "3"
