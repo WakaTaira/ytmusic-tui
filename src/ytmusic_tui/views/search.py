@@ -8,17 +8,19 @@ actions.
 from __future__ import annotations
 
 from enum import IntEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
-from textual import work
 from textual.containers import Horizontal, Vertical
-from textual.widgets import DataTable, Input, Label, Static
+from textual.css.query import NoMatches
+from textual.widgets import DataTable, Input, Label
 
-from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.formatting import format_duration as _format_duration
 from ytmusic_tui.layout import Orientation
+from ytmusic_tui.views.base import FetchView
 from ytmusic_tui.views.filter_bar import FilterBar
 from ytmusic_tui.views.guards import teardown_safe
+from ytmusic_tui.views.playlist import PlaylistView
+from ytmusic_tui.views.widgets import NavDataTable
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -87,6 +89,14 @@ _PANE_TITLES: dict[Pane, str] = {
     Pane.PLAYLISTS: "Playlists",
 }
 
+# Column headers for each pane's DataTable
+_PANE_COLUMNS: dict[Pane, tuple[str, ...]] = {
+    Pane.TRACKS: ("Title", "Artist", "Album", "Duration"),
+    Pane.ALBUMS: ("Title", "Artist", "Year"),
+    Pane.ARTISTS: ("Name",),
+    Pane.PLAYLISTS: ("Title", "Tracks"),
+}
+
 
 # ---------------------------------------------------------------------------
 # Search result pane widget
@@ -130,13 +140,15 @@ class _SearchPane(Vertical):
 # ---------------------------------------------------------------------------
 
 
-class SearchView(Static):
+class SearchView(FetchView):
     """Search YouTube Music with a multi-category grid layout.
 
     Enter on the input triggers a search. Tab/Shift-Tab cycles focus
     between the four result panes. Enter on a row dispatches an action
     based on the pane type.
     """
+
+    STATUS_LABEL_ID: ClassVar[str] = "#search-status"
 
     DEFAULT_CSS = """
     SearchView {
@@ -181,38 +193,18 @@ class SearchView(Static):
         yield Input(placeholder="Search YouTube Music...", id="search-input")
         yield Label("", id="search-status")
         with Vertical(id="search-grid"):
-            with Horizontal(classes="search-row"):
-                # Top-left: Tracks
-                with _SearchPane(Pane.TRACKS):
-                    yield Label("Tracks", classes="pane-title")
-                    table: DataTable[Any] = DataTable(id=_TABLE_IDS[Pane.TRACKS])
-                    table.cursor_type = "row"
-                    table.add_columns("Title", "Artist", "Album", "Duration")
-                    yield table
-                # Top-right: Albums
-                with _SearchPane(Pane.ALBUMS):
-                    yield Label("Albums", classes="pane-title")
-                    table = DataTable(id=_TABLE_IDS[Pane.ALBUMS])
-                    table.cursor_type = "row"
-                    table.add_columns("Title", "Artist", "Year")
-                    yield table
-            with Horizontal(classes="search-row"):
-                # Bottom-left: Artists
-                with _SearchPane(Pane.ARTISTS):
-                    yield Label("Artists", classes="pane-title")
-                    table = DataTable(id=_TABLE_IDS[Pane.ARTISTS])
-                    table.cursor_type = "row"
-                    table.add_columns(
-                        "Name",
-                    )
-                    yield table
-                # Bottom-right: Playlists
-                with _SearchPane(Pane.PLAYLISTS):
-                    yield Label("Playlists", classes="pane-title")
-                    table = DataTable(id=_TABLE_IDS[Pane.PLAYLISTS])
-                    table.cursor_type = "row"
-                    table.add_columns("Title", "Tracks")
-                    yield table
+            for row_panes in (
+                (Pane.TRACKS, Pane.ALBUMS),
+                (Pane.ARTISTS, Pane.PLAYLISTS),
+            ):
+                with Horizontal(classes="search-row"):
+                    for pane in row_panes:
+                        with _SearchPane(pane):
+                            yield Label(_PANE_TITLES[pane], classes="pane-title")
+                            table: DataTable[Any] = NavDataTable(id=_TABLE_IDS[pane])
+                            table.cursor_type = "row"
+                            table.add_columns(*_PANE_COLUMNS[pane])
+                            yield table
         yield FilterBar(_TABLE_IDS[Pane.TRACKS], id="search-filter")
 
     # -----------------------------------------------------------------
@@ -235,34 +227,22 @@ class SearchView(Static):
         category, parsed_query = _parse_search_prefix(query)
         self._run_search(parsed_query, category)
 
-    @work(thread=True)
     def _run_search(self, query: str, category: str | None = None) -> None:
-        """Fetch search results in a background thread.
+        """Search in a background thread and populate every pane.
 
         When *category* is given, the API call is restricted to that
-        result type and only the matching pane is populated.
+        result type and only the matching pane is filled. A "Searching..."
+        status is shown until results arrive.
         """
-        self.app.call_from_thread(self._set_status, "Searching...")
-
-        api = getattr(self.app, "music_api", None)
-        if api is None:
-            self.app.call_from_thread(self._set_status, "Error: API not initialized")
-            return
-
-        try:
-            results: SearchResults = api.search_all(query, limit=20, filter=category)
-            self.app.call_from_thread(self._populate_all_results, results)
-        except Exception as exc:
-            self.app.call_from_thread(self._set_status, classify_api_error(exc))
+        self._run_fetch(
+            lambda: self.music_app.music_api.search_all(query, limit=20, filter=category),
+            self._populate_all_results,
+            loading="Searching...",
+        )
 
     # -----------------------------------------------------------------
     # Status / populate
     # -----------------------------------------------------------------
-
-    @teardown_safe
-    def _set_status(self, text: str) -> None:
-        """Update the status label."""
-        self.query_one("#search-status", Label).update(text)
 
     @teardown_safe
     def _populate_all_results(self, results: SearchResults) -> None:
@@ -392,13 +372,8 @@ class SearchView(Static):
             return
 
         track = self._track_list[row_index]
-        queue = getattr(self.app, "queue_manager", None)
-        player = getattr(self.app, "player", None)
-
-        if queue is not None:
-            queue.set_playlist([track], start_index=0)
-        if player is not None:
-            player.play(track.video_id)
+        self.music_app.queue_manager.set_playlist([track], start_index=0)
+        self.music_app.player.play(track.video_id)
 
     def _on_album_selected(self, row_index: int) -> None:
         """Open the album detail view."""
@@ -406,9 +381,7 @@ class SearchView(Static):
             return
 
         album = self._album_list[row_index]
-        action = getattr(self.app, "action_open_album", None)
-        if action is not None:
-            action(album.browse_id)
+        self.music_app.action_open_album(album.browse_id)
 
     def _on_artist_selected(self, row_index: int) -> None:
         """Open the artist detail view."""
@@ -416,9 +389,7 @@ class SearchView(Static):
             return
 
         artist = self._artist_list[row_index]
-        action = getattr(self.app, "action_open_artist", None)
-        if action is not None:
-            action(artist.channel_id)
+        self.music_app.action_open_artist(artist.channel_id)
 
     def _on_playlist_selected(self, row_index: int) -> None:
         """Open the playlist view with the selected playlist's tracks."""
@@ -426,18 +397,8 @@ class SearchView(Static):
             return
 
         playlist = self._playlist_list[row_index]
-
-        # Switch to playlist view and load tracks
-        switch = getattr(self.app, "action_switch_view", None)
-        if switch is not None:
-            switch("playlist")
-
-        from ytmusic_tui.views.playlist import PlaylistView
-
-        playlist_view = self.app.query_one(PlaylistView)
-        load = getattr(playlist_view, "load_playlist", None)
-        if load is not None:
-            load(playlist.playlist_id)
+        self.music_app.action_switch_view("playlist")
+        self.music_app.query_one(PlaylistView).show_track_list(playlist)
 
     # -----------------------------------------------------------------
     # Public API
@@ -451,10 +412,8 @@ class SearchView(Static):
             cursor row, or ``None`` if the pane is empty.
         """
 
-        try:
-            table = self.query_one(f"#{_TABLE_IDS[self._focused_pane]}", DataTable)
-            row_index = table.cursor_row
-        except Exception:
+        row_index = self._cursor_row(f"#{_TABLE_IDS[self._focused_pane]}")
+        if row_index is None:
             return None
 
         if self._focused_pane == Pane.TRACKS:
@@ -493,7 +452,7 @@ class SearchView(Static):
         self._orientation = orientation
         try:
             grid = self.query_one("#search-grid")
-        except Exception:
+        except NoMatches:
             return
 
         if orientation is Orientation.VERTICAL:

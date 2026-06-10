@@ -231,7 +231,7 @@ class TestSessionValidity:
         import pytest as _pytest
 
         with _pytest.raises(Exception, match="oauth JSON"):
-            api.search("query")
+            api.search_all("query")
 
 
 class TestMusicAPIInit:
@@ -259,7 +259,13 @@ class TestMusicAPIInit:
 
 
 class TestTrackConversion:
-    """Test converting raw ytmusicapi dicts into Track dataclasses."""
+    """Test converting raw ytmusicapi song dicts into Track dataclasses.
+
+    Exercised through search_all (the public song-search entry point),
+    which routes "song"/"video" results through the same _dict_to_track
+    helper. Covers duration parsing, thumbnail picking, and artist
+    joining — the parsing behavior the now-removed search() carried.
+    """
 
     @patch("ytmusic_tui.api.YTMusic")
     def test_basic_song_conversion(self, mock_ytmusic_cls: MagicMock) -> None:
@@ -270,7 +276,7 @@ class TestTrackConversion:
         mock_ytmusic_cls.return_value = mock_client
 
         api = MusicAPI("/fake/path")
-        results = api.search("rick astley", filter="songs")
+        results = api.search_all("rick astley", filter="songs").tracks
 
         assert len(results) == 1
         track = results[0]
@@ -297,7 +303,7 @@ class TestTrackConversion:
         mock_ytmusic_cls.return_value = mock_client
 
         api = MusicAPI("/fake/path")
-        results = api.search("collab", filter="songs")
+        results = api.search_all("collab", filter="songs").tracks
         assert results[0].artist == "Artist A, Artist B, Artist C"
 
     @patch("ytmusic_tui.api.YTMusic")
@@ -309,7 +315,7 @@ class TestTrackConversion:
         mock_ytmusic_cls.return_value = mock_client
 
         api = MusicAPI("/fake/path")
-        results = api.search("single", filter="songs")
+        results = api.search_all("single", filter="songs").tracks
         assert results[0].album == ""
 
     @patch("ytmusic_tui.api.YTMusic")
@@ -321,7 +327,7 @@ class TestTrackConversion:
         mock_ytmusic_cls.return_value = mock_client
 
         api = MusicAPI("/fake/path")
-        results = api.search("unknown", filter="songs")
+        results = api.search_all("unknown", filter="songs").tracks
         assert results[0].artist == ""
 
     @patch("ytmusic_tui.api.YTMusic")
@@ -333,7 +339,7 @@ class TestTrackConversion:
         mock_ytmusic_cls.return_value = mock_client
 
         api = MusicAPI("/fake/path")
-        results = api.search("no duration", filter="songs")
+        results = api.search_all("no duration", filter="songs").tracks
         assert results[0].duration_seconds == 0.0
 
     @patch("ytmusic_tui.api.YTMusic")
@@ -345,7 +351,7 @@ class TestTrackConversion:
         mock_ytmusic_cls.return_value = mock_client
 
         api = MusicAPI("/fake/path")
-        results = api.search("no thumb", filter="songs")
+        results = api.search_all("no thumb", filter="songs").tracks
         assert results[0].thumbnail_url == ""
 
     @patch("ytmusic_tui.api.YTMusic")
@@ -357,54 +363,23 @@ class TestTrackConversion:
         mock_ytmusic_cls.return_value = mock_client
 
         api = MusicAPI("/fake/path")
-        results = api.search("empty thumbs", filter="songs")
+        results = api.search_all("empty thumbs", filter="songs").tracks
         assert results[0].thumbnail_url == ""
 
     @patch("ytmusic_tui.api.YTMusic")
     def test_skips_items_without_video_id(self, mock_ytmusic_cls: MagicMock) -> None:
-        """Search results without videoId (e.g. artist results) should be skipped."""
+        """Song results without videoId should be skipped, not crash."""
         mock_client = MagicMock()
         mock_client.search.return_value = [
-            {"resultType": "artist", "browseId": "UCxyz", "artist": "Some Artist"},
+            {"resultType": "song", "title": "No ID"},
             _make_search_song_result(),
         ]
         mock_ytmusic_cls.return_value = mock_client
 
         api = MusicAPI("/fake/path")
-        results = api.search("mixed results")
+        results = api.search_all("mixed results").tracks
         assert len(results) == 1
         assert results[0].video_id == "dQw4w9WgXcQ"
-
-
-# ---------------------------------------------------------------------------
-# search()
-# ---------------------------------------------------------------------------
-
-
-class TestSearch:
-    """Test the search method."""
-
-    @patch("ytmusic_tui.api.YTMusic")
-    def test_passes_filter_and_limit(self, mock_ytmusic_cls: MagicMock) -> None:
-        mock_client = MagicMock()
-        mock_client.search.return_value = []
-        mock_ytmusic_cls.return_value = mock_client
-
-        api = MusicAPI("/fake/path")
-        api.search("test query", filter="albums", limit=10)
-
-        mock_client.search.assert_called_once_with("test query", filter="albums", limit=10)
-
-    @patch("ytmusic_tui.api.YTMusic")
-    def test_passes_none_filter(self, mock_ytmusic_cls: MagicMock) -> None:
-        mock_client = MagicMock()
-        mock_client.search.return_value = []
-        mock_ytmusic_cls.return_value = mock_client
-
-        api = MusicAPI("/fake/path")
-        api.search("test query", filter=None, limit=20)
-
-        mock_client.search.assert_called_once_with("test query", filter=None, limit=20)
 
 
 # ---------------------------------------------------------------------------
@@ -1028,7 +1003,7 @@ class TestSearchAll:
 
     @patch("ytmusic_tui.api.YTMusic")
     def test_passes_limit(self, mock_ytmusic_cls: MagicMock) -> None:
-        """search_all should pass limit to the underlying client."""
+        """search_all should pass limit (and a None filter) to the client."""
         mock_client = MagicMock()
         mock_client.search.return_value = []
         mock_ytmusic_cls.return_value = mock_client
@@ -1037,6 +1012,18 @@ class TestSearchAll:
         api.search_all("test", limit=5)
 
         mock_client.search.assert_called_once_with("test", filter=None, limit=5)
+
+    @patch("ytmusic_tui.api.YTMusic")
+    def test_passes_explicit_filter(self, mock_ytmusic_cls: MagicMock) -> None:
+        """An explicit category filter should reach the underlying client."""
+        mock_client = MagicMock()
+        mock_client.search.return_value = []
+        mock_ytmusic_cls.return_value = mock_client
+
+        api = MusicAPI("/fake/path")
+        api.search_all("test query", limit=10, filter="albums")
+
+        mock_client.search.assert_called_once_with("test query", filter="albums", limit=10)
 
     @patch("ytmusic_tui.api.YTMusic")
     def test_skips_invalid_items(self, mock_ytmusic_cls: MagicMock) -> None:

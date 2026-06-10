@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, PropertyMock, patch
 
-from textual.app import App
+if TYPE_CHECKING:
+    from textual.app import App
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = PROJECT_ROOT / "screenshots"
@@ -134,7 +136,7 @@ async def main() -> None:
 
         app = YtMusicTui(auth_path="/dev/null")
 
-        async with app.run_test(size=(120, 40)) as pilot:
+        async with app.run_test(size=(120, 40)) as _:
             await asyncio.sleep(1.0)
 
             print("Exporting screenshots...")

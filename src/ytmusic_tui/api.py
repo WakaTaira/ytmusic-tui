@@ -19,6 +19,24 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
+# Errors
+# ---------------------------------------------------------------------------
+
+
+class MutationFailedError(Exception):
+    """Raised when a mutation's transport succeeded but the API said no.
+
+    Distinguishes a *logical* failure (HTTP 200 but ``status`` was not
+    ``"STATUS_SUCCEEDED"``, or a removal target was never found in the
+    playlist) from a transport/auth failure. Transport and auth errors
+    propagate as their original ytmusicapi exceptions; this type is used
+    only when the call completed and the service rejected it, so callers
+    and ``classify_api_error`` can phrase a precise message instead of a
+    generic "Could not X".
+    """
+
+
+# ---------------------------------------------------------------------------
 # Supporting dataclasses
 # ---------------------------------------------------------------------------
 
@@ -335,33 +353,6 @@ class MusicAPI:
     # Search
     # ------------------------------------------------------------------
 
-    def search(self, query: str, filter: str | None = None, limit: int = 20) -> list[Track]:
-        """Search YouTube Music.
-
-        Args:
-            query: Search string.
-            filter: One of 'songs', 'albums', 'playlists', 'artists',
-                    or None for all result types.
-            limit: Maximum number of results.
-
-        Returns:
-            List of Track objects from song results. Non-song results
-            (artists, albums without videoId) are filtered out.
-        """
-        # ytmusicapi types `filter` as a Literal; this wrapper deliberately
-        # accepts plain str | None, so cast at the client boundary.
-        raw_results: list[dict[str, Any]] = self._client.search(
-            query, filter=cast("Any", filter), limit=limit
-        )
-
-        tracks: list[Track] = []
-        for item in raw_results:
-            track = _dict_to_track(item)
-            if track is not None:
-                tracks.append(track)
-
-        return tracks
-
     def search_all(self, query: str, limit: int = 10, filter: str | None = None) -> SearchResults:
         """Search across all categories and return categorized results.
 
@@ -619,17 +610,18 @@ class MusicAPI:
                 return status if isinstance(status, str) else None
         return None
 
-    def rate_track(self, video_id: str, status: str) -> bool:
+    def rate_track(self, video_id: str, status: str) -> None:
         """Rate a track ('LIKE', 'INDIFFERENT', 'DISLIKE').
 
-        Returns True on success, False on failure (sentinel pattern,
-        consistent with the playlist mutations).
+        Returns ``None`` on success. Transport, auth, and other API
+        exceptions propagate so the caller's ``classify_api_error`` path
+        can surface a precise message (e.g. "Auth expired"). rate_song
+        has no per-call status payload, so there is no logical-failure
+        dimension to report.
         """
-        try:
-            self._client.rate_song(video_id, cast("Any", status))
-        except Exception:
-            return False
-        return True
+        # ytmusicapi types `rating` as a Literal; this wrapper accepts a
+        # plain str, so cast at the client boundary.
+        self._client.rate_song(video_id, cast("Any", status))
 
     def get_radio(self, video_id: str, limit: int = 50) -> list[Track]:
         """Return a radio queue seeded by *video_id* (seed track first).
@@ -666,73 +658,89 @@ class MusicAPI:
     # ------------------------------------------------------------------
 
     def get_lyrics(self, video_id: str) -> str | None:
-        """Fetch lyrics for a track."""
-        try:
-            watch = self._client.get_watch_playlist(video_id)
-            lyrics_id = watch.get("lyrics")
-            if not lyrics_id or not isinstance(lyrics_id, str):
-                return None
-            lyrics_data = self._client.get_lyrics(lyrics_id)
-            if isinstance(lyrics_data, dict):
-                return lyrics_data.get("lyrics") or None
-        except Exception:
-            pass
+        """Fetch lyrics for a track.
+
+        Returns the lyrics text, or ``None`` when the track has no lyrics
+        (no ``lyrics`` browse id, or an empty/malformed lyrics payload).
+        ``None`` means exactly "this track has no lyrics" — a value, not
+        an error. Transport, auth, and other API exceptions propagate so
+        the caller's ``classify_api_error`` path can distinguish "no
+        lyrics" from "could not reach YouTube Music".
+        """
+        watch = self._client.get_watch_playlist(video_id)
+        lyrics_id = watch.get("lyrics")
+        if not lyrics_id or not isinstance(lyrics_id, str):
+            return None
+        lyrics_data = self._client.get_lyrics(lyrics_id)
+        if isinstance(lyrics_data, dict):
+            return lyrics_data.get("lyrics") or None
         return None
 
     # ------------------------------------------------------------------
     # Playlist mutation
     # ------------------------------------------------------------------
 
-    def create_playlist(
-        self, title: str, description: str = "", privacy: str = "PRIVATE"
-    ) -> str | None:
-        """Create a new playlist."""
-        try:
-            result = self._client.create_playlist(title, description, privacy_status=privacy)
-            if isinstance(result, str):
-                return result
-        except Exception:
-            pass
-        return None
+    def create_playlist(self, title: str, description: str = "", privacy: str = "PRIVATE") -> str:
+        """Create a new playlist and return its ID.
 
-    def add_playlist_items(self, playlist_id: str, video_ids: list[str]) -> bool:
-        """Add tracks to an existing playlist."""
-        try:
-            result = self._client.add_playlist_items(playlist_id, video_ids)
-            if isinstance(result, dict) and result.get("status") == "STATUS_SUCCEEDED":
-                return True
-            if isinstance(result, str) and result == "STATUS_SUCCEEDED":
-                return True
-        except Exception:
-            pass
-        return False
+        Transport, auth, and other API exceptions propagate. Raises
+        :class:`MutationFailedError` when the call completed but did not return
+        a usable playlist ID (ytmusicapi returns an error dict instead of
+        a string in that case).
+        """
+        # ytmusicapi types `privacy_status` as a Literal; this wrapper
+        # accepts a plain str, so cast at the client boundary.
+        result = self._client.create_playlist(
+            title, description, privacy_status=cast("Any", privacy)
+        )
+        if isinstance(result, str):
+            return result
+        raise MutationFailedError("Playlist was not created")
 
-    def remove_playlist_items(self, playlist_id: str, video_ids: list[str]) -> bool:
-        """Remove tracks from a playlist."""
-        try:
-            playlist_data = self._client.get_playlist(playlist_id)
-            raw_tracks = playlist_data.get("tracks") or []
-            to_remove = []
-            target_set = set(video_ids)
-            for t in raw_tracks:
-                vid = t.get("videoId")
-                if vid in target_set:
-                    set_vid = t.get("setVideoId")
-                    if set_vid:
-                        to_remove.append({"videoId": vid, "setVideoId": set_vid})
-                        target_set.discard(vid)
-                if not target_set:
-                    break
-            if not to_remove:
-                return False
-            result = self._client.remove_playlist_items(playlist_id, to_remove)
-            if isinstance(result, str) and result == "STATUS_SUCCEEDED":
-                return True
-            if isinstance(result, dict) and result.get("status") == "STATUS_SUCCEEDED":
-                return True
-        except Exception:
-            pass
-        return False
+    def add_playlist_items(self, playlist_id: str, video_ids: list[str]) -> None:
+        """Add tracks to an existing playlist.
+
+        Returns ``None`` on success. Transport, auth, and other API
+        exceptions propagate. Raises :class:`MutationFailedError` when the call
+        completed but the service reported a non-success status.
+        """
+        result = self._client.add_playlist_items(playlist_id, video_ids)
+        if isinstance(result, dict) and result.get("status") == "STATUS_SUCCEEDED":
+            return
+        if isinstance(result, str) and result == "STATUS_SUCCEEDED":
+            return
+        raise MutationFailedError("Tracks were not added to the playlist")
+
+    def remove_playlist_items(self, playlist_id: str, video_ids: list[str]) -> None:
+        """Remove tracks from a playlist.
+
+        Resolves each ``videoId`` to its ``setVideoId`` (required by the
+        remove endpoint) by reading the playlist first. Returns ``None``
+        on success. Transport, auth, and other API exceptions propagate.
+        Raises :class:`MutationFailedError` when none of *video_ids* were found
+        in the playlist, or the service reported a non-success status.
+        """
+        playlist_data = self._client.get_playlist(playlist_id)
+        raw_tracks = playlist_data.get("tracks") or []
+        to_remove: list[dict[str, Any]] = []
+        target_set = set(video_ids)
+        for t in raw_tracks:
+            vid = t.get("videoId")
+            if vid in target_set:
+                set_vid = t.get("setVideoId")
+                if set_vid:
+                    to_remove.append({"videoId": vid, "setVideoId": set_vid})
+                    target_set.discard(vid)
+            if not target_set:
+                break
+        if not to_remove:
+            raise MutationFailedError("Track was not found in the playlist")
+        result = self._client.remove_playlist_items(playlist_id, to_remove)
+        if isinstance(result, str) and result == "STATUS_SUCCEEDED":
+            return
+        if isinstance(result, dict) and result.get("status") == "STATUS_SUCCEEDED":
+            return
+        raise MutationFailedError("Tracks were not removed from the playlist")
 
     # ------------------------------------------------------------------
     # Album

@@ -18,31 +18,32 @@ import contextlib
 from typing import TYPE_CHECKING, Any, cast
 
 from textual import work
-from textual.widgets import ContentSwitcher, Static
+from textual.widgets import ContentSwitcher
 
+from ytmusic_tui.api import AlbumInfo, PlaylistInfo
 from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.config import THEMES, build_textual_theme
 from ytmusic_tui.navigation import PageState
 from ytmusic_tui.queue import Track
-from ytmusic_tui.views.album import AlbumView
-from ytmusic_tui.views.artist import ArtistView
-from ytmusic_tui.views.history import HistoryView
-from ytmusic_tui.views.home import HomeView
-from ytmusic_tui.views.library import LibraryView
-from ytmusic_tui.views.lyrics import LyricsView
 from ytmusic_tui.views.playlist import PlaylistView
-from ytmusic_tui.views.popup import ActionKind, ActionPopup, PlaylistPickerPopup, ThemePopup
+from ytmusic_tui.views.popup import (
+    NEW_PLAYLIST_SENTINEL,
+    ActionKind,
+    ActionPopup,
+    PlaylistPickerPopup,
+    ThemePopup,
+)
 from ytmusic_tui.views.queue import QueueView
-from ytmusic_tui.views.search import SearchView
 
 if TYPE_CHECKING:
     from textual.app import App
 
-    from ytmusic_tui.api import AlbumInfo, MusicAPI, PlaylistInfo
+    from ytmusic_tui.api import MusicAPI
     from ytmusic_tui.config import AppConfig
     from ytmusic_tui.navigation import NavigationManager
     from ytmusic_tui.player import Player
     from ytmusic_tui.queue import QueueManager
+    from ytmusic_tui.views.base import FetchView
 
     _Base = App[None]
 else:
@@ -53,6 +54,9 @@ _VOLUME_STEP = 5
 
 # Seek step in seconds (spotify_player compatible)
 _SEEK_STEP = 5.0
+
+# How long the playback-failure toast stays on screen (seconds)
+_PLAYBACK_ERROR_TIMEOUT = 8.0
 
 
 class PlaybackActions(_Base):
@@ -66,6 +70,27 @@ class PlaybackActions(_Base):
         next_track = self.queue_manager.next_track()
         if next_track is not None:
             self.player.play(next_track.video_id)
+
+    def _on_playback_error(self, description: str = "") -> None:
+        """Surface an mpv playback failure to the user.
+
+        The queue is intentionally not advanced (see Player._handle_end_file):
+        a broken resolver would otherwise skip through every track. We just
+        show a single-line toast naming the failing track so the user is not
+        left staring at a silent player. *description* is mpv's optional short
+        error string; it is appended in parentheses when present.
+
+        Runs on the Textual thread — on_mount bridges mpv's event thread via
+        call_from_thread.
+        """
+        track = self.queue_manager.current_track
+        if track is not None:
+            message = f"Playback failed: {track.title} — press n to skip"
+        else:
+            message = "Playback failed"
+        if description:
+            message = f"{message} ({description})"
+        self.notify(message, severity="error", timeout=_PLAYBACK_ERROR_TIMEOUT)
 
     def action_toggle_pause(self) -> None:
         state = self.player.get_state()
@@ -127,6 +152,10 @@ class PlaybackActions(_Base):
     def action_toggle_mute(self) -> None:
         self.player.toggle_mute()
 
+    def action_cycle_audio_quality(self) -> None:
+        quality = self.player.cycle_audio_quality()
+        self.notify(f"Audio quality: {quality} (applies from the next track)")
+
     def _queue_and_play(self, tracks: list[Track]) -> None:
         self.queue_manager.set_playlist(tracks, start_index=0)
         self.player.play(tracks[0].video_id)
@@ -169,11 +198,10 @@ class BrowseActions(_Base):
     @work(thread=True)
     def _lookup_and_open_artist(self, artist_name: str) -> None:
         try:
-            raw = self.music_api._client.search(artist_name, filter="artists", limit=5)
-            for item in raw:
-                cid = item.get("browseId")
-                if cid:
-                    self.call_from_thread(self.action_open_artist, cid)
+            artists = self.music_api.search_all(artist_name, limit=5, filter="artists").artists
+            for artist in artists:
+                if artist.channel_id:
+                    self.call_from_thread(self.action_open_artist, artist.channel_id)
                     return
             self.call_from_thread(
                 self.notify, f"Artist not found: {artist_name}", severity="warning"
@@ -197,11 +225,9 @@ class BrowseActions(_Base):
         try:
             status = self.music_api.get_like_status(video_id)
             new_status = "INDIFFERENT" if status == "LIKE" else "LIKE"
-            if self.music_api.rate_track(video_id, new_status):
-                message = "Liked" if new_status == "LIKE" else "Like removed"
-                self.call_from_thread(self.notify, message)
-            else:
-                self.call_from_thread(self.notify, "Could not update like", severity="error")
+            self.music_api.rate_track(video_id, new_status)
+            message = "Liked" if new_status == "LIKE" else "Like removed"
+            self.call_from_thread(self.notify, message)
         except Exception as exc:
             self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
 
@@ -225,11 +251,10 @@ class BrowseActions(_Base):
     def _lookup_and_open_album(self, album_name: str, artist_name: str = "") -> None:
         try:
             q = f"{album_name} {artist_name}".strip()
-            raw = self.music_api._client.search(q, filter="albums", limit=5)
-            for item in raw:
-                bid = item.get("browseId")
-                if bid:
-                    self.call_from_thread(self.action_open_album, bid)
+            albums = self.music_api.search_all(q, limit=5, filter="albums").albums
+            for album in albums:
+                if album.browse_id:
+                    self.call_from_thread(self.action_open_album, album.browse_id)
                     return
             self.call_from_thread(
                 self.notify, f"Album not found: {album_name}", severity="warning"
@@ -258,6 +283,7 @@ class PopupActions(_Base):
         def _refresh_queue_view_if_active(self) -> None: ...
         def action_switch_view(self, view_id: str) -> None: ...
         def action_open_album(self, browse_id: str) -> None: ...
+        def current_view(self) -> FetchView | None: ...
 
     def action_open_action_popup(self) -> None:
         item = self._get_focused_item()
@@ -272,7 +298,7 @@ class PopupActions(_Base):
             context = "queue"
         elif switcher.current == "playlist":
             pv = self.query_one(PlaylistView)
-            if getattr(pv, "_viewing_tracks", False):
+            if pv.is_viewing_tracks:
                 context = "playlist_tracks"
         self.query_one(ActionPopup).show(item, context=context)
 
@@ -286,29 +312,14 @@ class PopupActions(_Base):
         )
 
     def _get_focused_item(self) -> Track | PlaylistInfo | AlbumInfo | None:
-        switcher = self.query_one(ContentSwitcher)
-        current_id = switcher.current
-        view_map: dict[str, type[Static]] = {
-            "home": HomeView,
-            "search": SearchView,
-            "library": LibraryView,
-            "playlist": PlaylistView,
-            "queue": QueueView,
-            "album": AlbumView,
-            "artist": ArtistView,
-            "lyrics": LyricsView,
-            "history": HistoryView,
-        }
-        view_cls = view_map.get(current_id or "")
-        if view_cls is None:
-            return None
-        try:
-            view = self.query_one(view_cls)
-        except Exception:
+        view = self.current_view()
+        if view is None:
             return None
         getter = getattr(view, "get_focused_item", None)
         if getter is None:
             return None
+        # getattr returns Any; cast pins the dynamic call back to the
+        # declared return type instead of letting Any leak to callers.
         return cast("Track | PlaylistInfo | AlbumInfo | None", getter())
 
     def on_action_popup_action_selected(self, event: ActionPopup.ActionSelected) -> None:
@@ -352,8 +363,6 @@ class PopupActions(_Base):
             self._handle_open(item)
 
     def _handle_play_all(self, item: object) -> None:
-        from ytmusic_tui.api import AlbumInfo, PlaylistInfo
-
         if isinstance(item, PlaylistInfo):
             self._play_all_playlist(item.playlist_id)
         elif isinstance(item, AlbumInfo):
@@ -378,11 +387,9 @@ class PopupActions(_Base):
             self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
 
     def _handle_open(self, item: object) -> None:
-        from ytmusic_tui.api import AlbumInfo, PlaylistInfo
-
         if isinstance(item, PlaylistInfo):
             self.action_switch_view("playlist")
-            self.query_one(PlaylistView)._show_track_list(item)
+            self.query_one(PlaylistView).show_track_list(item)
         elif isinstance(item, AlbumInfo):
             self.action_open_album(item.browse_id)
 
@@ -413,7 +420,7 @@ class PopupActions(_Base):
         if not isinstance(track, Track) or not track.video_id:
             return
         playlist_id = event.playlist_id
-        if playlist_id == PlaylistPickerPopup._NEW_PLAYLIST_SENTINEL:
+        if playlist_id == NEW_PLAYLIST_SENTINEL:
             self._create_and_add(track)
         elif playlist_id:
             self._add_to_existing_playlist(playlist_id, track)
@@ -422,27 +429,27 @@ class PopupActions(_Base):
     def _create_and_add(self, track: Track) -> None:
         try:
             new_id = self.music_api.create_playlist("New Playlist")
-            if not new_id:
-                self.call_from_thread(self.notify, "Could not create playlist", severity="error")
-                return
-            if self.music_api.add_playlist_items(new_id, [track.video_id]):
-                self.call_from_thread(self.notify, "Created playlist and added track")
-            else:
-                self.call_from_thread(
-                    self.notify,
-                    "Playlist created, but adding the track failed",
-                    severity="error",
-                )
         except Exception as exc:
             self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
+            return
+        try:
+            self.music_api.add_playlist_items(new_id, [track.video_id])
+        except Exception as exc:
+            # The playlist now exists but is empty — the message must say
+            # so, or the user cannot explain the stray playlist later.
+            self.call_from_thread(
+                self.notify,
+                f"Playlist created, but adding the track failed ({classify_api_error(exc)})",
+                severity="error",
+            )
+            return
+        self.call_from_thread(self.notify, "Created playlist and added track")
 
     @work(thread=True)
     def _add_to_existing_playlist(self, playlist_id: str, track: Track) -> None:
         try:
-            if self.music_api.add_playlist_items(playlist_id, [track.video_id]):
-                self.call_from_thread(self.notify, "Added to playlist")
-            else:
-                self.call_from_thread(self.notify, "Could not add to playlist", severity="error")
+            self.music_api.add_playlist_items(playlist_id, [track.video_id])
+            self.call_from_thread(self.notify, "Added to playlist")
         except Exception as exc:
             self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
 
@@ -460,21 +467,15 @@ class PopupActions(_Base):
     def _remove_from_playlist(self, track: Track) -> None:
         try:
             pv = self.query_one(PlaylistView)
-            playlist_id = getattr(pv, "_current_playlist_id", "")
+            playlist_id = pv.current_playlist_id
             if not playlist_id:
                 return
-            if not self.music_api.remove_playlist_items(playlist_id, [track.video_id]):
-                self.call_from_thread(
-                    self.notify, "Could not remove from playlist", severity="error"
-                )
-                return
+            self.music_api.remove_playlist_items(playlist_id, [track.video_id])
             self.call_from_thread(self._reload_playlist_view, playlist_id)
         except Exception as exc:
             self.call_from_thread(self.notify, classify_api_error(exc), severity="error")
 
     def _reload_playlist_view(self, playlist_id: str) -> None:
-        from ytmusic_tui.api import PlaylistInfo
-
         pv = self.query_one(PlaylistView)
         title = getattr(pv, "_current_playlist_title", "")
-        pv._show_track_list(PlaylistInfo(playlist_id=playlist_id, title=title))
+        pv.show_track_list(PlaylistInfo(playlist_id=playlist_id, title=title))

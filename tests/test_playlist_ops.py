@@ -9,7 +9,7 @@ from helpers import capture_notifications as _capture_notifications
 from helpers import make_app
 from helpers import make_track as _make_track
 
-from ytmusic_tui.views.popup import PlaylistPickerPopup
+from ytmusic_tui.views.popup import NEW_PLAYLIST_SENTINEL, PlaylistPickerPopup
 
 # ---------------------------------------------------------------------------
 # API methods
@@ -32,26 +32,29 @@ class TestCreatePlaylist:
         )
 
     @patch("ytmusic_tui.api.YTMusic")
-    def test_create_playlist_failure(self, mock_cls: MagicMock) -> None:
+    def test_create_playlist_propagates_transport_error(self, mock_cls: MagicMock) -> None:
+        """A transport/auth error must propagate, not collapse to None."""
         from ytmusic_tui.api import MusicAPI
 
         mock_client = mock_cls.return_value
         mock_client.create_playlist.side_effect = Exception("API error")
 
         api = MusicAPI("/fake/path")
-        result = api.create_playlist("Fail")
-        assert result is None
+        with pytest.raises(Exception, match="API error"):
+            api.create_playlist("Fail")
 
     @patch("ytmusic_tui.api.YTMusic")
-    def test_create_playlist_non_string_result(self, mock_cls: MagicMock) -> None:
-        from ytmusic_tui.api import MusicAPI
+    def test_create_playlist_non_string_result_raises(self, mock_cls: MagicMock) -> None:
+        """A completed call that returns an error dict (no playlist id)
+        is a logical failure -> MutationFailedError."""
+        from ytmusic_tui.api import MusicAPI, MutationFailedError
 
         mock_client = mock_cls.return_value
         mock_client.create_playlist.return_value = {"error": "bad"}
 
         api = MusicAPI("/fake/path")
-        result = api.create_playlist("Weird")
-        assert result is None
+        with pytest.raises(MutationFailedError):
+            api.create_playlist("Weird")
 
 
 class TestAddPlaylistItems:
@@ -63,8 +66,8 @@ class TestAddPlaylistItems:
         mock_client.add_playlist_items.return_value = {"status": "STATUS_SUCCEEDED"}
 
         api = MusicAPI("/fake/path")
-        result = api.add_playlist_items("PL123", ["vid1", "vid2"])
-        assert result is True
+        # Success returns None; absence of an exception is the contract.
+        assert api.add_playlist_items("PL123", ["vid1", "vid2"]) is None
 
     @patch("ytmusic_tui.api.YTMusic")
     def test_add_items_success_string(self, mock_cls: MagicMock) -> None:
@@ -74,30 +77,31 @@ class TestAddPlaylistItems:
         mock_client.add_playlist_items.return_value = "STATUS_SUCCEEDED"
 
         api = MusicAPI("/fake/path")
-        result = api.add_playlist_items("PL123", ["vid1"])
-        assert result is True
+        assert api.add_playlist_items("PL123", ["vid1"]) is None
 
     @patch("ytmusic_tui.api.YTMusic")
-    def test_add_items_failure(self, mock_cls: MagicMock) -> None:
-        from ytmusic_tui.api import MusicAPI
+    def test_add_items_logical_failure_raises(self, mock_cls: MagicMock) -> None:
+        """HTTP succeeded but status != STATUS_SUCCEEDED -> MutationFailedError."""
+        from ytmusic_tui.api import MusicAPI, MutationFailedError
 
         mock_client = mock_cls.return_value
         mock_client.add_playlist_items.return_value = {"status": "STATUS_FAILED"}
 
         api = MusicAPI("/fake/path")
-        result = api.add_playlist_items("PL123", ["vid1"])
-        assert result is False
+        with pytest.raises(MutationFailedError):
+            api.add_playlist_items("PL123", ["vid1"])
 
     @patch("ytmusic_tui.api.YTMusic")
-    def test_add_items_exception(self, mock_cls: MagicMock) -> None:
+    def test_add_items_propagates_transport_error(self, mock_cls: MagicMock) -> None:
+        """A transport/auth error must propagate, not collapse to False."""
         from ytmusic_tui.api import MusicAPI
 
         mock_client = mock_cls.return_value
         mock_client.add_playlist_items.side_effect = Exception("Network")
 
         api = MusicAPI("/fake/path")
-        result = api.add_playlist_items("PL123", ["vid1"])
-        assert result is False
+        with pytest.raises(Exception, match="Network"):
+            api.add_playlist_items("PL123", ["vid1"])
 
 
 # ---------------------------------------------------------------------------
@@ -120,33 +124,51 @@ class TestRemovePlaylistItems:
         mock_client.remove_playlist_items.return_value = "STATUS_SUCCEEDED"
 
         api = MusicAPI("/fake/path")
-        result = api.remove_playlist_items("PL123", ["vid1"])
-        assert result is True
+        # Success returns None; absence of an exception is the contract.
+        assert api.remove_playlist_items("PL123", ["vid1"]) is None
         mock_client.remove_playlist_items.assert_called_once_with(
             "PL123", [{"videoId": "vid1", "setVideoId": "set1"}]
         )
 
     @patch("ytmusic_tui.api.YTMusic")
-    def test_remove_items_video_not_found(self, mock_cls: MagicMock) -> None:
-        from ytmusic_tui.api import MusicAPI
+    def test_remove_items_video_not_found_raises(self, mock_cls: MagicMock) -> None:
+        """No matching setVideoId found is a logical failure -> MutationFailedError."""
+        from ytmusic_tui.api import MusicAPI, MutationFailedError
 
         mock_client = mock_cls.return_value
         mock_client.get_playlist.return_value = {"tracks": []}
 
         api = MusicAPI("/fake/path")
-        result = api.remove_playlist_items("PL123", ["vid_missing"])
-        assert result is False
+        with pytest.raises(MutationFailedError):
+            api.remove_playlist_items("PL123", ["vid_missing"])
+        mock_client.remove_playlist_items.assert_not_called()
 
     @patch("ytmusic_tui.api.YTMusic")
-    def test_remove_items_exception(self, mock_cls: MagicMock) -> None:
+    def test_remove_items_logical_failure_raises(self, mock_cls: MagicMock) -> None:
+        """Found the track but the service reported non-success -> MutationFailedError."""
+        from ytmusic_tui.api import MusicAPI, MutationFailedError
+
+        mock_client = mock_cls.return_value
+        mock_client.get_playlist.return_value = {
+            "tracks": [{"videoId": "vid1", "setVideoId": "set1"}]
+        }
+        mock_client.remove_playlist_items.return_value = {"status": "STATUS_FAILED"}
+
+        api = MusicAPI("/fake/path")
+        with pytest.raises(MutationFailedError):
+            api.remove_playlist_items("PL123", ["vid1"])
+
+    @patch("ytmusic_tui.api.YTMusic")
+    def test_remove_items_propagates_transport_error(self, mock_cls: MagicMock) -> None:
+        """A transport/auth error must propagate, not collapse to False."""
         from ytmusic_tui.api import MusicAPI
 
         mock_client = mock_cls.return_value
         mock_client.get_playlist.side_effect = Exception("API error")
 
         api = MusicAPI("/fake/path")
-        result = api.remove_playlist_items("PL123", ["vid1"])
-        assert result is False
+        with pytest.raises(Exception, match="API error"):
+            api.remove_playlist_items("PL123", ["vid1"])
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +222,7 @@ class TestContextActions:
 
 class TestPlaylistPickerPopup:
     def test_sentinel_value(self) -> None:
-        assert PlaylistPickerPopup._NEW_PLAYLIST_SENTINEL == "__new__"
+        assert NEW_PLAYLIST_SENTINEL == "__new__"
 
     def test_initial_state(self) -> None:
         popup = PlaylistPickerPopup()
@@ -231,17 +253,25 @@ class TestPlaylistOpsFeedback:
         assert ("Added to playlist", "information") in captured
 
     @pytest.mark.asyncio
-    async def test_add_to_existing_notifies_failure(self) -> None:
-        app = make_app(
-            configure_api=lambda api: setattr(api.add_playlist_items, "return_value", False)
-        )
+    async def test_add_to_existing_notifies_logical_failure(self) -> None:
+        """A logical failure (service rejected the add) surfaces the
+        MutationFailedError message verbatim, which is more specific than the
+        old generic "Could not add to playlist"."""
+        from ytmusic_tui.api import MutationFailedError
+
+        def _configure(api) -> None:
+            api.add_playlist_items.side_effect = MutationFailedError(
+                "Tracks were not added to the playlist"
+            )
+
+        app = make_app(configure_api=_configure)
         async with app.run_test(size=(120, 40)) as pilot:
             captured = _capture_notifications(app)
             app._add_to_existing_playlist("PL123", _make_track())
             await app.workers.wait_for_complete()
             await pilot.pause()
 
-        assert ("Could not add to playlist", "error") in captured
+        assert ("Tracks were not added to the playlist", "error") in captured
 
     @pytest.mark.asyncio
     async def test_add_to_existing_classifies_auth_error(self) -> None:
@@ -263,7 +293,7 @@ class TestPlaylistOpsFeedback:
     async def test_create_and_add_notifies_success(self) -> None:
         def _configure(api) -> None:
             api.create_playlist.return_value = "PLnew"
-            api.add_playlist_items.return_value = True
+            api.add_playlist_items.return_value = None
 
         app = make_app(configure_api=_configure)
         async with app.run_test(size=(120, 40)) as pilot:
@@ -276,8 +306,12 @@ class TestPlaylistOpsFeedback:
 
     @pytest.mark.asyncio
     async def test_create_and_add_notifies_create_failure(self) -> None:
+        """A create that the service rejects surfaces the MutationFailedError
+        message verbatim."""
+        from ytmusic_tui.api import MutationFailedError
+
         def _configure(api) -> None:
-            api.create_playlist.return_value = None
+            api.create_playlist.side_effect = MutationFailedError("Playlist was not created")
 
         app = make_app(configure_api=_configure)
         async with app.run_test(size=(120, 40)) as pilot:
@@ -286,7 +320,33 @@ class TestPlaylistOpsFeedback:
             await app.workers.wait_for_complete()
             await pilot.pause()
 
-        assert ("Could not create playlist", "error") in captured
+        assert ("Playlist was not created", "error") in captured
+
+    @pytest.mark.asyncio
+    async def test_create_and_add_notifies_partial_failure(self) -> None:
+        """Create succeeds but add fails: the message must say the playlist
+        now exists (empty) and why the track was not added."""
+        from ytmusic_tui.api import MutationFailedError
+
+        def _configure(api) -> None:
+            api.create_playlist.return_value = "PLnew"
+            api.add_playlist_items.side_effect = MutationFailedError(
+                "Tracks were not added to the playlist"
+            )
+
+        app = make_app(configure_api=_configure)
+        async with app.run_test(size=(120, 40)) as pilot:
+            captured = _capture_notifications(app)
+            app._create_and_add(_make_track())
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+        assert any(
+            message.startswith("Playlist created, but adding the track failed")
+            and "Tracks were not added" in message
+            and severity == "error"
+            for message, severity in captured
+        )
 
     @pytest.mark.asyncio
     async def test_play_all_playlist_notifies_on_api_error(self) -> None:

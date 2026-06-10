@@ -18,6 +18,25 @@ _YTM_URL = "https://music.youtube.com/watch?v={video_id}"
 _VOL_MIN = 0
 _VOL_MAX = 100
 
+# yt-dlp format selectors for each audio quality level.
+#
+# YouTube Music serves:
+#   - opus 251 ~160 kbps
+#   - opus 250 ~70 kbps
+#   - opus 249 ~50 kbps
+#   - AAC 140 ~128 kbps
+#
+# Every entry falls back to "bestaudio/best" so an over-narrow filter
+# can never yield "no formats" (the ytdl-hook would fail silently).
+AUDIO_QUALITY_FORMATS: dict[str, str] = {
+    "low": "bestaudio[abr<=70]/bestaudio/best",
+    "normal": "bestaudio[abr<=131]/bestaudio/best",
+    "high": "bestaudio/best",
+}
+
+# Ordered cycle used by cycle_audio_quality.
+_QUALITY_CYCLE = ["low", "normal", "high"]
+
 
 @dataclass
 class PlayerState:
@@ -45,21 +64,36 @@ class Player:
 
     mpv plays YouTube URLs directly via its built-in ytdl-hook,
     so no external yt-dlp subprocess is needed.
+
+    Args:
+        audio_quality: Initial quality level — "low", "normal", or "high".
+            Unknown values are silently normalised to "high" (config typos
+            degrade gracefully to the default; the ``b`` key in the TUI
+            reveals the active value).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, audio_quality: str = "high") -> None:
         import locale
 
         locale.setlocale(locale.LC_NUMERIC, "C")
+        # Normalise unknown values to the safe default.
+        quality = audio_quality if audio_quality in AUDIO_QUALITY_FORMATS else "high"
+        self._audio_quality: str = quality
+
+        # python-mpv translates constructor kwargs: underscores → dashes
+        # (e.g. ytdl_format → ytdl-format).  See mpv.MPV.__init__.
         self._mpv: mpv.MPV = mpv.MPV(
             ytdl=True,
             video=False,
             terminal=False,
+            ytdl_format=AUDIO_QUALITY_FORMATS[quality],
         )
         self._video_id: str = ""
         self.on_track_end: Callable[[], None] | None = None
+        self.on_track_error: Callable[[str], None] | None = None
 
-        # Register end-of-file observer for queue integration
+        # Register end-of-file observer for queue integration.
+        # python-mpv's event_callback decorator is untyped.
         @self._mpv.event_callback("end-file")  # type: ignore[untyped-decorator]
         def _on_end_file(event: mpv.MpvEvent) -> None:
             self._handle_end_file(event)
@@ -67,20 +101,51 @@ class Player:
         self._end_file_handler = _on_end_file
 
     def _handle_end_file(self, event: mpv.MpvEvent) -> None:
-        """Fire on_track_end only when a track finished naturally.
+        """Route an mpv end-file event to the right callback.
 
-        mpv emits end-file for *every* reason a file stops, including
-        being replaced by a new loadfile (ABORTED) — reacting to those
-        would auto-advance the queue right after the user picks a track,
-        playing the wrong song. ERROR is also ignored on purpose: with a
-        broken stream resolver it would machine-gun through the queue.
+        mpv emits end-file for *every* reason a file stops:
+
+        * ``EOF`` — the track finished naturally; fire ``on_track_end`` so
+          the queue advances.
+        * ``ERROR`` — the stream could not be played (e.g. a stale resolver
+          facing YouTube's EJS challenges). We deliberately do **not**
+          advance the queue, because a broken resolver would machine-gun
+          through every track. Instead we fire ``on_track_error`` with a
+          short description so the user gets visible feedback rather than
+          silence. The description comes from mpv's integer error code
+          (``event.data.error``) via :meth:`mpv.ErrorCode.human_readable`;
+          python-mpv 1.0.8 exposes no human-readable ``file_error`` string,
+          so we translate the code ourselves and fall back to an empty
+          string if it is unavailable.
+        * Any other reason (ABORTED on loadfile replacement, QUIT,
+          REDIRECT, ...) is ignored: reacting to ABORTED auto-advanced the
+          queue right after the user picked a track, playing the wrong song.
         """
         data = getattr(event, "data", None)
         reason = getattr(data, "reason", None)
-        if reason != mpv.MpvEventEndFile.EOF:
+        if reason == mpv.MpvEventEndFile.EOF:
+            if self.on_track_end is not None:
+                self.on_track_end()
             return
-        if self.on_track_end is not None:
-            self.on_track_end()
+        if reason == mpv.MpvEventEndFile.ERROR:
+            if self.on_track_error is not None:
+                self.on_track_error(self._end_file_error(data))
+            return
+
+    @staticmethod
+    def _end_file_error(data: object) -> str:
+        """Translate an end-file event's mpv error code to a short string.
+
+        Returns the empty string when the code is missing, zero, or cannot
+        be translated, so callers can treat the description as optional.
+        """
+        code = getattr(data, "error", None)
+        if not isinstance(code, int) or code == 0:
+            return ""
+        try:
+            return str(mpv.ErrorCode.human_readable(code))
+        except Exception:
+            return ""
 
     # -- Playback control --------------------------------------------------
 
@@ -121,6 +186,35 @@ class Player:
     def seek_absolute(self, position: float) -> None:
         """Seek to an absolute *position* in seconds."""
         self._mpv.seek(position, "absolute")
+
+    # -- Audio quality ------------------------------------------------------
+
+    @property
+    def audio_quality(self) -> str:
+        """Current audio quality level ("low", "normal", or "high")."""
+        return self._audio_quality
+
+    def set_audio_quality(self, quality: str) -> None:
+        """Set the yt-dlp format selector for a new quality level.
+
+        Unknown values are normalised to "high".  The change applies from
+        the *next* track: ytdl-format is evaluated by the ytdl-hook at
+        loadfile time, so the currently-playing stream is unaffected.
+
+        Uses dict-style option write (``self._mpv["ytdl-format"] = ...``),
+        which maps to mpv's ``options/`` property namespace — the same
+        mechanism as MPV.__setitem__ in python-mpv 1.0.8.
+        """
+        quality = quality if quality in AUDIO_QUALITY_FORMATS else "high"
+        self._audio_quality = quality
+        self._mpv["ytdl-format"] = AUDIO_QUALITY_FORMATS[quality]
+
+    def cycle_audio_quality(self) -> str:
+        """Advance quality low → normal → high → low and return the new value."""
+        idx = _QUALITY_CYCLE.index(self._audio_quality)
+        new_quality = _QUALITY_CYCLE[(idx + 1) % len(_QUALITY_CYCLE)]
+        self.set_audio_quality(new_quality)
+        return self._audio_quality
 
     # -- State introspection ------------------------------------------------
 

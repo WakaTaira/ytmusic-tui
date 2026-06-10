@@ -9,17 +9,18 @@ selected item.
 from __future__ import annotations
 
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
-from textual import work
 from textual.containers import Horizontal, Vertical
-from textual.widgets import DataTable, Label, Static
+from textual.css.query import NoMatches
+from textual.widgets import DataTable, Label
 
-from ytmusic_tui.auth import classify_api_error
 from ytmusic_tui.formatting import format_duration as _format_duration
 from ytmusic_tui.layout import Orientation
+from ytmusic_tui.views.base import FetchView
 from ytmusic_tui.views.filter_bar import FilterBar
 from ytmusic_tui.views.guards import teardown_safe
+from ytmusic_tui.views.widgets import NavDataTable
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -51,12 +52,14 @@ _LIBRARY_TABLE_IDS: dict[LibraryPane, str] = {
 }
 
 
-class LibraryView(Static):
+class LibraryView(FetchView):
     """Library view with three panes: Playlists, Albums, Artists.
 
     Tab/Shift-Tab cycles focus between panes. Enter drills into
     the selected item. Escape returns from track list to playlist list.
     """
+
+    STATUS_LABEL_ID: ClassVar[str] = "#library-status"
 
     DEFAULT_CSS = """
     LibraryView {
@@ -123,25 +126,32 @@ class LibraryView(Static):
             # Playlists pane (left)
             with Vertical(classes="library-pane library-pane-playlists"):
                 yield Label("Playlists", id="pane-label-playlists", classes="pane-label-active")
-                table: DataTable[Any] = DataTable(id="library-playlists")
+                table: DataTable[Any] = NavDataTable(id="library-playlists")
                 table.cursor_type = "row"
                 yield table
             # Albums pane (center)
             with Vertical(classes="library-pane library-pane-albums"):
                 yield Label("Albums", id="pane-label-albums", classes="pane-label")
-                table = DataTable(id="library-albums")
+                table = NavDataTable(id="library-albums")
                 table.cursor_type = "row"
                 yield table
             # Artists pane (right)
             with Vertical(classes="library-pane library-pane-artists"):
                 yield Label("Artists", id="pane-label-artists", classes="pane-label")
-                table = DataTable(id="library-artists")
+                table = NavDataTable(id="library-artists")
                 table.cursor_type = "row"
                 yield table
         yield FilterBar("library-playlists", id="library-filter")
 
     def on_mount(self) -> None:
         """Initialize all three panes and fetch data."""
+        self.refresh_library()
+
+    def refresh_library(self) -> None:
+        """Set up columns, reset labels, and re-fetch all library data.
+
+        Safe to call after mount to reload content without remounting.
+        """
         self._setup_columns()
         self._update_pane_labels()
         self._fetch_all_data()
@@ -243,50 +253,17 @@ class LibraryView(Static):
     # ------------------------------------------------------------------
 
     def _fetch_all_data(self) -> None:
-        """Kick off parallel fetches for all three data sources."""
+        """Kick off parallel fetches for all three data sources.
+
+        One combined "Loading library..." status is shown up front; the
+        three workers each pass ``loading=None`` so they do not stomp on
+        it (any of them may set an error status on failure).
+        """
         self._set_status("Loading library...")
-        self._fetch_playlists()
-        self._fetch_albums()
-        self._fetch_artists()
-
-    @work(thread=True)
-    def _fetch_playlists(self) -> None:
-        """Fetch library playlists in a background thread."""
-        api = getattr(self.app, "music_api", None)
-        if api is None:
-            return
-
-        try:
-            playlists: list[PlaylistInfo] = api.get_library_playlists()
-            self.app.call_from_thread(self._populate_playlists, playlists)
-        except Exception as exc:
-            self.app.call_from_thread(self._set_status, classify_api_error(exc))
-
-    @work(thread=True)
-    def _fetch_albums(self) -> None:
-        """Fetch library albums in a background thread."""
-        api = getattr(self.app, "music_api", None)
-        if api is None:
-            return
-
-        try:
-            albums: list[AlbumInfo] = api.get_library_albums()
-            self.app.call_from_thread(self._populate_albums, albums)
-        except Exception as exc:
-            self.app.call_from_thread(self._set_status, classify_api_error(exc))
-
-    @work(thread=True)
-    def _fetch_artists(self) -> None:
-        """Fetch library artists in a background thread."""
-        api = getattr(self.app, "music_api", None)
-        if api is None:
-            return
-
-        try:
-            artists: list[ArtistInfo] = api.get_library_artists()
-            self.app.call_from_thread(self._populate_artists, artists)
-        except Exception as exc:
-            self.app.call_from_thread(self._set_status, classify_api_error(exc))
+        api = self.music_app.music_api
+        self._run_fetch(api.get_library_playlists, self._populate_playlists)
+        self._run_fetch(api.get_library_albums, self._populate_albums)
+        self._run_fetch(api.get_library_artists, self._populate_artists)
 
     # ------------------------------------------------------------------
     # Population callbacks
@@ -353,26 +330,12 @@ class LibraryView(Static):
         table.clear(columns=True)
         table.add_columns("Title", "Artist", "Album", "Duration")
 
-        self._fetch_tracks(playlist.playlist_id)
-
-    @work(thread=True)
-    def _fetch_tracks(self, playlist_id: str) -> None:
-        """Fetch playlist tracks in a background thread."""
-        self.app.call_from_thread(
-            self._set_status,
-            f"Loading tracks for {self._current_playlist_title}...",
+        playlist_id = playlist.playlist_id
+        self._run_fetch(
+            lambda: self.music_app.music_api.get_playlist_tracks(playlist_id),
+            self._populate_tracks,
+            loading=f"Loading tracks for {playlist.title}...",
         )
-
-        api = getattr(self.app, "music_api", None)
-        if api is None:
-            self.app.call_from_thread(self._set_status, "Error: API not initialized")
-            return
-
-        try:
-            tracks: list[Track] = api.get_playlist_tracks(playlist_id)
-            self.app.call_from_thread(self._populate_tracks, tracks)
-        except Exception as exc:
-            self.app.call_from_thread(self._set_status, classify_api_error(exc))
 
     @teardown_safe
     def _populate_tracks(self, tracks: list[Track]) -> None:
@@ -440,12 +403,8 @@ class LibraryView(Static):
             if row_index < 0 or row_index >= len(self._tracks):
                 return
             track = self._tracks[row_index]
-            queue = getattr(self.app, "queue_manager", None)
-            player = getattr(self.app, "player", None)
-            if queue is not None:
-                queue.set_playlist(self._tracks, start_index=row_index)
-            if player is not None:
-                player.play(track.video_id)
+            self.music_app.queue_manager.set_playlist(self._tracks, start_index=row_index)
+            self.music_app.player.play(track.video_id)
         else:
             # Playlist list mode: drill into playlist
             if row_index < 0 or row_index >= len(self._playlists):
@@ -459,10 +418,7 @@ class LibraryView(Static):
             return
 
         album = self._albums[row_index]
-        app = self.app
-        open_album = getattr(app, "action_open_album", None)
-        if open_album is not None:
-            open_album(album.browse_id)
+        self.music_app.action_open_album(album.browse_id)
 
     def _handle_artist_selection(self, row_index: int) -> None:
         """Open the selected artist in ArtistView."""
@@ -470,10 +426,7 @@ class LibraryView(Static):
             return
 
         artist = self._artists[row_index]
-        app = self.app
-        open_artist = getattr(app, "action_open_artist", None)
-        if open_artist is not None:
-            open_artist(artist.channel_id)
+        self.music_app.action_open_artist(artist.channel_id)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -487,10 +440,8 @@ class LibraryView(Static):
         on the active pane.
         """
         if self._active_pane is LibraryPane.PLAYLISTS:
-            try:
-                table = self.query_one("#library-playlists", DataTable)
-                row_index = table.cursor_row
-            except Exception:
+            row_index = self._cursor_row("#library-playlists")
+            if row_index is None:
                 return None
             if self._viewing_tracks:
                 if 0 <= row_index < len(self._tracks):
@@ -499,10 +450,8 @@ class LibraryView(Static):
                 if 0 <= row_index < len(self._playlists):
                     return self._playlists[row_index]
         elif self._active_pane is LibraryPane.ALBUMS:
-            try:
-                table = self.query_one("#library-albums", DataTable)
-                row_index = table.cursor_row
-            except Exception:
+            row_index = self._cursor_row("#library-albums")
+            if row_index is None:
                 return None
             if 0 <= row_index < len(self._albums):
                 return self._albums[row_index]
@@ -518,11 +467,6 @@ class LibraryView(Static):
             filter_bar.retarget(target_id)
             filter_bar.show()
 
-    @teardown_safe
-    def _set_status(self, text: str) -> None:
-        """Update the status label."""
-        self.query_one("#library-status", Label).update(text)
-
     def update_orientation(self, orientation: Orientation) -> None:
         """Switch between horizontal and vertical pane layout.
 
@@ -535,7 +479,7 @@ class LibraryView(Static):
         self._orientation = orientation
         try:
             panes_container = self.query_one("#library-panes")
-        except Exception:
+        except NoMatches:
             return
 
         if orientation is Orientation.VERTICAL:

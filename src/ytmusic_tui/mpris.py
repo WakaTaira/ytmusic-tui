@@ -484,6 +484,7 @@ class MprisService:
         self._started.set()
 
         stop_task = asyncio.ensure_future(self._stop_event.wait())
+        # dbus-fast ships no type stubs, so wait_for_disconnect is untyped.
         disconnect_task = asyncio.ensure_future(
             bus.wait_for_disconnect()  # type: ignore[no-untyped-call]
         )

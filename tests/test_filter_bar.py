@@ -698,3 +698,73 @@ class TestAppToggleFilter:
             filter_bar.on_key(mock_event)
             await _pilot.pause()
             assert not filter_bar.is_visible
+
+
+# ===================================================================
+# FilterBar: missing target notifies the user (Task 3)
+# ===================================================================
+
+
+class TestFilterBarMissingTarget:
+    """show() with a target table id that resolves to None must notify the user."""
+
+    @pytest.mark.asyncio
+    async def test_show_with_bad_target_notifies_and_stays_hidden(self) -> None:
+        """When target_table is None (bad id), show() notifies and remains hidden."""
+        from helpers import capture_notifications, make_app
+
+        from ytmusic_tui.views.filter_bar import FilterBar
+        from ytmusic_tui.views.queue import QueueView
+
+        app = make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            captured = capture_notifications(app)
+            app.action_switch_view("queue")
+            await _pilot.pause()
+
+            view = app.query_one(QueueView)
+            filter_bar = view.query_one("#queue-filter", FilterBar)
+
+            # Retarget to a non-existent table id
+            filter_bar._target_table_id = "this-table-does-not-exist"
+            assert filter_bar.target_table is None
+
+            filter_bar.show()
+            await _pilot.pause()
+
+            # Filter bar must remain hidden
+            assert not filter_bar.is_visible
+
+            # A warning notification must have been posted
+            assert any("Nothing to filter" in msg and sev == "warning" for msg, sev in captured), (
+                f"Expected 'Nothing to filter' warning, got: {captured}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_show_with_valid_target_does_not_notify(self) -> None:
+        """show() with a valid target must not emit the 'Nothing to filter' warning."""
+        from helpers import capture_notifications, make_app, make_tracks
+
+        from ytmusic_tui.views.filter_bar import FilterBar
+        from ytmusic_tui.views.queue import QueueView
+
+        app = make_app()
+        async with app.run_test(size=(120, 40)) as _pilot:
+            captured = capture_notifications(app)
+
+            tracks = make_tracks(3)
+            app.queue_manager.set_playlist(tracks)
+            app.action_switch_view("queue")
+            await _pilot.pause()
+
+            view = app.query_one(QueueView)
+            view.refresh_queue()
+            await _pilot.pause()
+
+            filter_bar = view.query_one("#queue-filter", FilterBar)
+            filter_bar.show()
+            await _pilot.pause()
+
+            # The filter bar must be visible and no "Nothing to filter" warning
+            assert filter_bar.is_visible
+            assert not any("Nothing to filter" in msg for msg, _sev in captured)
