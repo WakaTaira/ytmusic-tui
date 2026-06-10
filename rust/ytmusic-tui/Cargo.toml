@@ -9,3 +9,10 @@ description = "YouTube Music TUI client (Rust port)"
 [[bin]]
 name = "ytmusic-tui"
 path = "src/main.rs"
+
+[lib]
+name = "ytmusic_tui"
+path = "src/lib.rs"
+
+[dependencies]
+rand = "0.9"
