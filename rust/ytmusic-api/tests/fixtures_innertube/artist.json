@@ -1,0 +1,624 @@
+{
+  "header": {
+    "musicImmersiveHeaderRenderer": {
+      "title": {
+        "runs": [
+          {
+            "text": "Lofi Girl"
+          }
+        ]
+      },
+      "thumbnail": {
+        "musicThumbnailRenderer": {
+          "thumbnail": {
+            "thumbnails": [
+              {
+                "url": "https://yt3.googleusercontent.com/YSRvDAd6k4ua0uFcwF4V9YRl1yyUYR52l5EuVHAl_DbxTdYS0l-XrMaLikKpGVLeT8dadxCMfNvbaA=w540-h225-p-l90-rj",
+                "width": 540,
+                "height": 225
+              },
+              {
+                "url": "https://yt3.googleusercontent.com/YSRvDAd6k4ua0uFcwF4V9YRl1yyUYR52l5EuVHAl_DbxTdYS0l-XrMaLikKpGVLeT8dadxCMfNvbaA=w2880-h1200-p-l90-rj",
+                "width": 2880,
+                "height": 1200
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "contents": {
+    "singleColumnBrowseResultsRenderer": {
+      "tabs": [
+        {
+          "tabRenderer": {
+            "content": {
+              "sectionListRenderer": {
+                "contents": [
+                  {
+                    "musicShelfRenderer": {
+                      "title": {
+                        "runs": [
+                          {
+                            "text": "Top songs",
+                            "navigationEndpoint": {
+                              "clickTrackingParams": "CKcEEPleGAAiEwjksdqQtv2UAxWZSg8CHZ-1DEXKAQSceCcs",
+                              "browseEndpoint": {
+                                "browseId": "VLOLAK5uy_kJIcTYhPGkiDOlYfL3W8Q20RarHQC2d2I",
+                                "params": "ggMCCAI%3D",
+                                "browseEndpointContextSupportedConfigs": {
+                                  "browseEndpointContextMusicConfig": {
+                                    "pageType": "MUSIC_PAGE_TYPE_PLAYLIST"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      "contents": [
+                        {
+                          "musicResponsiveListItemRenderer": {
+                            "flexColumns": [
+                              {
+                                "musicResponsiveListItemFlexColumnRenderer": {
+                                  "text": {
+                                    "runs": [
+                                      {
+                                        "text": "Snowman",
+                                        "navigationEndpoint": {
+                                          "watchEndpoint": {
+                                            "videoId": "zJymZhHQmfs"
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "musicResponsiveListItemFlexColumnRenderer": {
+                                  "text": {
+                                    "runs": [
+                                      {
+                                        "text": "WYS",
+                                        "navigationEndpoint": {
+                                          "browseEndpoint": {
+                                            "browseId": "UC5x6ZNyH0Ohcvzrex31H2VA",
+                                            "browseEndpointContextSupportedConfigs": {
+                                              "browseEndpointContextMusicConfig": {
+                                                "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "text": " & "
+                                      },
+                                      {
+                                        "text": "Lofi Girl",
+                                        "navigationEndpoint": {
+                                          "browseEndpoint": {
+                                            "browseId": "UCi5YpRRZmwegT235crEZ2YQ",
+                                            "browseEndpointContextSupportedConfigs": {
+                                              "browseEndpointContextMusicConfig": {
+                                                "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "musicResponsiveListItemFlexColumnRenderer": {
+                                  "text": {
+                                    "runs": [
+                                      {
+                                        "text": "10M plays"
+                                      }
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "musicResponsiveListItemFlexColumnRenderer": {
+                                  "text": {
+                                    "runs": [
+                                      {
+                                        "text": "Snowman",
+                                        "navigationEndpoint": {
+                                          "browseEndpoint": {
+                                            "browseId": "MPREb_EbO5NzWKli0",
+                                            "browseEndpointContextSupportedConfigs": {
+                                              "browseEndpointContextMusicConfig": {
+                                                "pageType": "MUSIC_PAGE_TYPE_ALBUM"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            ],
+                            "overlay": {
+                              "musicItemThumbnailOverlayRenderer": {
+                                "content": {
+                                  "musicPlayButtonRenderer": {
+                                    "playNavigationEndpoint": {
+                                      "watchEndpoint": {
+                                        "videoId": "zJymZhHQmfs",
+                                        "watchEndpointMusicSupportedConfigs": {
+                                          "watchEndpointMusicConfig": {
+                                            "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            "menu": {
+                              "menuRenderer": {
+                                "items": [],
+                                "topLevelButtons": [
+                                  {
+                                    "likeButtonRenderer": {
+                                      "likeStatus": "INDIFFERENT"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            "thumbnail": {
+                              "musicThumbnailRenderer": {
+                                "thumbnail": {
+                                  "thumbnails": [
+                                    {
+                                      "url": "https://yt3.googleusercontent.com/GpYxCW1dvPf-WNbhy-7uBbCiY3sN5FvPe4GEGDqRFdNc8eyHeVyeDXEqNqVIAnMRHhaM3P2FdxsLLXo=w60-h60-l90-rj",
+                                      "width": 60,
+                                      "height": 60
+                                    },
+                                    {
+                                      "url": "https://yt3.googleusercontent.com/GpYxCW1dvPf-WNbhy-7uBbCiY3sN5FvPe4GEGDqRFdNc8eyHeVyeDXEqNqVIAnMRHhaM3P2FdxsLLXo=w120-h120-l90-rj",
+                                      "width": 120,
+                                      "height": 120
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemRenderer": {
+                            "flexColumns": [
+                              {
+                                "musicResponsiveListItemFlexColumnRenderer": {
+                                  "text": {
+                                    "runs": [
+                                      {
+                                        "text": "Whirlpools",
+                                        "navigationEndpoint": {
+                                          "watchEndpoint": {
+                                            "videoId": "B_IrQoHbhAE"
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "musicResponsiveListItemFlexColumnRenderer": {
+                                  "text": {
+                                    "runs": [
+                                      {
+                                        "text": "Casiio",
+                                        "navigationEndpoint": {
+                                          "browseEndpoint": {
+                                            "browseId": "UCF-mN-XHUCabVfi71bU_Ecg",
+                                            "browseEndpointContextSupportedConfigs": {
+                                              "browseEndpointContextMusicConfig": {
+                                                "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "text": ", "
+                                      },
+                                      {
+                                        "text": "Kainbeats",
+                                        "navigationEndpoint": {
+                                          "browseEndpoint": {
+                                            "browseId": "UCTC2H5TTtKCRs5rG_spJDAw",
+                                            "browseEndpointContextSupportedConfigs": {
+                                              "browseEndpointContextMusicConfig": {
+                                                "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "text": " & "
+                                      },
+                                      {
+                                        "text": "Lofi Girl",
+                                        "navigationEndpoint": {
+                                          "browseEndpoint": {
+                                            "browseId": "UCi5YpRRZmwegT235crEZ2YQ",
+                                            "browseEndpointContextSupportedConfigs": {
+                                              "browseEndpointContextMusicConfig": {
+                                                "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "musicResponsiveListItemFlexColumnRenderer": {
+                                  "text": {
+                                    "runs": [
+                                      {
+                                        "text": "2M plays"
+                                      }
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "musicResponsiveListItemFlexColumnRenderer": {
+                                  "text": {
+                                    "runs": [
+                                      {
+                                        "text": "Best-of lofi hip-hop 2024",
+                                        "navigationEndpoint": {
+                                          "browseEndpoint": {
+                                            "browseId": "MPREb_fVf9LjrtLpk",
+                                            "browseEndpointContextSupportedConfigs": {
+                                              "browseEndpointContextMusicConfig": {
+                                                "pageType": "MUSIC_PAGE_TYPE_ALBUM"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            ],
+                            "overlay": {
+                              "musicItemThumbnailOverlayRenderer": {
+                                "content": {
+                                  "musicPlayButtonRenderer": {
+                                    "playNavigationEndpoint": {
+                                      "watchEndpoint": {
+                                        "videoId": "B_IrQoHbhAE",
+                                        "watchEndpointMusicSupportedConfigs": {
+                                          "watchEndpointMusicConfig": {
+                                            "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            "menu": {
+                              "menuRenderer": {
+                                "items": [],
+                                "topLevelButtons": [
+                                  {
+                                    "likeButtonRenderer": {
+                                      "likeStatus": "INDIFFERENT"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            "thumbnail": {
+                              "musicThumbnailRenderer": {
+                                "thumbnail": {
+                                  "thumbnails": [
+                                    {
+                                      "url": "https://yt3.googleusercontent.com/R2yQPf6NVVLm8LpCD3p11ikvnWHsZJFzvnoBwQnQTgHV4sOSmiEs8NyAktyy8KSk7ijyAtDFA5Wd_BE=w60-h60-l90-rj",
+                                      "width": 60,
+                                      "height": 60
+                                    },
+                                    {
+                                      "url": "https://yt3.googleusercontent.com/R2yQPf6NVVLm8LpCD3p11ikvnWHsZJFzvnoBwQnQTgHV4sOSmiEs8NyAktyy8KSk7ijyAtDFA5Wd_BE=w120-h120-l90-rj",
+                                      "width": 120,
+                                      "height": 120
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ],
+                      "bottomText": {
+                        "runs": [
+                          {
+                            "text": "Show all"
+                          }
+                        ]
+                      },
+                      "bottomEndpoint": {
+                        "clickTrackingParams": "CKcEEPleGAAiEwjksdqQtv2UAxWZSg8CHZ-1DEXKAQSceCcs",
+                        "browseEndpoint": {
+                          "browseId": "VLOLAK5uy_kJIcTYhPGkiDOlYfL3W8Q20RarHQC2d2I",
+                          "params": "ggMCCAI%3D",
+                          "browseEndpointContextSupportedConfigs": {
+                            "browseEndpointContextMusicConfig": {
+                              "pageType": "MUSIC_PAGE_TYPE_PLAYLIST"
+                            }
+                          }
+                        }
+                      },
+                      "shelfDivider": {
+                        "musicShelfDividerRenderer": {
+                          "hidden": true
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "musicCarouselShelfRenderer": {
+                      "header": {
+                        "musicCarouselShelfBasicHeaderRenderer": {
+                          "title": {
+                            "runs": [
+                              {
+                                "text": "Albums"
+                              }
+                            ]
+                          },
+                          "headerStyle": "MUSIC_CAROUSEL_SHELF_BASIC_HEADER_STYLE_DISPLAY_TWO"
+                        }
+                      },
+                      "contents": [
+                        {
+                          "musicTwoRowItemRenderer": {
+                            "title": {
+                              "runs": [
+                                {
+                                  "text": "Lofi Girl x The Sims - cozy music to feel ooh be gah!",
+                                  "navigationEndpoint": {
+                                    "browseEndpoint": {
+                                      "browseId": "MPREb_uIxpnvfvGsl",
+                                      "browseEndpointContextSupportedConfigs": {
+                                        "browseEndpointContextMusicConfig": {
+                                          "pageType": "MUSIC_PAGE_TYPE_ALBUM"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            "subtitle": {
+                              "runs": [
+                                {
+                                  "text": "2026"
+                                }
+                              ]
+                            },
+                            "thumbnailRenderer": {
+                              "musicThumbnailRenderer": {
+                                "thumbnail": {
+                                  "thumbnails": [
+                                    {
+                                      "url": "https://yt3.googleusercontent.com/grJ0j7ianfFT4MFqgV-OR8qZvCz0H-t62jQzD1o3lx9MJoLfs6SH7KUnVHFGiuS2E8EWFQgs9gOvNxPD=w226-h226-l90-rj",
+                                      "width": 226,
+                                      "height": 226
+                                    },
+                                    {
+                                      "url": "https://yt3.googleusercontent.com/grJ0j7ianfFT4MFqgV-OR8qZvCz0H-t62jQzD1o3lx9MJoLfs6SH7KUnVHFGiuS2E8EWFQgs9gOvNxPD=w544-h544-l90-rj",
+                                      "width": 544,
+                                      "height": 544
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "musicTwoRowItemRenderer": {
+                            "title": {
+                              "runs": [
+                                {
+                                  "text": "4 A.M Chill Session",
+                                  "navigationEndpoint": {
+                                    "browseEndpoint": {
+                                      "browseId": "MPREb_Q4sZOGlm97U",
+                                      "browseEndpointContextSupportedConfigs": {
+                                        "browseEndpointContextMusicConfig": {
+                                          "pageType": "MUSIC_PAGE_TYPE_ALBUM"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            "subtitle": {
+                              "runs": [
+                                {
+                                  "text": "2026"
+                                }
+                              ]
+                            },
+                            "thumbnailRenderer": {
+                              "musicThumbnailRenderer": {
+                                "thumbnail": {
+                                  "thumbnails": [
+                                    {
+                                      "url": "https://yt3.googleusercontent.com/syI-AyqgBzl1JuQI---U5mMcgbhKqaXXANrGCHsOeYWnc2hftTRoVoAfEEgBVP3Io_qB2w4QUge5utn2=w226-h226-l90-rj",
+                                      "width": 226,
+                                      "height": 226
+                                    },
+                                    {
+                                      "url": "https://yt3.googleusercontent.com/syI-AyqgBzl1JuQI---U5mMcgbhKqaXXANrGCHsOeYWnc2hftTRoVoAfEEgBVP3Io_qB2w4QUge5utn2=w544-h544-l90-rj",
+                                      "width": 544,
+                                      "height": 544
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ],
+                      "itemSize": "COLLECTION_STYLE_ITEM_SIZE_MEDIUM"
+                    }
+                  },
+                  {
+                    "musicCarouselShelfRenderer": {
+                      "header": {
+                        "musicCarouselShelfBasicHeaderRenderer": {
+                          "title": {
+                            "runs": [
+                              {
+                                "text": "Singles & EPs"
+                              }
+                            ]
+                          },
+                          "headerStyle": "MUSIC_CAROUSEL_SHELF_BASIC_HEADER_STYLE_DISPLAY_TWO"
+                        }
+                      },
+                      "contents": [
+                        {
+                          "musicTwoRowItemRenderer": {
+                            "title": {
+                              "runs": [
+                                {
+                                  "text": "Snowman",
+                                  "navigationEndpoint": {
+                                    "browseEndpoint": {
+                                      "browseId": "MPREb_EbO5NzWKli0",
+                                      "browseEndpointContextSupportedConfigs": {
+                                        "browseEndpointContextMusicConfig": {
+                                          "pageType": "MUSIC_PAGE_TYPE_ALBUM"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            "subtitle": {
+                              "runs": [
+                                {
+                                  "text": "Single"
+                                },
+                                {
+                                  "text": " • "
+                                },
+                                {
+                                  "text": "2023"
+                                }
+                              ]
+                            },
+                            "thumbnailRenderer": {
+                              "musicThumbnailRenderer": {
+                                "thumbnail": {
+                                  "thumbnails": [
+                                    {
+                                      "url": "https://yt3.googleusercontent.com/GpYxCW1dvPf-WNbhy-7uBbCiY3sN5FvPe4GEGDqRFdNc8eyHeVyeDXEqNqVIAnMRHhaM3P2FdxsLLXo=w226-h226-l90-rj",
+                                      "width": 226,
+                                      "height": 226
+                                    },
+                                    {
+                                      "url": "https://yt3.googleusercontent.com/GpYxCW1dvPf-WNbhy-7uBbCiY3sN5FvPe4GEGDqRFdNc8eyHeVyeDXEqNqVIAnMRHhaM3P2FdxsLLXo=w544-h544-l90-rj",
+                                      "width": 544,
+                                      "height": 544
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "musicTwoRowItemRenderer": {
+                            "title": {
+                              "runs": [
+                                {
+                                  "text": "Geralt of Rivia (The Witcher 3: Wild Hunt) (Lofi Remix)",
+                                  "navigationEndpoint": {
+                                    "browseEndpoint": {
+                                      "browseId": "MPREb_Skb0SAbr1bj",
+                                      "browseEndpointContextSupportedConfigs": {
+                                        "browseEndpointContextMusicConfig": {
+                                          "pageType": "MUSIC_PAGE_TYPE_ALBUM"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            "subtitle": {
+                              "runs": [
+                                {
+                                  "text": "Single"
+                                },
+                                {
+                                  "text": " • "
+                                },
+                                {
+                                  "text": "2025"
+                                }
+                              ]
+                            },
+                            "thumbnailRenderer": {
+                              "musicThumbnailRenderer": {
+                                "thumbnail": {
+                                  "thumbnails": [
+                                    {
+                                      "url": "https://yt3.googleusercontent.com/BeZ8niyLak6wT_jbn8qJ1aa1_u-zA7v4v-6jtx9aotzE7zUHxAkkccltIPbzWkBMEO4z0bS-PlL1apd1=w226-h226-l90-rj",
+                                      "width": 226,
+                                      "height": 226
+                                    },
+                                    {
+                                      "url": "https://yt3.googleusercontent.com/BeZ8niyLak6wT_jbn8qJ1aa1_u-zA7v4v-6jtx9aotzE7zUHxAkkccltIPbzWkBMEO4z0bS-PlL1apd1=w544-h544-l90-rj",
+                                      "width": 544,
+                                      "height": 544
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ],
+                      "itemSize": "COLLECTION_STYLE_ITEM_SIZE_MEDIUM"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

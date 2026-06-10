@@ -23,8 +23,10 @@
 mod auth;
 mod client;
 mod context;
+mod endpoints;
 mod error;
 pub mod models;
+mod nav;
 pub mod parse;
 
 pub use auth::{BrowserAuth, YTM_ORIGIN, sapisid_authorization};
