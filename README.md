@@ -2,7 +2,7 @@
 
 A terminal music player for YouTube Music, built for keyboard-driven workflows.
 
-> **Status:** Alpha (Sprint 5 complete). Playback, multi-category search, library, navigation history, action popup, filter bar, custom keymaps, and theming are functional.
+> **Status:** Beta. Playback, search, library, history, lyrics, radio, likes, MPRIS, theming, and custom keymaps are functional. A Rust rewrite is planned once the Python version stabilizes.
 
 ![screenshot placeholder](https://via.placeholder.com/800x450?text=screenshot+coming+soon)
 
@@ -12,12 +12,17 @@ A terminal music player for YouTube Music, built for keyboard-driven workflows.
 
 ## Features
 
-- **Multi-category search** -- songs, albums, and artists in a 3-pane grid (Tab to cycle panes)
+- **Multi-category search** -- songs, albums, artists, and playlists in a 4-pane grid, with `#songs:`-style category filters
 - **Home view** with personalized recommendations
 - **Playlist browsing** -- drill into playlists, queue from any track
 - **3-pane library** -- Playlists, Albums, and Artists tabs (Tab to cycle)
 - **Album and Artist views** -- dedicated detail pages for albums and artists
 - **Queue management** with shuffle and repeat
+- **Radio** -- start a YouTube Music radio from any track (`R`)
+- **Likes** -- like/unlike tracks without leaving the terminal (`f`)
+- **Recently played** -- your listening history as a page (`H`)
+- **Lyrics page** (`L` key)
+- **MPRIS2 integration** -- playerctl / waybar / KDE Connect control and metadata
 - **Navigation history** -- Esc goes back through visited pages
 - **Action popup** (`.` key) -- context actions for the selected track/playlist/album
 - **Filter bar** (`/` key) -- live-filter the current list without leaving the view
