@@ -3,6 +3,7 @@ pub mod config;
 pub mod formatting;
 pub mod keymap;
 pub mod layout;
+pub mod mpris;
 pub mod navigation;
 pub mod player;
 pub mod queue;
