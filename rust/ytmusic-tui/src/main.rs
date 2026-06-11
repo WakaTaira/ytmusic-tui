@@ -61,7 +61,8 @@ use ytmusic_tui::views::lyrics::LyricsView;
 use ytmusic_tui::views::player_bar::{PLAYER_BAR_HEIGHT, PlayerBar, PlayerBarState};
 use ytmusic_tui::views::playlist::{PlaylistAction, PlaylistView};
 use ytmusic_tui::views::popup::{
-    ActionKind, ActionPopup, PickerChoice, PopupItem, PopupOutcome, PopupState, ThemePopup,
+    ActionKind, ActionPopup, PickerChoice, PopupContext, PopupItem, PopupOutcome, PopupState,
+    ThemePopup,
 };
 use ytmusic_tui::views::queue_view::{QueueAction, QueueView};
 use ytmusic_tui::views::search::{SearchAction, SearchView};
@@ -276,19 +277,23 @@ fn run_loop(
     // Build the keymap dispatcher from the merged keymap.toml. A load error
     // (malformed user file) falls back to the compiled-in defaults rather than
     // aborting the UI — the user can still drive the app and fix the file.
-    let keymap = match config::load_keymap(None, None) {
+    // Unparseable *bindings* (a typo in an otherwise-valid file) are collected as
+    // warnings and surfaced once on the status line below.
+    let (keymap, keymap_warnings) = match config::load_keymap(None, None) {
         Ok(mut map) => {
             // `search_page` ships unbound in the keymap files; grant it the
             // `g s` sequence default now that the dispatcher supports sequences
             // (directive §6). A user binding in keymap.toml still overrides it.
             map.entry("search_page".to_owned())
                 .or_insert_with(|| "g s".to_owned());
-            Keymap::from_map(&map)
+            Keymap::from_map_with_warnings(&map)
         }
-        Err(_) => Keymap::defaults(),
+        Err(_) => (Keymap::defaults(), Vec::new()),
     };
     let mut model = AppModel::with_keymap(Theme::from_name(&config.ui.theme), keymap);
     model.set_theme_name(&config.ui.theme);
+    // Surface dropped keymap bindings once, on the status line.
+    model.set_keymap_warnings(&keymap_warnings);
 
     while !model.should_quit {
         // Drain events that arrived since the last tick before drawing, so the
@@ -550,6 +555,24 @@ impl AppModel {
         self.theme_name = name.into();
     }
 
+    /// Surface any dropped/unparseable keymap bindings on the status line, once,
+    /// at startup (directive §6). A non-empty list becomes a single line like
+    /// `2 keymap bindings ignored: quit = "notakey", next = "??"`. An empty list
+    /// is a no-op, so a clean keymap leaves the status line free for the first
+    /// real message. The line is transient: any later status update (an API
+    /// error, a toast) replaces it, matching the "show once" intent.
+    fn set_keymap_warnings(&mut self, warnings: &[String]) {
+        if warnings.is_empty() {
+            return;
+        }
+        self.status = Some(format!(
+            "{} keymap binding{} ignored: {}",
+            warnings.len(),
+            if warnings.len() == 1 { "" } else { "s" },
+            warnings.join(", ")
+        ));
+    }
+
     /// Build a model with an explicit keymap (the runtime path, fed the merged
     /// user `keymap.toml`).
     fn with_keymap(theme: Theme, keymap: Keymap) -> Self {
@@ -677,6 +700,7 @@ impl AppModel {
             AppEvent::PlayerProgress(secs) => self.player.on_progress(secs),
             AppEvent::PlayerDuration(secs) => self.player.on_duration(secs),
             AppEvent::PlayerVolume(vol) => self.player.on_volume(vol),
+            AppEvent::PlayerMute(muted) => self.player.on_mute(muted),
             AppEvent::AudioQualityChanged(quality) => {
                 // Toast the new level; it applies from the next track.
                 self.status = Some(format!("Audio quality: {quality} (from next track)"));
@@ -699,6 +723,17 @@ impl AppModel {
                 // NEVER advance on a failed stream — a broken resolver would
                 // machine-gun the queue (the end-file battle lesson).
                 self.status = Some(format!("Playback error: {detail}"));
+            }
+            AppEvent::ArtistResolved(channel_id) => {
+                // The `a` / "Go to artist" lookup resolved a channel id: navigate
+                // to the artist page (reusing open_artist's view/nav prep) and
+                // chain the fetch as the fold's follow-up command.
+                self.status = None;
+                return Some(self.prepare_open_artist(&channel_id));
+            }
+            AppEvent::AlbumResolved(browse_id) => {
+                self.status = None;
+                return Some(self.prepare_open_album(&browse_id));
             }
             AppEvent::AlbumLoaded(album) => {
                 self.album.set_album(album);
@@ -943,6 +978,22 @@ impl AppModel {
             Action::CycleAudioQuality => {
                 runtime.send(AppCommand::CycleAudioQuality);
             }
+            Action::SeekForward => {
+                runtime.send(AppCommand::SeekForward);
+            }
+            Action::SeekBackward => {
+                runtime.send(AppCommand::SeekBackward);
+            }
+            Action::SeekToStart => {
+                runtime.send(AppCommand::SeekToStart);
+            }
+            Action::ToggleMute => {
+                runtime.send(AppCommand::ToggleMute);
+            }
+            Action::ToggleLike => self.toggle_like_current(runtime),
+            Action::StartRadio => self.start_radio_current(runtime),
+            Action::OpenCurrentArtist => self.open_current_artist(runtime),
+            Action::OpenCurrentAlbum => self.open_current_album(runtime),
             Action::GoBack => self.go_back(runtime),
             Action::ToggleFilter => self.toggle_filter(),
             Action::SwitchHome => self.switch_view(View::Home, runtime),
@@ -972,7 +1023,21 @@ impl AppModel {
         // the picker without a visible wait.
         runtime.send(AppCommand::FetchLibraryPlaylists);
         self.close_filter();
-        self.popups = PopupState::Action(ActionPopup::new(item));
+        let context = self.popup_context();
+        self.popups = PopupState::Action(ActionPopup::with_context(item, context));
+    }
+
+    /// The action-popup context for the active view (Python's `context` arg to
+    /// `ActionPopup.show`): the queue view yields the queue track list (with
+    /// "Remove from queue"), the playlist view drilled into its tracks yields the
+    /// playlist-track list (with "Remove from playlist"), and everything else is
+    /// the plain track list.
+    fn popup_context(&self) -> PopupContext {
+        match self.view {
+            View::Queue => PopupContext::Queue,
+            View::Playlist if self.playlist.is_viewing_tracks() => PopupContext::PlaylistTracks,
+            _ => PopupContext::Plain,
+        }
     }
 
     /// Open the theme-picker popup, seeded with the built-in theme names and the
@@ -1018,13 +1083,11 @@ impl AppModel {
                 self.handle_action(action.kind, item, runtime);
             }
             PopupOutcome::PlaylistChosen { choice, track } => match choice {
-                PickerChoice::NewPlaylist => {
-                    // A minimal new-playlist flow: name it after the track (the
-                    // Rust UI has no text-prompt yet; Python prompted). The track
-                    // is added to the freshly created playlist.
-                    let title = format!("{} mix", track.title);
+                PickerChoice::NewPlaylist { name } => {
+                    // The picker's name-entry prompt produced a title; create the
+                    // playlist and add the track to it (Python's create-then-add).
                     runtime.send(AppCommand::CreatePlaylistAndAdd {
-                        title,
+                        title: name,
                         video_id: track.video_id,
                     });
                 }
@@ -1061,6 +1124,12 @@ impl AppModel {
             (ActionKind::AddToPlaylist, PopupItem::Track(track)) => {
                 self.open_playlist_picker(track);
             }
+            (ActionKind::RemoveFromQueue, PopupItem::Track(track)) => {
+                runtime.send(AppCommand::RemoveFromQueue(track.video_id));
+            }
+            (ActionKind::RemoveFromPlaylist, PopupItem::Track(track)) => {
+                self.remove_from_playlist(track, runtime);
+            }
             (ActionKind::GoToArtist, item) => self.action_go_to_artist(&item, runtime),
             (ActionKind::GoToAlbum, item) => self.action_go_to_album(&item, runtime),
             (ActionKind::PlayAll, PopupItem::Playlist(info)) => self.open_playlist(info, runtime),
@@ -1070,6 +1139,38 @@ impl AppModel {
             }
             // Combinations that don't apply to the item type are no-ops.
             _ => {}
+        }
+    }
+
+    /// Remove `track` from the playlist currently shown in the playlist view's
+    /// track list (the "Remove from playlist" action).
+    ///
+    /// The playlist id is read from the nav stack's current page context — when
+    /// the playlist view is drilled into its tracks the current page is
+    /// `("playlist", playlist_id = …)`. Python read it from
+    /// `PlaylistView.current_playlist_id`; the Rust playlist view's `Tracks`
+    /// level stores only the title, so the id comes from the nav entry that
+    /// drilled in (set by `open_playlist` / `activate_playlist`). A missing id
+    /// (somehow not on a playlist page) reports the limitation rather than
+    /// guessing.
+    fn remove_from_playlist(&mut self, track: ytmusic_api::Track, runtime: &RuntimeHandle) {
+        let playlist_id = self
+            .nav
+            .current()
+            .context
+            .get("playlist_id")
+            .filter(|id| !id.is_empty())
+            .cloned();
+        match playlist_id {
+            Some(playlist_id) => {
+                runtime.send(AppCommand::RemoveFromPlaylist {
+                    playlist_id,
+                    video_id: track.video_id,
+                });
+            }
+            None => {
+                self.status = Some("Remove from playlist: no playlist context".to_owned());
+            }
         }
     }
 
@@ -1086,25 +1187,94 @@ impl AppModel {
 
     /// Navigate to the artist of a popup item.
     ///
-    /// The Rust `Track` / `AlbumInfo` models (in the out-of-boundary
-    /// `ytmusic-api` crate) do not carry an artist channel id, so "Go to artist"
-    /// cannot resolve a target from a track or album row here. It reports the
-    /// limitation rather than guessing — a search-by-name fallback (Python's
-    /// `_lookup_and_open_artist`) is a later refinement that needs an API helper.
-    fn action_go_to_artist(&mut self, _item: &PopupItem, _runtime: &RuntimeHandle) {
-        self.status = Some("Go to artist: unavailable from this row".to_owned());
+    /// An [`PopupItem::Album`] row carries the album's artist *name* (the Rust
+    /// `Track`/`AlbumInfo` models do not carry an artist channel id), so this
+    /// resolves the target by search — the same `_lookup_and_open_artist` flow
+    /// the `a` key uses. A track row likewise resolves by its artist name. A
+    /// row with no artist name reports the limitation.
+    fn action_go_to_artist(&mut self, item: &PopupItem, runtime: &RuntimeHandle) {
+        let name = match item {
+            PopupItem::Track(t) => t.artist.clone(),
+            PopupItem::Album(a) => a.artist.clone(),
+            PopupItem::Playlist(_) => String::new(),
+        };
+        if name.is_empty() {
+            self.status = Some("Go to artist: unavailable from this row".to_owned());
+            return;
+        }
+        self.status = Some(format!("Finding artist: {name}…"));
+        runtime.send(AppCommand::SearchAndOpenArtist(name));
     }
 
-    /// Navigate to the album of a popup item. Only an [`PopupItem::Album`] row
-    /// carries a usable browse id; a track row has no album browse id in the
-    /// Rust model, so "Go to album" reports the limitation there.
+    /// Navigate to the album of a popup item. An [`PopupItem::Album`] row carries
+    /// a usable browse id directly; a track row carries only the album *name*, so
+    /// it resolves by search (`_lookup_and_open_album`), the same flow the `A`
+    /// key uses. A row with no album reports the limitation.
     fn action_go_to_album(&mut self, item: &PopupItem, runtime: &RuntimeHandle) {
         match item {
             PopupItem::Album(a) if !a.browse_id.is_empty() => {
                 self.open_album(a.browse_id.clone(), runtime);
             }
+            PopupItem::Track(t) if !t.album.is_empty() => {
+                self.status = Some(format!("Finding album: {}…", t.album));
+                runtime.send(AppCommand::SearchAndOpenAlbum {
+                    name: t.album.clone(),
+                    artist: t.artist.clone(),
+                });
+            }
             _ => self.status = Some("Go to album: unavailable from this row".to_owned()),
         }
+    }
+
+    /// The `f` key: toggle the like state of the *current* track.
+    ///
+    /// Mirrors Python's `action_toggle_like`, which reads
+    /// `queue_manager.current_track` and returns silently when nothing is
+    /// playing. The current `video_id` is tracked from [`AppEvent::NowPlaying`].
+    fn toggle_like_current(&mut self, runtime: &RuntimeHandle) {
+        let Some(video_id) = self.current_video_id.clone() else {
+            return; // nothing playing — silent no-op (Python parity)
+        };
+        runtime.send(AppCommand::ToggleLike(video_id));
+    }
+
+    /// The `R` key: start a radio seeded by the *current* track.
+    ///
+    /// Mirrors Python's `action_start_radio` (uses `current_track`, silent when
+    /// nothing is playing).
+    fn start_radio_current(&mut self, runtime: &RuntimeHandle) {
+        let Some(video_id) = self.current_video_id.clone() else {
+            return;
+        };
+        runtime.send(AppCommand::StartRadio(video_id));
+    }
+
+    /// The `a` key: jump to the *current* track's artist, resolved by search.
+    ///
+    /// Mirrors Python's `action_open_current_artist` → `_lookup_and_open_artist`:
+    /// requires a current track with a non-empty artist name, then searches the
+    /// name and opens the first hit's page. A missing track or empty artist name
+    /// is a silent no-op (Python `return`s).
+    fn open_current_artist(&mut self, runtime: &RuntimeHandle) {
+        if self.current_video_id.is_none() || self.player.artist.is_empty() {
+            return;
+        }
+        let name = self.player.artist.clone();
+        self.status = Some(format!("Finding artist: {name}…"));
+        runtime.send(AppCommand::SearchAndOpenArtist(name));
+    }
+
+    /// The `A` key: jump to the *current* track's album, resolved by search.
+    ///
+    /// Mirrors Python's `action_open_current_album` → `_lookup_and_open_album`.
+    fn open_current_album(&mut self, runtime: &RuntimeHandle) {
+        if self.current_video_id.is_none() || self.player.album.is_empty() {
+            return;
+        }
+        let name = self.player.album.clone();
+        let artist = self.player.artist.clone();
+        self.status = Some(format!("Finding album: {name}…"));
+        runtime.send(AppCommand::SearchAndOpenAlbum { name, artist });
     }
 
     /// Toggle the `/`-triggered in-page filter bar for the current view.
@@ -1399,13 +1569,23 @@ impl AppModel {
     /// library, or artist). Resets the album view to loading and fires
     /// [`AppCommand::FetchAlbum`]. Mirrors Python's `action_open_album`.
     fn open_album(&mut self, browse_id: String, runtime: &RuntimeHandle) {
+        let fetch = self.prepare_open_album(&browse_id);
+        runtime.send(fetch);
+    }
+
+    /// The runtime-free half of [`AppModel::open_album`]: switch to the album
+    /// view, reset it to loading, and push the nav entry. Returns the
+    /// [`AppCommand::FetchAlbum`] the caller must dispatch — so the event-fold
+    /// path (which has no `RuntimeHandle`) can reuse the exact navigation and
+    /// return the fetch as its follow-up command.
+    fn prepare_open_album(&mut self, browse_id: &str) -> AppCommand {
         self.close_filter();
         self.input_mode = false;
         self.view = View::Album;
         self.album = AlbumView::new(); // fresh loading state for the new album
         self.nav
-            .push(NavPage::with_context("album", "browse_id", &browse_id));
-        runtime.send(AppCommand::FetchAlbum(browse_id));
+            .push(NavPage::with_context("album", "browse_id", browse_id));
+        AppCommand::FetchAlbum(browse_id.to_owned())
     }
 
     /// Navigate to the artist detail view and kick off the fetch.
@@ -1413,13 +1593,21 @@ impl AppModel {
     /// Mirrors [`AppModel::open_album`] but for artists. Recursive chains like
     /// search→artist→related-artist→album work because each push is independent.
     fn open_artist(&mut self, channel_id: String, runtime: &RuntimeHandle) {
+        let fetch = self.prepare_open_artist(&channel_id);
+        runtime.send(fetch);
+    }
+
+    /// The runtime-free half of [`AppModel::open_artist`] (see
+    /// [`AppModel::prepare_open_album`]). Returns the [`AppCommand::FetchArtist`]
+    /// the caller dispatches.
+    fn prepare_open_artist(&mut self, channel_id: &str) -> AppCommand {
         self.close_filter();
         self.input_mode = false;
         self.view = View::Artist;
         self.artist = ArtistView::new(); // fresh loading state for the new artist
         self.nav
-            .push(NavPage::with_context("artist", "channel_id", &channel_id));
-        runtime.send(AppCommand::FetchArtist(channel_id));
+            .push(NavPage::with_context("artist", "channel_id", channel_id));
+        AppCommand::FetchArtist(channel_id.to_owned())
     }
 
     /// Enter on the album view: play from the cursor, queueing the rest of the
@@ -1813,6 +2001,189 @@ mod tests {
         assert_eq!(rx.try_recv().ok(), Some(AppCommand::CycleAudioQuality));
     }
 
+    // -- seek / mute (Stage 1) ---------------------------------------------
+
+    #[test]
+    fn seek_keys_send_seek_commands_via_dispatch() {
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        model.dispatch_key(key(KeyCode::Char('>')), &runtime);
+        assert_eq!(rx.try_recv().ok(), Some(AppCommand::SeekForward));
+        model.dispatch_key(key(KeyCode::Char('<')), &runtime);
+        assert_eq!(rx.try_recv().ok(), Some(AppCommand::SeekBackward));
+        model.dispatch_key(key(KeyCode::Char('^')), &runtime);
+        assert_eq!(rx.try_recv().ok(), Some(AppCommand::SeekToStart));
+    }
+
+    #[test]
+    fn underscore_sends_toggle_mute_via_dispatch() {
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        model.dispatch_key(key(KeyCode::Char('_')), &runtime);
+        assert_eq!(rx.try_recv().ok(), Some(AppCommand::ToggleMute));
+    }
+
+    #[test]
+    fn player_mute_event_folds_into_bar() {
+        let mut model = AppModel::new(Theme::default());
+        fold(&mut model, AppEvent::PlayerMute(true));
+        assert!(model.player.is_muted);
+        fold(&mut model, AppEvent::PlayerMute(false));
+        assert!(!model.player.is_muted);
+    }
+
+    // -- keymap warnings on the status line (Stage 4) ----------------------
+
+    #[test]
+    fn keymap_warnings_surface_on_status_line() {
+        let mut model = AppModel::new(Theme::default());
+        model.set_keymap_warnings(&["quit = \"notakey\"".to_owned()]);
+        let status = model.status.as_deref().unwrap_or("");
+        assert!(status.contains("1 keymap binding ignored"), "got: {status}");
+        assert!(status.contains("notakey"), "got: {status}");
+    }
+
+    #[test]
+    fn keymap_warnings_plural_and_empty() {
+        let mut model = AppModel::new(Theme::default());
+        model.set_keymap_warnings(&["a = \"?\"".to_owned(), "b = \"!\"".to_owned()]);
+        assert!(
+            model
+                .status
+                .as_deref()
+                .is_some_and(|s| s.contains("2 keymap bindings ignored"))
+        );
+        // An empty list leaves the status untouched.
+        let mut clean = AppModel::new(Theme::default());
+        clean.set_keymap_warnings(&[]);
+        assert!(clean.status.is_none());
+    }
+
+    // -- like / radio / a / A (Stage 2) ------------------------------------
+
+    /// A model with a current track loaded (the state after a NowPlaying).
+    fn model_with_current_track() -> AppModel {
+        use ytmusic_tui::app::NowPlaying;
+        use ytmusic_tui::queue::RepeatMode;
+        let mut model = AppModel::new(Theme::default());
+        fold(
+            &mut model,
+            AppEvent::NowPlaying(NowPlaying {
+                title: "Get Lucky".to_owned(),
+                artist: "Daft Punk".to_owned(),
+                album: "Random Access Memories".to_owned(),
+                video_id: "v1".to_owned(),
+                duration_seconds: 248.0,
+                shuffle: false,
+                repeat: RepeatMode::Off,
+            }),
+        );
+        model
+    }
+
+    #[test]
+    fn f_toggles_like_on_current_track() {
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = model_with_current_track();
+        model.dispatch_key(key(KeyCode::Char('f')), &runtime);
+        assert_eq!(
+            rx.try_recv().ok(),
+            Some(AppCommand::ToggleLike("v1".into()))
+        );
+    }
+
+    #[test]
+    fn f_with_no_current_track_is_silent() {
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default()); // nothing playing
+        model.dispatch_key(key(KeyCode::Char('f')), &runtime);
+        assert!(rx.try_recv().is_err(), "no command when nothing is playing");
+    }
+
+    #[test]
+    fn capital_r_starts_radio_on_current_track() {
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = model_with_current_track();
+        model.dispatch_key(key(KeyCode::Char('R')), &runtime);
+        assert_eq!(
+            rx.try_recv().ok(),
+            Some(AppCommand::StartRadio("v1".into()))
+        );
+    }
+
+    #[test]
+    fn a_resolves_current_artist_by_name() {
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = model_with_current_track();
+        model.dispatch_key(key(KeyCode::Char('a')), &runtime);
+        assert_eq!(
+            rx.try_recv().ok(),
+            Some(AppCommand::SearchAndOpenArtist("Daft Punk".into()))
+        );
+    }
+
+    #[test]
+    fn capital_a_resolves_current_album_by_name() {
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = model_with_current_track();
+        model.dispatch_key(key(KeyCode::Char('A')), &runtime);
+        assert_eq!(
+            rx.try_recv().ok(),
+            Some(AppCommand::SearchAndOpenAlbum {
+                name: "Random Access Memories".into(),
+                artist: "Daft Punk".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_with_no_current_track_is_silent() {
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        model.dispatch_key(key(KeyCode::Char('a')), &runtime);
+        assert!(rx.try_recv().is_err(), "no lookup when nothing is playing");
+    }
+
+    #[test]
+    fn artist_resolved_event_navigates_and_chains_fetch() {
+        // The runtime's search resolved a channel id: the fold must switch to
+        // the artist view, push nav, and return the FetchArtist follow-up.
+        let mut model = AppModel::new(Theme::default());
+        let follow_up = model.on_event(AppEvent::ArtistResolved("UC_chan".to_owned()));
+        assert_eq!(model.view, View::Artist);
+        assert_eq!(
+            follow_up,
+            Some(AppCommand::FetchArtist("UC_chan".to_owned()))
+        );
+        assert_eq!(model.nav.current().page_type, "artist");
+    }
+
+    #[test]
+    fn album_resolved_event_navigates_and_chains_fetch() {
+        let mut model = AppModel::new(Theme::default());
+        let follow_up = model.on_event(AppEvent::AlbumResolved("MPRE_x".to_owned()));
+        assert_eq!(model.view, View::Album);
+        assert_eq!(follow_up, Some(AppCommand::FetchAlbum("MPRE_x".to_owned())));
+        assert_eq!(model.nav.current().page_type, "album");
+    }
+
+    #[test]
+    fn go_to_album_on_track_row_resolves_by_search() {
+        // The action popup's "Go to album" on a track row (which carries only the
+        // album name) resolves by search rather than reporting unavailable.
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = model_on_history();
+        let item = PopupItem::Track(Track::new("v1", "Song", "Band", "Greatest Hits", 100.0, ""));
+        model.action_go_to_album(&item, &runtime);
+        assert_eq!(
+            rx.try_recv().ok(),
+            Some(AppCommand::SearchAndOpenAlbum {
+                name: "Greatest Hits".into(),
+                artist: "Band".into(),
+            })
+        );
+    }
+
     #[test]
     fn g_then_s_switches_to_search_via_dispatch() {
         // The `g s` sequence reaches the search view (search_page). A bare `g`
@@ -2034,6 +2405,128 @@ mod tests {
         model.dispatch_key(key(KeyCode::Esc), &runtime);
         assert!(!model.popups.is_open(), "Esc dismisses the popup");
         assert_eq!(model.view, View::History, "Esc did not navigate");
+    }
+
+    // -- new-playlist naming + remove actions (Stage 3) --------------------
+
+    #[test]
+    fn new_playlist_naming_flow_sends_create_with_typed_name() {
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = model_on_history();
+        model.library_playlists = vec![("PL1".to_owned(), "My Mix".to_owned())];
+        model.dispatch_key(key(KeyCode::Char('.')), &runtime);
+        // Navigate to "Add to playlist" (index 5) and open the picker.
+        for _ in 0..5 {
+            model.dispatch_key(key(KeyCode::Char('j')), &runtime);
+        }
+        model.dispatch_key(key(KeyCode::Enter), &runtime);
+        assert!(matches!(model.popups, PopupState::PlaylistPicker(_)));
+        // Cursor is on row 0 ("New playlist…"); Enter begins naming, then type.
+        model.dispatch_key(key(KeyCode::Enter), &runtime);
+        for ch in "Focus".chars() {
+            model.dispatch_key(key(KeyCode::Char(ch)), &runtime);
+        }
+        model.dispatch_key(key(KeyCode::Enter), &runtime);
+        assert!(
+            !model.popups.is_open(),
+            "picker closes after naming confirm"
+        );
+        // The create-and-add command carries the typed name (video_id v1 is the
+        // first/selected history track).
+        let mut saw_create = false;
+        while let Ok(cmd) = rx.try_recv() {
+            if let AppCommand::CreatePlaylistAndAdd { title, video_id } = cmd {
+                assert_eq!(title, "Focus");
+                assert_eq!(video_id, "v1");
+                saw_create = true;
+            }
+        }
+        assert!(
+            saw_create,
+            "expected CreatePlaylistAndAdd with the typed name"
+        );
+    }
+
+    #[test]
+    fn queue_view_popup_offers_remove_from_queue() {
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        model.view = View::Queue;
+        model
+            .queue_view
+            .set_snapshot(ytmusic_tui::views::queue_view::QueueSnapshot {
+                tracks: vec![
+                    Track::new("v1", "First", "A", "Al", 100.0, ""),
+                    Track::new("v2", "Second", "B", "Al", 120.0, ""),
+                ],
+                current_index: Some(0),
+            });
+        model.dispatch_key(key(KeyCode::Char('.')), &runtime);
+        assert!(model.popups.is_open(), "queue popup opens");
+        // The queue-context action list is Play, Remove from queue, … so move to
+        // index 1 and select.
+        model.dispatch_key(key(KeyCode::Char('j')), &runtime);
+        model.dispatch_key(key(KeyCode::Enter), &runtime);
+        let mut saw_remove = false;
+        while let Ok(cmd) = rx.try_recv() {
+            if matches!(cmd, AppCommand::RemoveFromQueue(ref id) if id == "v1") {
+                saw_remove = true;
+            }
+        }
+        assert!(saw_remove, "Remove from queue should send the command");
+    }
+
+    /// A model on the playlist view, drilled into a playlist's track list, with
+    /// the playlist id on the nav stack (the state after opening a playlist).
+    fn model_on_playlist_tracks_with_id() -> AppModel {
+        let mut model = AppModel::new(Theme::default());
+        model.view = View::Playlist;
+        model
+            .nav
+            .push(NavPage::with_context("playlist", "playlist_id", "PL42"));
+        model.playlist.show_track_list_loading("My Mix");
+        model.playlist.set_tracks(
+            "My Mix",
+            vec![Track::new("v1", "First", "A", "Al", 100.0, "")],
+        );
+        model
+    }
+
+    #[test]
+    fn playlist_track_popup_offers_remove_from_playlist() {
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = model_on_playlist_tracks_with_id();
+        model.dispatch_key(key(KeyCode::Char('.')), &runtime);
+        assert!(model.popups.is_open());
+        // The playlist-track action list is Play, Add to queue, Remove from
+        // playlist (index 2), … — move to index 2 and select.
+        model.dispatch_key(key(KeyCode::Char('j')), &runtime);
+        model.dispatch_key(key(KeyCode::Char('j')), &runtime);
+        model.dispatch_key(key(KeyCode::Enter), &runtime);
+        let mut saw_remove = false;
+        while let Ok(cmd) = rx.try_recv() {
+            if let AppCommand::RemoveFromPlaylist {
+                playlist_id,
+                video_id,
+            } = cmd
+            {
+                assert_eq!(playlist_id, "PL42");
+                assert_eq!(video_id, "v1");
+                saw_remove = true;
+            }
+        }
+        assert!(
+            saw_remove,
+            "Remove from playlist should send the command with the nav playlist id"
+        );
+    }
+
+    #[test]
+    fn popup_context_is_plain_on_history_view() {
+        // A non-queue, non-playlist-track view gets the plain track action list
+        // (no remove actions).
+        let model = model_on_history();
+        assert_eq!(model.popup_context(), PopupContext::Plain);
     }
 
     // -- pending-tracks token routing (Stage 4) ----------------------------

@@ -153,6 +153,19 @@ pub enum AppCommand {
     SetVolume(i64),
     /// Adjust the volume by a relative delta.
     AdjustVolume(i64),
+    /// Seek forward by [`SEEK_STEP_SECONDS`] (the `>` key). A no-op when nothing
+    /// is playing; a failed seek (the stream not yet seekable while the
+    /// ytdl-hook resolves) is swallowed, mirroring Python's suppressed seek.
+    SeekForward,
+    /// Seek backward by [`SEEK_STEP_SECONDS`] (the `<` key). Same no-op / error
+    /// semantics as [`AppCommand::SeekForward`].
+    SeekBackward,
+    /// Seek to the start of the current track (the `^` key). A no-op when
+    /// nothing is playing.
+    SeekToStart,
+    /// Toggle audio mute (the `_` key). The player's mute observation
+    /// ([`AppEvent::PlayerMute`]) folds the new state into the bar.
+    ToggleMute,
     /// Cycle the audio quality low → normal → high → low (the `b` key). The
     /// change applies from the next track (ytdl-format is read at loadfile
     /// time). Replies with [`AppEvent::AudioQualityChanged`] carrying the new
@@ -187,6 +200,19 @@ pub enum AppCommand {
     /// Fetches the radio tracks and plays them as a fresh queue. Replies with
     /// [`AppEvent::NowPlaying`] on success or [`AppEvent::ApiError`] on failure.
     StartRadio(String),
+    /// Resolve an artist by `name` via search and open their page (the `a` key /
+    /// "Go to artist"). The runtime searches `name` with the `artists` filter,
+    /// takes the first hit's `channel_id`, and replies with
+    /// [`AppEvent::ArtistLoaded`] (chaining the fetch). An empty result or an
+    /// API error replies with [`AppEvent::ApiError`]. Mirrors Python's
+    /// `_lookup_and_open_artist`.
+    SearchAndOpenArtist(String),
+    /// Resolve an album by `name` (optionally disambiguated by `artist`) via
+    /// search and open it (the `A` key / "Go to album"). The runtime searches
+    /// `"{name} {artist}"` with the `albums` filter, takes the first hit's
+    /// `browse_id`, and replies with [`AppEvent::AlbumLoaded`]. Mirrors Python's
+    /// `_lookup_and_open_album`.
+    SearchAndOpenAlbum { name: String, artist: String },
     /// Toggle the like state of `video_id` (the `f` key / "Like / Unlike"). Reads
     /// the current status then flips it. Replies with [`AppEvent::ActionResult`]
     /// (a toast) or [`AppEvent::ApiError`].
@@ -202,6 +228,20 @@ pub enum AppCommand {
     /// picker's "New playlist…" choice). Replies with [`AppEvent::ActionResult`]
     /// or [`AppEvent::ApiError`].
     CreatePlaylistAndAdd { title: String, video_id: String },
+    /// Remove the queue track with `video_id` (the queue action popup's "Remove
+    /// from queue"). The runtime finds the index by id and removes it, then
+    /// emits an updated [`AppEvent::QueueSnapshot`]. A no-op (with a toast) when
+    /// the track is no longer in the queue. Mirrors Python's `_remove_from_queue`
+    /// (look up by `video_id`, then `queue_manager.remove(i)`).
+    RemoveFromQueue(String),
+    /// Remove `video_id` from the playlist `playlist_id` (the playlist-track
+    /// action popup's "Remove from playlist"). Replies with
+    /// [`AppEvent::ActionResult`] or [`AppEvent::ApiError`]. Mirrors Python's
+    /// `_remove_from_playlist` (`remove_playlist_items(playlist_id, [video_id])`).
+    RemoveFromPlaylist {
+        playlist_id: String,
+        video_id: String,
+    },
     /// Shut the runtime down cleanly; the command loop exits after this.
     Quit,
 }
@@ -269,6 +309,9 @@ pub enum AppEvent {
     /// A `volume` observation from the player (0–100). Corrects the bar's
     /// optimistic volume after mpv applies (or clamps) a change.
     PlayerVolume(i64),
+    /// A `mute` observation from the player. Folds into the bar so it shows
+    /// `Vol: MUTE` while muted (the `_` key).
+    PlayerMute(bool),
     /// The audio quality was cycled; the string is the new level (`"low"` /
     /// `"normal"` / `"high"`). The UI toasts it on the status line. Applies from
     /// the next track.
@@ -286,6 +329,17 @@ pub enum AppEvent {
     TrackEnded,
     /// The current stream failed; the string is a short description.
     TrackError(String),
+    /// A search resolved a `channel_id` for the `a` / "Go to artist" lookup. The
+    /// UI navigates to the artist page (switch view + push nav) and the fetch is
+    /// chained by the follow-up [`AppCommand::FetchArtist`] the fold returns —
+    /// reusing the normal open-artist flow. Emitted by
+    /// [`AppCommand::SearchAndOpenArtist`] on a hit.
+    ArtistResolved(String),
+    /// A search resolved a `browse_id` for the `A` / "Go to album" lookup. The
+    /// UI navigates to the album page and the fetch is chained by the follow-up
+    /// [`AppCommand::FetchAlbum`] the fold returns. Emitted by
+    /// [`AppCommand::SearchAndOpenAlbum`] on a hit.
+    AlbumResolved(String),
     /// An album's tracks finished loading.
     AlbumLoaded(AlbumInfo),
     /// An artist's page data finished loading.
@@ -440,6 +494,7 @@ fn translate_player_event(event: PlayerEvent) -> AppEvent {
         PlayerEvent::Progress(secs) => AppEvent::PlayerProgress(secs),
         PlayerEvent::Duration(secs) => AppEvent::PlayerDuration(secs),
         PlayerEvent::Volume(vol) => AppEvent::PlayerVolume(vol),
+        PlayerEvent::Mute(muted) => AppEvent::PlayerMute(muted),
         PlayerEvent::TrackEnded => AppEvent::TrackEnded,
         PlayerEvent::TrackError(detail) => AppEvent::TrackError(detail),
         PlayerEvent::Started => AppEvent::PlayerStarted,
@@ -538,6 +593,12 @@ fn run_runtime(
                 AppCommand::AdjustVolume(delta) => {
                     report_player_result(player.adjust_volume(delta), events);
                 }
+                AppCommand::SeekForward => seek_relative(&player, SEEK_STEP_SECONDS),
+                AppCommand::SeekBackward => seek_relative(&player, -SEEK_STEP_SECONDS),
+                AppCommand::SeekToStart => seek_to_start(&player),
+                AppCommand::ToggleMute => {
+                    report_player_result(player.toggle_mute(), events);
+                }
                 AppCommand::CycleAudioQuality => match player.cycle_audio_quality() {
                     Ok(quality) => {
                         let _ = events.send(AppEvent::AudioQualityChanged(quality.to_owned()));
@@ -557,6 +618,12 @@ fn run_runtime(
                     handle_start_radio(client.as_ref(), &video_id, &mut queue, &mut player, events)
                         .await;
                 }
+                AppCommand::SearchAndOpenArtist(name) => {
+                    handle_search_and_open_artist(client.as_ref(), &name, events).await;
+                }
+                AppCommand::SearchAndOpenAlbum { name, artist } => {
+                    handle_search_and_open_album(client.as_ref(), &name, &artist, events).await;
+                }
                 AppCommand::ToggleLike(video_id) => {
                     handle_toggle_like(client.as_ref(), &video_id, events).await;
                 }
@@ -568,6 +635,16 @@ fn run_runtime(
                 }
                 AppCommand::CreatePlaylistAndAdd { title, video_id } => {
                     handle_create_playlist_and_add(client.as_ref(), &title, &video_id, events)
+                        .await;
+                }
+                AppCommand::RemoveFromQueue(video_id) => {
+                    remove_from_queue(&mut queue, &video_id, events);
+                }
+                AppCommand::RemoveFromPlaylist {
+                    playlist_id,
+                    video_id,
+                } => {
+                    handle_remove_from_playlist(client.as_ref(), &playlist_id, &video_id, events)
                         .await;
                 }
             }
@@ -627,6 +704,29 @@ fn emit_queue_snapshot(queue: &QueueManager, events: &StdSender<AppEvent>) {
         tracks,
         current_index,
     }));
+}
+
+/// Remove the queue track with `video_id` and emit an updated snapshot.
+///
+/// Mirrors Python's `_remove_from_queue`: find the *first* matching track by
+/// `video_id` and remove it (the index is recomputed runtime-side rather than
+/// passed from the UI, so a stale queue-view snapshot can never remove the wrong
+/// row). A missing track is a no-op confirmation toast; a successful removal
+/// emits a fresh [`AppEvent::QueueSnapshot`] so an open queue view re-renders.
+fn remove_from_queue(queue: &mut QueueManager, video_id: &str, events: &StdSender<AppEvent>) {
+    let index = queue.tracks().iter().position(|t| t.video_id == video_id);
+    match index {
+        Some(i) => {
+            // `remove` only errors on an out-of-range index, which `position`
+            // cannot produce; ignore the Result rather than toast a can't-happen.
+            let _ = queue.remove(i);
+            emit_queue_snapshot(queue, events);
+            let _ = events.send(AppEvent::ActionResult("Removed from queue".to_owned()));
+        }
+        None => {
+            let _ = events.send(AppEvent::ActionResult("Track not in the queue".to_owned()));
+        }
+    }
 }
 
 /// Play a single track: replace the queue with `[track]` and start it.
@@ -872,6 +972,33 @@ fn report_player_result(
     }
 }
 
+/// Seek step in seconds for the `>` / `<` keys, matching Python's `_SEEK_STEP`.
+const SEEK_STEP_SECONDS: f64 = 5.0;
+
+/// Seek `seconds` relative to the current position, mirroring Python's
+/// `_seek_relative`: a no-op when nothing is playing, and a swallowed error
+/// otherwise.
+///
+/// The stream may not be seekable yet while the ytdl-hook is still resolving the
+/// URL; mpv rejects that seek with `MPV_ERROR_COMMAND`. Python wrapped the seek
+/// in `contextlib.suppress(Exception)` precisely for this transient case, so the
+/// error is dropped rather than toasted (it is not a user-actionable failure).
+fn seek_relative(player: &Player, seconds: f64) {
+    if player.get_state().video_id.is_empty() {
+        return;
+    }
+    let _ = player.seek(seconds);
+}
+
+/// Seek to the start of the current track, mirroring Python's `action_seek_start`
+/// (`seek_absolute(0.0)` behind the same `video_id` guard + error suppression).
+fn seek_to_start(player: &Player) {
+    if player.get_state().video_id.is_empty() {
+        return;
+    }
+    let _ = player.seek_absolute(0.0);
+}
+
 /// Fetch a single album by `browse_id` and emit the result (or a classified
 /// error). Mirrors Python `api.get_album(browse_id)`.
 async fn handle_fetch_album(
@@ -985,6 +1112,87 @@ async fn handle_start_radio(
     }
 }
 
+/// Per-lookup search cap for the `a` / `A` resolution, matching Python's
+/// `search_all(name, limit=5, filter=...)` in `_lookup_and_open_*`.
+const LOOKUP_SEARCH_LIMIT: usize = 5;
+
+/// Resolve an artist by `name` and emit [`AppEvent::ArtistResolved`] with the
+/// first hit's `channel_id`. Mirrors Python's `_lookup_and_open_artist`: search
+/// the name with the `artists` filter, take the first result that carries a
+/// `channel_id`, and let the UI navigate. An empty result is a warning toast;
+/// an API error is classified. The actual artist fetch is chained UI-side (the
+/// `ArtistResolved` fold returns `FetchArtist`).
+async fn handle_search_and_open_artist(
+    client: Option<&InnerTubeClient>,
+    name: &str,
+    events: &StdSender<AppEvent>,
+) {
+    let Some(client) = client else {
+        let _ = events.send(AppEvent::ApiError(
+            "Not signed in — run: ytmusic-tui auth".to_owned(),
+        ));
+        return;
+    };
+    match client
+        .search_all(name, LOOKUP_SEARCH_LIMIT, Some("artists"))
+        .await
+    {
+        Ok(results) => {
+            match results
+                .artists
+                .into_iter()
+                .find(|a| !a.channel_id.is_empty())
+            {
+                Some(artist) => {
+                    let _ = events.send(AppEvent::ArtistResolved(artist.channel_id));
+                }
+                None => {
+                    let _ = events.send(AppEvent::ApiError(format!("Artist not found: {name}")));
+                }
+            }
+        }
+        Err(err) => {
+            let _ = events.send(AppEvent::ApiError(ytmusic_api::classify_api_error(&err)));
+        }
+    }
+}
+
+/// Resolve an album by `name` (optionally disambiguated by `artist`) and emit
+/// [`AppEvent::AlbumResolved`] with the first hit's `browse_id`. Mirrors
+/// Python's `_lookup_and_open_album`: search `"{name} {artist}"` with the
+/// `albums` filter, take the first result that carries a `browse_id`.
+async fn handle_search_and_open_album(
+    client: Option<&InnerTubeClient>,
+    name: &str,
+    artist: &str,
+    events: &StdSender<AppEvent>,
+) {
+    let Some(client) = client else {
+        let _ = events.send(AppEvent::ApiError(
+            "Not signed in — run: ytmusic-tui auth".to_owned(),
+        ));
+        return;
+    };
+    let query = format!("{name} {artist}");
+    let query = query.trim();
+    match client
+        .search_all(query, LOOKUP_SEARCH_LIMIT, Some("albums"))
+        .await
+    {
+        Ok(results) => match results.albums.into_iter().find(|a| !a.browse_id.is_empty()) {
+            Some(album) => {
+                let _ = events.send(AppEvent::AlbumResolved(album.browse_id));
+            }
+            None => {
+                let _ = events.send(AppEvent::ApiError(format!("Album not found: {name}")));
+            }
+        },
+        Err(err) => {
+            let _ = events.send(AppEvent::ApiError(ytmusic_api::classify_api_error(&err)));
+        }
+    }
+}
+
 /// Toggle the like state of `video_id`: read the current status and flip it.
 /// Mirrors Python's `_toggle_like` (`INDIFFERENT if status == "LIKE" else
 /// "LIKE"`).
@@ -1046,6 +1254,33 @@ async fn handle_add_to_playlist(
     {
         Ok(()) => {
             let _ = events.send(AppEvent::ActionResult("Added to playlist".to_owned()));
+        }
+        Err(err) => {
+            let _ = events.send(AppEvent::ApiError(ytmusic_api::classify_api_error(&err)));
+        }
+    }
+}
+
+/// Remove `video_id` from the playlist `playlist_id`. Mirrors Python's
+/// `_remove_from_playlist` (`remove_playlist_items(playlist_id, [video_id])`).
+async fn handle_remove_from_playlist(
+    client: Option<&InnerTubeClient>,
+    playlist_id: &str,
+    video_id: &str,
+    events: &StdSender<AppEvent>,
+) {
+    let Some(client) = client else {
+        let _ = events.send(AppEvent::ApiError(
+            "Not signed in — run: ytmusic-tui auth".to_owned(),
+        ));
+        return;
+    };
+    match client
+        .remove_playlist_items(playlist_id, &[video_id.to_owned()])
+        .await
+    {
+        Ok(()) => {
+            let _ = events.send(AppEvent::ActionResult("Removed from playlist".to_owned()));
         }
         Err(err) => {
             let _ = events.send(AppEvent::ApiError(ytmusic_api::classify_api_error(&err)));
@@ -1159,6 +1394,55 @@ mod tests {
     }
 
     // -- emit_now_playing / advance emission (real channel, no Player) -----
+
+    #[test]
+    fn remove_from_queue_removes_by_id_and_emits_snapshot() {
+        let (tx, rx) = std::sync::mpsc::channel::<AppEvent>();
+        let mut queue = QueueManager::new();
+        queue.set_playlist(
+            vec![
+                track("v1", "First", "A", "", 10.0),
+                track("v2", "Second", "B", "", 20.0),
+            ],
+            0,
+        );
+        remove_from_queue(&mut queue, "v2", &tx);
+        // The track is gone from the queue.
+        assert_eq!(queue.tracks().len(), 1);
+        assert_eq!(queue.tracks()[0].video_id, "v1");
+        // A snapshot (reflecting the removal) and a confirmation toast were sent.
+        let mut saw_snapshot = false;
+        let mut saw_toast = false;
+        while let Ok(ev) = rx.try_recv() {
+            match ev {
+                AppEvent::QueueSnapshot(s) => {
+                    assert_eq!(s.tracks.len(), 1);
+                    saw_snapshot = true;
+                }
+                AppEvent::ActionResult(msg) => {
+                    assert!(msg.contains("Removed"));
+                    saw_toast = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(saw_snapshot && saw_toast);
+    }
+
+    #[test]
+    fn remove_from_queue_missing_id_is_a_noop_toast() {
+        let (tx, rx) = std::sync::mpsc::channel::<AppEvent>();
+        let mut queue = QueueManager::new();
+        queue.set_playlist(vec![track("v1", "First", "A", "", 10.0)], 0);
+        remove_from_queue(&mut queue, "absent", &tx);
+        // Nothing removed.
+        assert_eq!(queue.tracks().len(), 1);
+        // A "not in the queue" toast, no snapshot.
+        match rx.recv().unwrap() {
+            AppEvent::ActionResult(msg) => assert!(msg.contains("not in the queue")),
+            other => panic!("expected a toast, got {other:?}"),
+        }
+    }
 
     #[test]
     fn emit_now_playing_sends_a_now_playing_event() {

@@ -44,10 +44,29 @@ pub enum ActionKind {
     GoToAlbum,
     /// Add this track to a playlist (opens the playlist picker).
     AddToPlaylist,
+    /// Remove this track from the queue (queue-view context only).
+    RemoveFromQueue,
+    /// Remove this track from the playlist it is shown in (playlist-track
+    /// context only).
+    RemoveFromPlaylist,
     /// Play all of a playlist/album.
     PlayAll,
     /// Open a playlist/album's detail view.
     Open,
+}
+
+/// The context an action popup was opened in, discriminating the track action
+/// list. Port of Python's `context` string argument to `build_actions`
+/// (`""` / `"queue"` / `"playlist_tracks"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PopupContext {
+    /// A plain track row (home / search / library / album / artist / history).
+    #[default]
+    Plain,
+    /// A track in the queue view (offers "Remove from queue").
+    Queue,
+    /// A track inside a playlist's track list (offers "Remove from playlist").
+    PlaylistTracks,
 }
 
 /// A single selectable action within the action popup.
@@ -106,23 +125,13 @@ impl PopupItem {
     }
 }
 
-/// Build the action list for `item` (port of Python's `build_actions`).
-///
-/// Track action lists are spelled out for the plain-track case (the only one
-/// the Rust UI currently reaches — the queue/playlist-track context popups are
-/// a later refinement). Playlists and albums match the Python builders exactly.
+/// Build the action list for `item` in `context` (port of Python's
+/// `build_actions`). Playlists and albums ignore the context (they have a single
+/// action list each); only tracks vary by context.
 #[must_use]
-pub fn build_actions(item: &PopupItem) -> Vec<PopupAction> {
+pub fn build_actions(item: &PopupItem, context: PopupContext) -> Vec<PopupAction> {
     match item {
-        PopupItem::Track(_) => vec![
-            PopupAction::new(ActionKind::Play, "Play"),
-            PopupAction::new(ActionKind::AddToQueue, "Add to queue"),
-            PopupAction::new(ActionKind::StartRadio, "Start radio"),
-            PopupAction::new(ActionKind::GoToArtist, "Go to artist"),
-            PopupAction::new(ActionKind::GoToAlbum, "Go to album"),
-            PopupAction::new(ActionKind::AddToPlaylist, "Add to playlist"),
-            PopupAction::new(ActionKind::ToggleLike, "Like / Unlike"),
-        ],
+        PopupItem::Track(_) => track_actions(context),
         PopupItem::Playlist(_) => vec![
             PopupAction::new(ActionKind::PlayAll, "Play all"),
             PopupAction::new(ActionKind::Open, "Open"),
@@ -131,6 +140,37 @@ pub fn build_actions(item: &PopupItem) -> Vec<PopupAction> {
             PopupAction::new(ActionKind::PlayAll, "Play all"),
             PopupAction::new(ActionKind::Open, "Open"),
             PopupAction::new(ActionKind::GoToArtist, "Go to artist"),
+        ],
+    }
+}
+
+/// The per-context track action list (port of Python's `actions_for_track` /
+/// `actions_for_queue_track` / `actions_for_playlist_track`). The ordering and
+/// labels are 1:1 with the Python builders — those lists are the contract.
+fn track_actions(context: PopupContext) -> Vec<PopupAction> {
+    match context {
+        PopupContext::Plain => vec![
+            PopupAction::new(ActionKind::Play, "Play"),
+            PopupAction::new(ActionKind::AddToQueue, "Add to queue"),
+            PopupAction::new(ActionKind::StartRadio, "Start radio"),
+            PopupAction::new(ActionKind::GoToArtist, "Go to artist"),
+            PopupAction::new(ActionKind::GoToAlbum, "Go to album"),
+            PopupAction::new(ActionKind::AddToPlaylist, "Add to playlist"),
+            PopupAction::new(ActionKind::ToggleLike, "Like / Unlike"),
+        ],
+        PopupContext::Queue => vec![
+            PopupAction::new(ActionKind::Play, "Play"),
+            PopupAction::new(ActionKind::RemoveFromQueue, "Remove from queue"),
+            PopupAction::new(ActionKind::GoToArtist, "Go to artist"),
+            PopupAction::new(ActionKind::GoToAlbum, "Go to album"),
+            PopupAction::new(ActionKind::AddToPlaylist, "Add to playlist"),
+        ],
+        PopupContext::PlaylistTracks => vec![
+            PopupAction::new(ActionKind::Play, "Play"),
+            PopupAction::new(ActionKind::AddToQueue, "Add to queue"),
+            PopupAction::new(ActionKind::RemoveFromPlaylist, "Remove from playlist"),
+            PopupAction::new(ActionKind::GoToArtist, "Go to artist"),
+            PopupAction::new(ActionKind::GoToAlbum, "Go to album"),
         ],
     }
 }
@@ -148,10 +188,18 @@ pub struct ActionPopup {
 }
 
 impl ActionPopup {
-    /// Build the popup for `item`, populating its action list.
+    /// Build the popup for `item` in the plain (no-context) track context.
     #[must_use]
     pub fn new(item: PopupItem) -> Self {
-        let actions = build_actions(&item);
+        Self::with_context(item, PopupContext::Plain)
+    }
+
+    /// Build the popup for `item` in `context`, populating its action list.
+    /// The context only changes the *track* action list (queue / playlist-track
+    /// rows get their remove actions); playlists and albums are context-agnostic.
+    #[must_use]
+    pub fn with_context(item: PopupItem, context: PopupContext) -> Self {
+        let actions = build_actions(&item, context);
         // Every PopupItem variant must yield at least one action: an empty
         // popup would open, render nothing, and silently dismiss on Enter.
         debug_assert!(
@@ -243,8 +291,10 @@ const NEW_PLAYLIST_ROW: usize = 0;
 /// What a playlist-picker selection resolves to.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PickerChoice {
-    /// The user chose "New playlist…" (create then add).
-    NewPlaylist,
+    /// The user chose "New playlist…" and named it (create then add). `name` is
+    /// the title typed into the name-entry prompt (Python prompted for one via
+    /// `PlaylistPickerPopup`'s "New playlist" entry).
+    NewPlaylist { name: String },
     /// The user chose an existing playlist (by id) to add the track to.
     Existing(String),
 }
@@ -253,6 +303,13 @@ pub enum PickerChoice {
 ///
 /// Row 0 is always "New playlist…"; the rest are the user's playlists. Holds the
 /// `track` the add applies to so the caller can issue the add command on select.
+///
+/// Selecting "New playlist…" does not resolve immediately: it enters a
+/// **name-entry** sub-mode (`naming` becomes `Some(buffer)`), where printable
+/// keys build the title, Backspace deletes, Enter confirms (resolving to
+/// [`PickerChoice::NewPlaylist`] with the typed name), and Esc returns to the
+/// list. This is the Rust equivalent of Python's "New playlist" prompt, kept
+/// inside the popup so the app's search-specific input mode is untouched.
 #[derive(Debug, Clone)]
 pub struct PlaylistPickerPopup {
     /// `(playlist_id, title)` pairs for the existing playlists.
@@ -260,6 +317,9 @@ pub struct PlaylistPickerPopup {
     /// The track being added (carried through to the selection result).
     track: Track,
     cursor: usize,
+    /// `Some(buffer)` while the user is typing a new playlist name; `None` in
+    /// the normal list-navigation mode.
+    naming: Option<String>,
 }
 
 impl PlaylistPickerPopup {
@@ -270,6 +330,7 @@ impl PlaylistPickerPopup {
             playlists,
             track,
             cursor: 0,
+            naming: None,
         }
     }
 
@@ -279,17 +340,58 @@ impl PlaylistPickerPopup {
         &self.track
     }
 
-    /// Resolve the current selection to a [`PickerChoice`], or `None` if the
-    /// cursor is somehow out of range.
+    /// Whether the popup is in the name-entry sub-mode.
     #[must_use]
-    pub fn selected(&self) -> Option<PickerChoice> {
+    pub fn is_naming(&self) -> bool {
+        self.naming.is_some()
+    }
+
+    /// Resolve the current *list* selection to a [`PickerChoice`], or `None`.
+    ///
+    /// Used only for existing-playlist rows: the "New playlist…" row does not
+    /// resolve here (it enters the name-entry sub-mode instead — see
+    /// [`PopupState::on_key`]). Kept for the existing-row terminal path.
+    #[must_use]
+    pub fn selected_existing(&self) -> Option<PickerChoice> {
         if self.cursor == NEW_PLAYLIST_ROW {
-            return Some(PickerChoice::NewPlaylist);
+            return None;
         }
         let adj = self.cursor - 1;
         self.playlists
             .get(adj)
             .map(|(id, _)| PickerChoice::Existing(id.clone()))
+    }
+
+    /// Enter the name-entry sub-mode with an empty buffer (the user picked the
+    /// "New playlist…" row).
+    fn begin_naming(&mut self) {
+        self.naming = Some(String::new());
+    }
+
+    /// The currently-typed new-playlist name, if in the name-entry sub-mode.
+    #[must_use]
+    pub fn naming_buffer(&self) -> Option<&str> {
+        self.naming.as_deref()
+    }
+
+    /// Append a character to the name buffer (name-entry mode only).
+    fn push_name_char(&mut self, ch: char) {
+        if let Some(buf) = self.naming.as_mut() {
+            buf.push(ch);
+        }
+    }
+
+    /// Delete the last character of the name buffer (name-entry mode only).
+    fn backspace_name(&mut self) {
+        if let Some(buf) = self.naming.as_mut() {
+            buf.pop();
+        }
+    }
+
+    /// Leave the name-entry sub-mode, discarding the buffer, and return to the
+    /// list (Esc inside naming).
+    fn cancel_naming(&mut self) {
+        self.naming = None;
     }
 
     /// The total number of rows (the "New playlist…" row plus the playlists).
@@ -421,6 +523,38 @@ impl PopupState {
                 }
                 _ => PopupOutcome::Consumed,
             },
+            PopupState::PlaylistPicker(popup) if popup.is_naming() => match key {
+                // Name-entry sub-mode: build the new playlist title.
+                KeyCode::Enter => {
+                    // An empty name is not a valid title; ignore Enter until at
+                    // least one character is typed (Esc still cancels).
+                    let name = popup.naming_buffer().unwrap_or("").trim().to_owned();
+                    if name.is_empty() {
+                        return PopupOutcome::Consumed;
+                    }
+                    let track = popup.track.clone();
+                    self.close();
+                    PopupOutcome::PlaylistChosen {
+                        choice: PickerChoice::NewPlaylist { name },
+                        track,
+                    }
+                }
+                KeyCode::Backspace => {
+                    popup.backspace_name();
+                    PopupOutcome::Consumed
+                }
+                KeyCode::Esc => {
+                    // Esc inside naming returns to the list, not dismissing the
+                    // whole popup.
+                    popup.cancel_naming();
+                    PopupOutcome::Consumed
+                }
+                KeyCode::Char(ch) => {
+                    popup.push_name_char(ch);
+                    PopupOutcome::Consumed
+                }
+                _ => PopupOutcome::Consumed,
+            },
             PopupState::PlaylistPicker(popup) => match key {
                 KeyCode::Char('j') | KeyCode::Down => {
                     popup.select_next();
@@ -431,12 +565,22 @@ impl PopupState {
                     PopupOutcome::Consumed
                 }
                 KeyCode::Enter => {
-                    let outcome = popup.selected().map(|choice| PopupOutcome::PlaylistChosen {
-                        choice,
-                        track: popup.track.clone(),
-                    });
-                    self.close();
-                    outcome.unwrap_or(PopupOutcome::Dismissed)
+                    // "New playlist…" (row 0) enters the name-entry sub-mode;
+                    // an existing row resolves immediately.
+                    if popup.cursor == NEW_PLAYLIST_ROW {
+                        popup.begin_naming();
+                        PopupOutcome::Consumed
+                    } else {
+                        let outcome =
+                            popup
+                                .selected_existing()
+                                .map(|choice| PopupOutcome::PlaylistChosen {
+                                    choice,
+                                    track: popup.track.clone(),
+                                });
+                        self.close();
+                        outcome.unwrap_or(PopupOutcome::Dismissed)
+                    }
                 }
                 KeyCode::Esc => {
                     self.close();
@@ -472,15 +616,23 @@ impl PopupState {
                 render_list_popup(frame, area, theme, "Select Theme", rows, popup.cursor);
             }
             PopupState::PlaylistPicker(popup) => {
-                let mut rows: Vec<ListItem> =
-                    vec![ListItem::new(Line::from(Span::raw("+ New playlist...")))];
-                rows.extend(
-                    popup
-                        .playlists
-                        .iter()
-                        .map(|(_, title)| ListItem::new(Line::from(Span::raw(title.clone())))),
-                );
-                render_list_popup(frame, area, theme, "Add to playlist", rows, popup.cursor);
+                if let Some(buffer) = popup.naming_buffer() {
+                    // Name-entry sub-mode: a single prompt row with the typed
+                    // title and a block cursor, so the user sees what they type.
+                    let prompt = format!("Name: {buffer}_");
+                    let rows = vec![ListItem::new(Line::from(Span::raw(prompt)))];
+                    render_list_popup(frame, area, theme, "New playlist", rows, 0);
+                } else {
+                    let mut rows: Vec<ListItem> =
+                        vec![ListItem::new(Line::from(Span::raw("+ New playlist...")))];
+                    rows.extend(
+                        popup
+                            .playlists
+                            .iter()
+                            .map(|(_, title)| ListItem::new(Line::from(Span::raw(title.clone())))),
+                    );
+                    render_list_popup(frame, area, theme, "Add to playlist", rows, popup.cursor);
+                }
             }
         }
     }
@@ -574,7 +726,10 @@ mod tests {
 
     #[test]
     fn track_action_list_matches_python() {
-        let actions = build_actions(&PopupItem::Track(track("v1", "Song", "Band")));
+        let actions = build_actions(
+            &PopupItem::Track(track("v1", "Song", "Band")),
+            PopupContext::Plain,
+        );
         let kinds: Vec<ActionKind> = actions.iter().map(|a| a.kind).collect();
         assert_eq!(
             kinds,
@@ -591,9 +746,47 @@ mod tests {
     }
 
     #[test]
+    fn queue_track_action_list_matches_python() {
+        let actions = build_actions(
+            &PopupItem::Track(track("v1", "Song", "Band")),
+            PopupContext::Queue,
+        );
+        let kinds: Vec<ActionKind> = actions.iter().map(|a| a.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                ActionKind::Play,
+                ActionKind::RemoveFromQueue,
+                ActionKind::GoToArtist,
+                ActionKind::GoToAlbum,
+                ActionKind::AddToPlaylist,
+            ]
+        );
+    }
+
+    #[test]
+    fn playlist_track_action_list_matches_python() {
+        let actions = build_actions(
+            &PopupItem::Track(track("v1", "Song", "Band")),
+            PopupContext::PlaylistTracks,
+        );
+        let kinds: Vec<ActionKind> = actions.iter().map(|a| a.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                ActionKind::Play,
+                ActionKind::AddToQueue,
+                ActionKind::RemoveFromPlaylist,
+                ActionKind::GoToArtist,
+                ActionKind::GoToAlbum,
+            ]
+        );
+    }
+
+    #[test]
     fn playlist_action_list_matches_python() {
         let pl = PlaylistInfo::new("PL1", "Mix", "", 10, "");
-        let actions = build_actions(&PopupItem::Playlist(pl));
+        let actions = build_actions(&PopupItem::Playlist(pl), PopupContext::Plain);
         let kinds: Vec<ActionKind> = actions.iter().map(|a| a.kind).collect();
         assert_eq!(kinds, vec![ActionKind::PlayAll, ActionKind::Open]);
     }
@@ -601,7 +794,7 @@ mod tests {
     #[test]
     fn album_action_list_matches_python() {
         let al = AlbumInfo::new_without_tracks("b1", "LP", "Band", "2020", "");
-        let actions = build_actions(&PopupItem::Album(al));
+        let actions = build_actions(&PopupItem::Album(al), PopupContext::Plain);
         let kinds: Vec<ActionKind> = actions.iter().map(|a| a.kind).collect();
         assert_eq!(
             kinds,
@@ -682,17 +875,66 @@ mod tests {
     // -- playlist picker ---------------------------------------------------
 
     #[test]
-    fn picker_row_zero_is_new_playlist() {
+    fn picker_row_zero_enters_naming_mode_then_resolves_typed_name() {
         let mut state = PopupState::PlaylistPicker(PlaylistPickerPopup::new(
             vec![("PL1".into(), "Mix".into())],
             track("v1", "Song", "Band"),
         ));
+        // Enter on "New playlist…" enters name-entry mode (does NOT resolve yet).
+        assert_eq!(state.on_key(KeyCode::Enter), PopupOutcome::Consumed);
+        if let PopupState::PlaylistPicker(p) = &state {
+            assert!(p.is_naming(), "Enter on row 0 begins naming");
+        } else {
+            panic!("picker should still be open");
+        }
+        // Type a name, then Enter to confirm.
+        for ch in "Roadtrip".chars() {
+            assert_eq!(state.on_key(KeyCode::Char(ch)), PopupOutcome::Consumed);
+        }
         match state.on_key(KeyCode::Enter) {
             PopupOutcome::PlaylistChosen { choice, track } => {
-                assert_eq!(choice, PickerChoice::NewPlaylist);
+                assert_eq!(
+                    choice,
+                    PickerChoice::NewPlaylist {
+                        name: "Roadtrip".into()
+                    }
+                );
                 assert_eq!(track.video_id, "v1");
             }
             other => panic!("expected PlaylistChosen, got {other:?}"),
+        }
+        assert!(!state.is_open(), "popup closes after naming confirm");
+    }
+
+    #[test]
+    fn picker_naming_empty_name_does_not_resolve() {
+        let mut state = PopupState::PlaylistPicker(PlaylistPickerPopup::new(
+            vec![],
+            track("v1", "Song", "Band"),
+        ));
+        state.on_key(KeyCode::Enter); // enter naming
+        // Enter with an empty buffer is ignored (stays open, still naming).
+        assert_eq!(state.on_key(KeyCode::Enter), PopupOutcome::Consumed);
+        assert!(state.is_open());
+        if let PopupState::PlaylistPicker(p) = &state {
+            assert!(p.is_naming());
+        }
+    }
+
+    #[test]
+    fn picker_naming_esc_returns_to_list() {
+        let mut state = PopupState::PlaylistPicker(PlaylistPickerPopup::new(
+            vec![("PL1".into(), "Mix".into())],
+            track("v1", "Song", "Band"),
+        ));
+        state.on_key(KeyCode::Enter); // enter naming
+        state.on_key(KeyCode::Char('x'));
+        state.on_key(KeyCode::Backspace);
+        // Esc inside naming returns to the list without dismissing the popup.
+        assert_eq!(state.on_key(KeyCode::Esc), PopupOutcome::Consumed);
+        assert!(state.is_open());
+        if let PopupState::PlaylistPicker(p) = &state {
+            assert!(!p.is_naming(), "Esc leaves naming back to the list");
         }
     }
 

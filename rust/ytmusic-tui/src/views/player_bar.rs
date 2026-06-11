@@ -215,6 +215,15 @@ impl PlayerBarState {
         self.volume = volume.clamp(0, 100);
     }
 
+    /// Fold a mute observation in (`AppEvent::PlayerMute`).
+    ///
+    /// Drives the `Vol: MUTE` indicator. The state is owned by mpv (the `_` key
+    /// toggles the property and the observer reports the resulting value), so
+    /// the bar simply mirrors it rather than tracking an optimistic guess.
+    pub fn on_mute(&mut self, muted: bool) {
+        self.is_muted = muted;
+    }
+
     /// Clear the now-playing state when the track ends (`AppEvent::TrackEnded`).
     ///
     /// Returns the bar to idle. The runtime's auto-advance (M5b) may then send a
@@ -670,6 +679,17 @@ mod tests {
         assert_eq!(state.volume, 100);
         state.on_volume(-5);
         assert_eq!(state.volume, 0);
+    }
+
+    #[test]
+    fn on_mute_mirrors_observed_state() {
+        let mut state = PlayerBarState::default();
+        assert!(!state.is_muted);
+        state.on_mute(true);
+        assert!(state.is_muted);
+        assert_eq!(volume_text(&state), "Vol: MUTE");
+        state.on_mute(false);
+        assert!(!state.is_muted);
     }
 
     #[test]
