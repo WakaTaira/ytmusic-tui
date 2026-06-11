@@ -129,6 +129,17 @@ impl AlbumView {
         })
     }
 
+    /// The album track under the cursor as a [`PopupItem`] for the action popup.
+    /// `None` when the album is empty / not loaded.
+    #[must_use]
+    pub fn selected_popup_item(&self) -> Option<super::popup::PopupItem> {
+        let album = self.state.loaded()?;
+        album
+            .tracks
+            .get(self.cursor)
+            .map(|t| super::popup::PopupItem::Track(t.clone()))
+    }
+
     // -- Rendering -----------------------------------------------------------
 
     /// Render the album view into `area`.

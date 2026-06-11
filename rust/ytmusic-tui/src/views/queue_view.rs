@@ -32,6 +32,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ytmusic_api::Track;
 
+use super::filter_bar::matches_filter;
 use super::{PageState, Theme};
 use crate::formatting::format_duration;
 
@@ -71,6 +72,10 @@ pub enum QueueAction {
 pub struct QueueView {
     state: PageState<QueueSnapshot>,
     cursor: usize,
+    /// The active in-page filter query (`None` = no filter), set by the main
+    /// loop from the filter bar. Navigation, the `▶` marker, and "jump to" all
+    /// operate over the filtered subset when set.
+    filter: Option<String>,
 }
 
 impl Default for QueueView {
@@ -86,6 +91,7 @@ impl QueueView {
         Self {
             state: PageState::Loading,
             cursor: 0,
+            filter: None,
         }
     }
 
@@ -98,20 +104,25 @@ impl QueueView {
     // -- Data loading --------------------------------------------------------
 
     /// Apply a fresh queue snapshot (from [`crate::app::AppEvent::QueueSnapshot`]).
+    ///
+    /// The active filter is preserved across snapshots (the queue re-snapshots
+    /// as tracks advance while the bar is open); the cursor is clamped against
+    /// the *filtered* row count so it never points past the visible rows.
     pub fn set_snapshot(&mut self, snapshot: QueueSnapshot) {
-        // Clamp the cursor so it stays valid if the queue shrank.
-        if !snapshot.tracks.is_empty() {
-            self.cursor = self.cursor.min(snapshot.tracks.len() - 1);
-        } else {
-            self.cursor = 0;
-        }
         self.state = PageState::Loaded(snapshot);
+        let visible = self.visible_indices().len();
+        self.cursor = if visible == 0 {
+            0
+        } else {
+            self.cursor.min(visible - 1)
+        };
     }
 
     /// Reset to loading (issued when the queue view is first opened).
     pub fn set_loading(&mut self) {
         self.state = PageState::Loading;
         self.cursor = 0;
+        self.filter = None;
     }
 
     /// Transition into the error state.
@@ -119,10 +130,57 @@ impl QueueView {
         self.state = PageState::Error(message.into());
     }
 
+    // -- In-page filter ------------------------------------------------------
+
+    /// Set (or clear) the in-page filter query, resetting the cursor on change.
+    pub fn set_filter(&mut self, query: Option<&str>) {
+        let new = query.map(str::to_owned);
+        if new != self.filter {
+            self.filter = new;
+            self.cursor = 0;
+        }
+    }
+
+    /// The indices into the snapshot's track list that pass the active filter.
+    /// With no filter, every index is returned; empty when not loaded.
+    fn visible_indices(&self) -> Vec<usize> {
+        let Some(snap) = self.state.loaded() else {
+            return Vec::new();
+        };
+        match &self.filter {
+            None => (0..snap.tracks.len()).collect(),
+            Some(q) => snap
+                .tracks
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| matches_filter(q, &[&t.title, &t.artist, &t.album]))
+                .map(|(i, _)| i)
+                .collect(),
+        }
+    }
+
+    /// The `(visible, total)` row counts for the filter bar's label.
+    #[must_use]
+    pub fn filter_counts(&self) -> (usize, usize) {
+        let total = self.state.loaded().map_or(0, |s| s.tracks.len());
+        (self.visible_indices().len(), total)
+    }
+
+    /// The queue track under the cursor, as a [`PopupItem`] for the action
+    /// popup. `None` when empty / not loaded. Respects the active filter.
+    #[must_use]
+    pub fn selected_popup_item(&self) -> Option<super::popup::PopupItem> {
+        let visible = self.visible_indices();
+        let original = *visible.get(self.cursor)?;
+        let track = self.state.loaded()?.tracks.get(original)?;
+        Some(super::popup::PopupItem::Track(track.clone()))
+    }
+
     // -- Navigation ----------------------------------------------------------
 
+    /// The number of *visible* (post-filter) rows.
     fn track_count(&self) -> usize {
-        self.state.loaded().map_or(0, |s| s.tracks.len())
+        self.visible_indices().len()
     }
 
     /// Move the cursor down one row, clamping at the end.
@@ -140,16 +198,24 @@ impl QueueView {
 
     /// Resolve an Enter keypress into a [`QueueAction`], or `None`.
     ///
-    /// Mirrors Python: `set_playlist(tracks, start_index=row_index)` — the
-    /// whole queue is kept but playback resumes from the selected row.
+    /// Plays from the selected (visible) row, queueing the rest of the *visible*
+    /// rows. With a filter active this re-seeds the queue with the filtered
+    /// subset (matching what the user sees); unfiltered it keeps the whole queue
+    /// and resumes from the selected row (Python's
+    /// `set_playlist(tracks, start_index=row_index)`).
     #[must_use]
     pub fn activate_selected(&self) -> Option<QueueAction> {
         let snap = self.state.loaded()?;
-        if snap.tracks.is_empty() || self.cursor >= snap.tracks.len() {
+        let visible = self.visible_indices();
+        if visible.is_empty() || self.cursor >= visible.len() {
             return None;
         }
+        let tracks: Vec<Track> = visible
+            .iter()
+            .filter_map(|&i| snap.tracks.get(i).cloned())
+            .collect();
         Some(QueueAction::JumpTo {
-            tracks: snap.tracks.clone(),
+            tracks,
             start_index: self.cursor,
         })
     }
@@ -188,6 +254,12 @@ impl QueueView {
             PageState::Loaded(snap) => {
                 if snap.tracks.is_empty() {
                     ("Queue is empty".to_owned(), false)
+                } else if self.filter.is_some() {
+                    let visible = self.track_count();
+                    (
+                        format!("{visible}/{} track(s) in queue", snap.tracks.len()),
+                        false,
+                    )
                 } else {
                     (format!("{} track(s) in queue", snap.tracks.len()), false)
                 }
@@ -199,14 +271,17 @@ impl QueueView {
         let PageState::Loaded(snap) = &self.state else {
             return;
         };
-        if snap.tracks.is_empty() {
+        let visible = self.visible_indices();
+        if visible.is_empty() {
             return;
         }
 
-        let items: Vec<ListItem> = snap
-            .tracks
+        // Keep the original queue position number and the current-track marker
+        // mapped to the original index, so a filtered view still shows real
+        // positions and highlights the playing track when it is visible.
+        let items: Vec<ListItem> = visible
             .iter()
-            .enumerate()
+            .filter_map(|&i| snap.tracks.get(i).map(|t| (i, t)))
             .map(|(i, t)| track_row(i + 1, t, snap.current_index == Some(i)))
             .collect();
 
@@ -222,9 +297,7 @@ impl QueueView {
             .highlight_symbol("▶ ");
 
         let mut list_state = ListState::default();
-        if !snap.tracks.is_empty() {
-            list_state.select(Some(self.cursor.min(snap.tracks.len() - 1)));
-        }
+        list_state.select(Some(self.cursor.min(visible.len() - 1)));
         frame.render_stateful_widget(list, area, &mut list_state);
     }
 }
@@ -430,5 +503,79 @@ mod tests {
         });
         let text = render_to_string(&view, 60, 8);
         assert!(text.contains("Queue is empty"), "text:\n{text}");
+    }
+
+    // -- in-page filter ------------------------------------------------------
+
+    #[test]
+    fn filter_narrows_visible_rows() {
+        let mut view = QueueView::new();
+        view.set_snapshot(QueueSnapshot {
+            tracks: vec![
+                make_track("v1", "Airbag", "Radiohead"),
+                make_track("v2", "Get Lucky", "Daft Punk"),
+                make_track("v3", "Karma Police", "Radiohead"),
+            ],
+            current_index: Some(0),
+        });
+        view.set_filter(Some("daft"));
+        assert_eq!(view.track_count(), 1);
+    }
+
+    #[test]
+    fn filter_jump_queues_visible_subset() {
+        let mut view = QueueView::new();
+        view.set_snapshot(QueueSnapshot {
+            tracks: vec![
+                make_track("v1", "Airbag", "Radiohead"),
+                make_track("v2", "Get Lucky", "Daft Punk"),
+                make_track("v3", "Karma Police", "Radiohead"),
+            ],
+            current_index: Some(0),
+        });
+        view.set_filter(Some("radiohead"));
+        match view.activate_selected() {
+            Some(QueueAction::JumpTo {
+                tracks,
+                start_index,
+            }) => {
+                assert_eq!(tracks.len(), 2);
+                assert_eq!(start_index, 0);
+                assert_eq!(tracks[0].video_id, "v1");
+                assert_eq!(tracks[1].video_id, "v3");
+            }
+            other => panic!("expected JumpTo, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn filter_render_shows_filtered_count() {
+        let mut view = QueueView::new();
+        view.set_snapshot(QueueSnapshot {
+            tracks: vec![
+                make_track("v1", "Airbag", "Radiohead"),
+                make_track("v2", "Get Lucky", "Daft Punk"),
+            ],
+            current_index: Some(0),
+        });
+        view.set_filter(Some("lucky"));
+        let text = render_to_string(&view, 70, 10);
+        assert!(text.contains("Get Lucky"), "missing match:\n{text}");
+        assert!(!text.contains("Airbag"), "non-match shown:\n{text}");
+        assert!(
+            text.contains("1/2 track(s) in queue"),
+            "missing filtered count:\n{text}"
+        );
+    }
+
+    #[test]
+    fn snapshot_preserves_filter() {
+        let mut view = QueueView::new();
+        view.set_snapshot(snapshot_with_current(Some(0)));
+        view.set_filter(Some("airbag"));
+        assert_eq!(view.track_count(), 1);
+        // A re-snapshot (queue advanced) keeps the filter applied.
+        view.set_snapshot(snapshot_with_current(Some(1)));
+        assert_eq!(view.track_count(), 1, "filter survives a re-snapshot");
     }
 }

@@ -117,6 +117,18 @@ impl HomeView {
         section.items.get(self.item_idx)
     }
 
+    /// The item under the cursor as a [`PopupItem`] for the action popup
+    /// (a track or a playlist). `None` when nothing is selected.
+    #[must_use]
+    pub fn selected_popup_item(&self) -> Option<super::popup::PopupItem> {
+        match self.selected_item()? {
+            HomeSectionItem::Track(track) => Some(super::popup::PopupItem::Track(track.clone())),
+            HomeSectionItem::Playlist(playlist) => {
+                Some(super::popup::PopupItem::Playlist(playlist.clone()))
+            }
+        }
+    }
+
     // -- Navigation (ported from home.py) ----------------------------------
 
     /// Move the cursor down one item within the active section (Python Down /

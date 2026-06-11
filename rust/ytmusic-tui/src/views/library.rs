@@ -36,6 +36,7 @@ use ytmusic_api::{AlbumInfo, ArtistInfo, PlaylistInfo, Track};
 
 use super::{PageState, Theme};
 use crate::formatting::format_duration;
+use crate::layout::{Orientation, detect_orientation};
 
 // ---------------------------------------------------------------------------
 // Pane index
@@ -342,6 +343,48 @@ impl LibraryView {
         }
     }
 
+    /// The item under the cursor in the focused pane as a [`PopupItem`] for the
+    /// action popup. The Artists pane and the synthetic "Liked songs" row have
+    /// no [`PopupItem`] variant, so they yield `None`.
+    #[must_use]
+    pub fn selected_popup_item(&self) -> Option<super::popup::PopupItem> {
+        match self.active_pane {
+            LibraryPane::Playlists => {
+                let cursor = self.cursors[LibraryPane::Playlists.index()];
+                match &self.playlists_level {
+                    PlaylistsLevel::List(state) => {
+                        if self.has_liked_row() {
+                            if cursor == 0 {
+                                return None; // the synthetic liked-songs row
+                            }
+                            state
+                                .loaded()?
+                                .get(cursor - 1)
+                                .map(|p| super::popup::PopupItem::Playlist(p.clone()))
+                        } else {
+                            state
+                                .loaded()?
+                                .get(cursor)
+                                .map(|p| super::popup::PopupItem::Playlist(p.clone()))
+                        }
+                    }
+                    PlaylistsLevel::Tracks { state, .. } => state
+                        .loaded()?
+                        .get(cursor)
+                        .map(|t| super::popup::PopupItem::Track(t.clone())),
+                }
+            }
+            LibraryPane::Albums => {
+                let cursor = self.cursors[LibraryPane::Albums.index()];
+                self.albums
+                    .loaded()?
+                    .get(cursor)
+                    .map(|a| super::popup::PopupItem::Album(a.clone()))
+            }
+            LibraryPane::Artists => None,
+        }
+    }
+
     /// Resolve Enter on the Playlists pane, handling the liked-songs row, real
     /// playlists, and the track drill-down.
     fn activate_playlists(&self) -> Option<LibraryAction> {
@@ -534,18 +577,31 @@ impl LibraryView {
             || matches!(self.artists, PageState::Loading)
     }
 
-    /// Draw the three panes side by side (Playlists 2fr, Albums 2fr, Artists 1fr,
-    /// mirroring Python's CSS widths).
+    /// Draw the three panes responsively (port of spotify_player's layout
+    /// switch, consuming [`crate::layout::detect_orientation`]).
+    ///
+    /// * **Horizontal** (wide terminal): three columns side by side — Playlists
+    ///   2fr, Albums 2fr, Artists 1fr (Python's CSS widths).
+    /// * **Vertical** (portrait-ish): the three panes stacked in one column so
+    ///   each keeps usable width on a narrow terminal.
     fn render_panes(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        let cols = Layout::horizontal([
-            Constraint::Ratio(2, 5),
-            Constraint::Ratio(2, 5),
-            Constraint::Ratio(1, 5),
-        ])
-        .split(area);
-        self.render_pane(frame, cols[0], theme, LibraryPane::Playlists);
-        self.render_pane(frame, cols[1], theme, LibraryPane::Albums);
-        self.render_pane(frame, cols[2], theme, LibraryPane::Artists);
+        let cells = match detect_orientation(area.width, area.height) {
+            Orientation::Horizontal => Layout::horizontal([
+                Constraint::Ratio(2, 5),
+                Constraint::Ratio(2, 5),
+                Constraint::Ratio(1, 5),
+            ])
+            .split(area),
+            Orientation::Vertical => Layout::vertical([
+                Constraint::Ratio(1, 3),
+                Constraint::Ratio(1, 3),
+                Constraint::Ratio(1, 3),
+            ])
+            .split(area),
+        };
+        self.render_pane(frame, cells[0], theme, LibraryPane::Playlists);
+        self.render_pane(frame, cells[1], theme, LibraryPane::Albums);
+        self.render_pane(frame, cells[2], theme, LibraryPane::Artists);
     }
 
     /// Draw one pane as a titled, bordered list with the active pane highlighted.
@@ -1041,5 +1097,19 @@ mod tests {
         let text = render_to_string(&view, 90, 16);
         assert!(text.contains("First"), "missing track:\n{text}");
         assert!(text.contains("Esc to go back"), "missing hint:\n{text}");
+    }
+
+    #[test]
+    fn portrait_layout_stacks_three_panes() {
+        // A narrow/tall terminal (aspect < 2.3) stacks the three panes; all
+        // three titles must still render.
+        let view = loaded_view();
+        let stacked = render_to_string(&view, 40, 40); // 40/40 = 1.0 → vertical
+        assert!(
+            stacked.contains("Playlists"),
+            "missing Playlists:\n{stacked}"
+        );
+        assert!(stacked.contains("Albums"), "missing Albums:\n{stacked}");
+        assert!(stacked.contains("Artists"), "missing Artists:\n{stacked}");
     }
 }

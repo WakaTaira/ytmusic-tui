@@ -234,6 +234,26 @@ impl ArtistView {
         }
     }
 
+    /// The item under the cursor in the focused section as a [`PopupItem`] for
+    /// the action popup: a top-song track, or an album. The Related Artists
+    /// section has no [`PopupItem`] variant and yields `None`.
+    #[must_use]
+    pub fn selected_popup_item(&self) -> Option<super::popup::PopupItem> {
+        let artist = self.state.loaded()?;
+        let cursor = self.cursors[self.focused.index()];
+        match self.focused {
+            ArtistSection::TopSongs => artist
+                .top_songs
+                .get(cursor)
+                .map(|t| super::popup::PopupItem::Track(t.clone())),
+            ArtistSection::Albums => artist
+                .albums
+                .get(cursor)
+                .map(|a| super::popup::PopupItem::Album(a.clone())),
+            ArtistSection::RelatedArtists => None,
+        }
+    }
+
     // -- Rendering -----------------------------------------------------------
 
     /// Render the artist view into `area`.

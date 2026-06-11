@@ -26,6 +26,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ytmusic_api::{PlaylistInfo, Track};
 
+use super::filter_bar::matches_filter;
 use super::{PageState, Theme};
 use crate::formatting::format_duration;
 
@@ -75,6 +76,9 @@ pub struct PlaylistView {
     level: Level,
     /// Cursor into the active level's items.
     cursor: usize,
+    /// The active in-page filter query (`None` = no filter), set by the main
+    /// loop from the filter bar. Applies to whichever level's list is showing.
+    filter: Option<String>,
 }
 
 impl Default for PlaylistView {
@@ -94,6 +98,7 @@ impl PlaylistView {
         Self {
             level: Level::Playlists(PageState::Loading),
             cursor: 0,
+            filter: None,
         }
     }
 
@@ -111,6 +116,7 @@ impl PlaylistView {
     pub fn set_playlists(&mut self, playlists: Vec<PlaylistInfo>) {
         self.level = Level::Playlists(PageState::Loaded(playlists));
         self.cursor = 0;
+        self.filter = None;
     }
 
     /// Switch to level 2 in the loading state for `title`
@@ -121,6 +127,7 @@ impl PlaylistView {
             state: PageState::Loading,
         };
         self.cursor = 0;
+        self.filter = None;
     }
 
     /// Fill the level-2 track list (`PlaylistTracksLoaded`).
@@ -138,6 +145,7 @@ impl PlaylistView {
             state: PageState::Loaded(tracks),
         };
         self.cursor = 0;
+        self.filter = None;
     }
 
     /// Put the active level into the error state with a classified message.
@@ -152,12 +160,10 @@ impl PlaylistView {
 
     // -- Navigation --------------------------------------------------------
 
-    /// The number of selectable rows in the active level (0 unless loaded).
+    /// The number of selectable *visible* (post-filter) rows in the active level
+    /// (0 unless loaded).
     fn item_count(&self) -> usize {
-        match &self.level {
-            Level::Playlists(state) => state.loaded().map_or(0, Vec::len),
-            Level::Tracks { state, .. } => state.loaded().map_or(0, Vec::len),
-        }
+        self.visible_indices().len()
     }
 
     /// Move the cursor down one row, clamping at the last item (Textual tables
@@ -182,18 +188,28 @@ impl PlaylistView {
     /// nothing is selected (not loaded, or an empty list).
     #[must_use]
     pub fn activate_selected(&self) -> Option<PlaylistAction> {
+        // The cursor indexes the *visible* (filtered) rows; map it back to the
+        // original item via the visible-index list.
+        let visible = self.visible_indices();
+        let original = *visible.get(self.cursor)?;
         match &self.level {
             Level::Playlists(state) => {
-                let playlist = state.loaded()?.get(self.cursor)?;
+                let playlist = state.loaded()?.get(original)?;
                 Some(PlaylistAction::OpenPlaylist(playlist.clone()))
             }
             Level::Tracks { state, .. } => {
                 let tracks = state.loaded()?;
-                if self.cursor >= tracks.len() {
+                // Queue the visible subset, playing from the selected visible
+                // row, so a filtered track list plays only what the user sees.
+                let visible_tracks: Vec<Track> = visible
+                    .iter()
+                    .filter_map(|&i| tracks.get(i).cloned())
+                    .collect();
+                if self.cursor >= visible_tracks.len() {
                     return None;
                 }
                 Some(PlaylistAction::PlayTracks {
-                    tracks: tracks.clone(),
+                    tracks: visible_tracks,
                     start_index: self.cursor,
                 })
             }
@@ -216,9 +232,81 @@ impl PlaylistView {
         if self.is_viewing_tracks() {
             self.level = Level::Playlists(PageState::Loading);
             self.cursor = 0;
+            self.filter = None;
             true
         } else {
             false
+        }
+    }
+
+    // -- In-page filter ------------------------------------------------------
+
+    /// Set (or clear) the in-page filter query, resetting the cursor on change.
+    /// Applies to whichever level's list is currently showing.
+    pub fn set_filter(&mut self, query: Option<&str>) {
+        let new = query.map(str::to_owned);
+        if new != self.filter {
+            self.filter = new;
+            self.cursor = 0;
+        }
+    }
+
+    /// The indices into the active level's list that pass the active filter, in
+    /// order. With no filter, every index is returned; empty unless loaded.
+    fn visible_indices(&self) -> Vec<usize> {
+        match &self.level {
+            Level::Playlists(PageState::Loaded(playlists)) => match &self.filter {
+                None => (0..playlists.len()).collect(),
+                Some(q) => playlists
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| matches_filter(q, &[&p.title]))
+                    .map(|(i, _)| i)
+                    .collect(),
+            },
+            Level::Tracks {
+                state: PageState::Loaded(tracks),
+                ..
+            } => match &self.filter {
+                None => (0..tracks.len()).collect(),
+                Some(q) => tracks
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, t)| matches_filter(q, &[&t.title, &t.artist, &t.album]))
+                    .map(|(i, _)| i)
+                    .collect(),
+            },
+            _ => Vec::new(),
+        }
+    }
+
+    /// The `(visible, total)` row counts for the filter bar's label, over the
+    /// active level's list.
+    #[must_use]
+    pub fn filter_counts(&self) -> (usize, usize) {
+        let total = match &self.level {
+            Level::Playlists(state) => state.loaded().map_or(0, Vec::len),
+            Level::Tracks { state, .. } => state.loaded().map_or(0, Vec::len),
+        };
+        (self.visible_indices().len(), total)
+    }
+
+    /// The item under the cursor as a [`PopupItem`] for the action popup: a
+    /// playlist at level 1, a track at level 2. `None` when the list is empty /
+    /// not loaded. Respects the active filter.
+    #[must_use]
+    pub fn selected_popup_item(&self) -> Option<super::popup::PopupItem> {
+        let visible = self.visible_indices();
+        let original = *visible.get(self.cursor)?;
+        match &self.level {
+            Level::Playlists(state) => state
+                .loaded()?
+                .get(original)
+                .map(|p| super::popup::PopupItem::Playlist(p.clone())),
+            Level::Tracks { state, .. } => state
+                .loaded()?
+                .get(original)
+                .map(|t| super::popup::PopupItem::Track(t.clone())),
         }
     }
 
@@ -285,14 +373,21 @@ impl PlaylistView {
     /// Draw the active level's list (or nothing while loading/errored — the
     /// status line carries that message).
     fn render_list(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+        let visible = self.visible_indices();
         let items: Vec<ListItem> = match &self.level {
-            Level::Playlists(PageState::Loaded(playlists)) => {
-                playlists.iter().map(playlist_row).collect()
-            }
+            Level::Playlists(PageState::Loaded(playlists)) => visible
+                .iter()
+                .filter_map(|&i| playlists.get(i))
+                .map(playlist_row)
+                .collect(),
             Level::Tracks {
                 state: PageState::Loaded(tracks),
                 ..
-            } => tracks.iter().map(track_row).collect(),
+            } => visible
+                .iter()
+                .filter_map(|&i| tracks.get(i))
+                .map(track_row)
+                .collect(),
             // Loading / Error: the status line already shows the message.
             _ => return,
         };
