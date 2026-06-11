@@ -1,10 +1,12 @@
 //! Popup overlay widgets: context actions, theme picker, and playlist picker.
 //!
-//! Port of `src/ytmusic_tui/views/popup.py`. Each popup is a centered floating
-//! box drawn over the current view (ratatui [`Clear`] + a bordered list). Only
-//! one is shown at a time; the active one is tracked by [`PopupState`] on the
-//! main loop's model. While a popup is open, keys route to it: `j`/`k` (and
-//! arrows) navigate, Enter selects, Esc dismisses.
+//! Port of `src/ytmusic_tui/views/popup.py`. Each popup is a bottom-docked
+//! sheet drawn over the current view (ratatui [`Clear`] + an accent top-border
+//! divider over a surface-filled list), matching the Textual CSS
+//! (`dock: bottom; border-top: solid $accent`). Only one is shown at a time;
+//! the active one is tracked by [`PopupState`] on the main loop's model. While
+//! a popup is open, keys route to it: `j`/`k` (and arrows) navigate, Enter
+//! selects, Esc dismisses.
 //!
 //! # Architecture vs Python
 //!
@@ -15,10 +17,10 @@
 //! [`build_actions`], 1:1 with the Python builders.
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Flex, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 use ytmusic_api::{AlbumInfo, PlaylistInfo, Track};
 
 use super::Theme;
@@ -591,7 +593,7 @@ impl PopupState {
         }
     }
 
-    /// Render the active popup as a centered floating box over `area`.
+    /// Render the active popup as a bottom-docked sheet over `area`.
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
         match self {
             PopupState::None => {}
@@ -638,11 +640,17 @@ impl PopupState {
     }
 }
 
-/// Draw a centered, bordered list popup with `title` and a highlighted cursor.
+/// Draw a bottom-docked list popup sheet with `title` and a highlighted cursor.
 ///
-/// The box is sized to the content (clamped to the available area) and centered
-/// both axes. A [`Clear`] is drawn first so the popup fully occludes the view
-/// underneath.
+/// Reproduces popup.py's CSS: the popup is a full-width sheet docked to the
+/// bottom of `area` (`dock: bottom; height: auto`), filled with `$surface`, a
+/// `border-top: solid $accent` divider, an accent-bold title row, and one-cell
+/// horizontal padding (`padding: 0 1`). The selected list row uses Textual's
+/// default `$primary` cursor.
+///
+/// ratatui cannot translucently dim the view behind the sheet (Textual's docked
+/// sheets do not dim either), so only the sheet area is cleared — the view stays
+/// visible above it, matching the Textual behavior.
 fn render_list_popup(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -651,59 +659,69 @@ fn render_list_popup(
     rows: Vec<ListItem<'static>>,
     cursor: usize,
 ) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
     let row_count = rows.len();
-    // Width: the widest of the title / rows, plus borders + a little padding,
-    // clamped to the area. Height: rows + the two border lines.
-    let content_width = rows
-        .iter()
-        .map(ListItem::width)
-        .chain(std::iter::once(title.len()))
-        .max()
-        .unwrap_or(0) as u16;
-    let width = (content_width + 4)
-        .clamp(10, area.width.max(10))
-        .min(area.width);
-    let height = ((row_count as u16) + 2)
-        .clamp(3, area.height.max(3))
-        .min(area.height);
 
-    let popup_area = center_rect(area, width, height);
+    // Sheet height: top-border divider (1) + title (1) + list rows, capped at
+    // Python's `max-height: 12/14` and the available area. The sheet docks to
+    // the bottom of `area`. Python caps differ per popup (Action 12 / Theme 10
+    // / Picker 14); one unified cap of 14 is fine because content is
+    // height-driven and the deepest real list (the picker) is the 14 case.
+    const MAX_SHEET_ROWS: u16 = 14;
+    let body_rows = (row_count as u16).min(MAX_SHEET_ROWS);
+    let height = (body_rows + 2).min(area.height); // +1 border, +1 title
+    let sheet_area = Rect {
+        x: area.x,
+        y: area.y + area.height - height,
+        width: area.width,
+        height,
+    };
 
+    // Clear only the sheet so it reads as a solid surface; the view remains
+    // visible above (Textual's docked sheets do not dim the backdrop).
+    frame.render_widget(Clear, sheet_area);
+
+    // Top-border divider in accent (Python `border-top: solid $accent`) over a
+    // surface-filled body.
     let block = Block::default()
-        .borders(Borders::ALL)
+        .borders(Borders::TOP)
         .border_style(Style::default().fg(theme.accent))
-        .title(Span::styled(
+        .style(Style::default().bg(theme.surface));
+    let inner = block.inner(sheet_area);
+    frame.render_widget(block, sheet_area);
+
+    // Title row + list, with one cell of left/right padding (`padding: 0 1`).
+    let [title_area, list_area] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
+    let [title_pad] = Layout::horizontal([Constraint::Min(0)])
+        .horizontal_margin(1)
+        .areas(title_area);
+    let [list_pad] = Layout::horizontal([Constraint::Min(0)])
+        .horizontal_margin(1)
+        .areas(list_area);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
             title.to_owned(),
             Style::default()
                 .fg(theme.accent)
                 .add_modifier(Modifier::BOLD),
-        ));
+        )))
+        .style(Style::default().bg(theme.surface)),
+        title_pad,
+    );
 
     let list = List::new(rows)
-        .block(block)
         .style(Style::default().fg(theme.text).bg(theme.surface))
-        .highlight_style(super::selected_row_style(theme))
-        .highlight_symbol("▶ ");
+        .highlight_style(super::selected_row_style(theme));
 
     let mut list_state = ListState::default();
     if row_count > 0 {
         list_state.select(Some(cursor.min(row_count - 1)));
     }
-
-    frame.render_widget(Clear, popup_area);
-    frame.render_stateful_widget(list, popup_area, &mut list_state);
-}
-
-/// Compute a centered `width`×`height` rect inside `area` (both axes centered
-/// via ratatui's [`Flex::Center`]).
-fn center_rect(area: Rect, width: u16, height: u16) -> Rect {
-    let [row] = Layout::vertical([Constraint::Length(height)])
-        .flex(Flex::Center)
-        .areas(area);
-    let [cell] = Layout::horizontal([Constraint::Length(width)])
-        .flex(Flex::Center)
-        .areas(row);
-    cell
+    frame.render_stateful_widget(list, list_pad, &mut list_state);
 }
 
 #[cfg(test)]
@@ -1011,5 +1029,53 @@ mod tests {
         assert!(text.contains("Add to playlist"), "missing title:\n{text}");
         assert!(text.contains("New playlist"), "missing new row:\n{text}");
         assert!(text.contains("My Mix"), "missing playlist:\n{text}");
+    }
+
+    // -- contract: bottom-docked accent-bordered surface sheet -------------
+
+    #[test]
+    fn popup_is_bottom_docked_with_accent_top_border() {
+        // The sheet docks to the bottom of the area with a `─` accent divider
+        // along its top edge (Python `dock: bottom; border-top: solid $accent`),
+        // and a surface-filled body with a primary-colored selected row.
+        let state = PopupState::Action(ActionPopup::new(PopupItem::Track(track(
+            "v1",
+            "Get Lucky",
+            "Daft Punk",
+        ))));
+        let (w, h) = (50u16, 16u16);
+        let backend = TestBackend::new(w, h);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        terminal
+            .draw(|frame| state.render(frame, frame.area(), &theme))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        // The bottom row carries surface fill (the sheet is docked there).
+        assert_eq!(
+            buffer[(0, h - 1)].bg,
+            theme.surface,
+            "bottom row is not the docked sheet's surface"
+        );
+        // The top edge of the sheet is an accent-colored `─` divider.
+        let has_accent_top_border = buffer
+            .content()
+            .iter()
+            .any(|c| c.symbol() == "─" && c.fg == theme.accent);
+        assert!(has_accent_top_border, "missing accent top-border divider");
+        // The selected action row uses the primary cursor.
+        assert!(
+            buffer.content().iter().any(|c| c.bg == theme.primary),
+            "selected popup row not highlighted with primary"
+        );
+        // No box-corner glyphs (it is a top-border sheet, not a full box).
+        for cell in buffer.content() {
+            assert!(
+                !"┌┐└┘".contains(cell.symbol()),
+                "popup drew a box corner: {:?}",
+                cell.symbol()
+            );
+        }
     }
 }

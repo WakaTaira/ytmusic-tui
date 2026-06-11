@@ -23,11 +23,11 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Paragraph, TableState};
 use ytmusic_api::{PlaylistInfo, Track};
 
 use super::filter_bar::matches_filter;
-use super::{PageState, Theme};
+use super::{PageState, Theme, borderless_table, table_header, table_row};
 use crate::formatting::format_duration;
 
 /// What an Enter / Escape keypress on the playlist view resolves to.
@@ -313,20 +313,13 @@ impl PlaylistView {
     // -- Rendering ---------------------------------------------------------
 
     /// Render the active level into `area`.
+    ///
+    /// A muted status line over a borderless DataTable, matching the contract
+    /// (no "Playlists" panel border — the screen is flat `surface`). Level-1
+    /// shows `Title`/`Tracks`; the drilled-in track list shows
+    /// `Title`/`Artist`/`Album`/`Duration`.
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        // Wrap the view in a bordered, surface-filled panel (Python's Screen
-        // surface bg + a titled pane). The status header + list draw inside.
-        let title = if self.is_viewing_tracks() {
-            "Playlist"
-        } else {
-            "Playlists"
-        };
-        let block = super::panel_block(theme, title);
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
-        // A one-row status header + the list below it, inside the panel border.
-        let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(inner);
+        let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
         self.render_status(frame, chunks[0], theme);
         self.render_list(frame, chunks[1], theme);
     }
@@ -342,7 +335,11 @@ impl PlaylistView {
                 .fg(theme.text_muted)
                 .add_modifier(Modifier::ITALIC)
         };
-        frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(text, style)))
+                .style(Style::default().bg(theme.surface)),
+            area,
+        );
     }
 
     /// Compute the status text and whether it is an error (for styling).
@@ -381,68 +378,81 @@ impl PlaylistView {
         }
     }
 
-    /// Draw the active level's list (or nothing while loading/errored — the
-    /// status line carries that message).
+    /// Draw the active level's borderless DataTable (or nothing while
+    /// loading/errored — the status line carries that message).
     fn render_list(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
         let visible = self.visible_indices();
-        let items: Vec<ListItem> = match &self.level {
-            Level::Playlists(PageState::Loaded(playlists)) => visible
-                .iter()
-                .filter_map(|&i| playlists.get(i))
-                .map(playlist_row)
-                .collect(),
-            Level::Tracks {
-                state: PageState::Loaded(tracks),
-                ..
-            } => visible
-                .iter()
-                .filter_map(|&i| tracks.get(i))
-                .map(track_row)
-                .collect(),
-            // Loading / Error: the status line already shows the message.
-            _ => return,
-        };
+        let (labels, widths, rows): (Vec<&str>, Vec<Constraint>, Vec<Vec<String>>) =
+            match &self.level {
+                Level::Playlists(PageState::Loaded(playlists)) => (
+                    vec!["Title", "Tracks"],
+                    vec![Constraint::Min(10), Constraint::Length(9)],
+                    visible
+                        .iter()
+                        .filter_map(|&i| playlists.get(i))
+                        .map(playlist_columns)
+                        .collect(),
+                ),
+                Level::Tracks {
+                    state: PageState::Loaded(tracks),
+                    ..
+                } => (
+                    vec!["Title", "Artist", "Album", "Duration"],
+                    vec![
+                        Constraint::Min(10),
+                        Constraint::Length(20),
+                        Constraint::Length(20),
+                        Constraint::Length(10),
+                    ],
+                    visible
+                        .iter()
+                        .filter_map(|&i| tracks.get(i))
+                        .map(track_columns)
+                        .collect(),
+                ),
+                // Loading / Error: the status line already shows the message.
+                _ => return,
+            };
 
-        let list = List::new(items)
-            .style(Style::default().fg(theme.text).bg(theme.surface))
-            .highlight_style(super::selected_row_style(theme))
-            .highlight_symbol("▶ ");
+        let header = table_header(theme, &labels, true);
+        let table_rows = rows
+            .into_iter()
+            .map(|cols| table_row(theme, &cols, true))
+            .collect();
+        let table = borderless_table(theme, header, table_rows, widths, true);
 
-        let mut list_state = ListState::default();
+        let mut state = TableState::default();
         if self.item_count() > 0 {
-            list_state.select(Some(self.cursor.min(self.item_count() - 1)));
+            state.select(Some(self.cursor.min(self.item_count() - 1)));
         }
-        frame.render_stateful_widget(list, area, &mut list_state);
+        frame.render_stateful_widget(table, area, &mut state);
     }
 }
 
-/// Format a playlist as a level-1 row: `Title  (N tracks)`.
-fn playlist_row(playlist: &PlaylistInfo) -> ListItem<'static> {
+/// Format a playlist as level-1 `Title`/`Tracks` columns.
+fn playlist_columns(playlist: &PlaylistInfo) -> Vec<String> {
     let count = if playlist.track_count > 0 {
-        format!("{} tracks", playlist.track_count)
+        playlist.track_count.to_string()
     } else {
-        "Playlist".to_owned()
+        String::new()
     };
-    ListItem::new(Line::from(vec![
-        Span::raw(playlist.title.clone()),
-        Span::raw("  "),
-        Span::styled(count, Style::default().add_modifier(Modifier::DIM)),
-    ]))
+    vec![playlist.title.clone(), count]
 }
 
-/// Format a track as a level-2 row: `Title — Artist  Duration`.
-fn track_row(track: &Track) -> ListItem<'static> {
-    let mut spans = vec![Span::raw(track.title.clone())];
-    if !track.artist.is_empty() {
-        spans.push(Span::raw(" — "));
-        spans.push(Span::raw(track.artist.clone()));
-    }
+/// Format a track as level-2 `Title`/`Artist`/`Album`/`Duration` columns.
+fn track_columns(track: &Track) -> Vec<String> {
     let duration = format_duration(track.duration_seconds);
-    if duration != "—" {
-        spans.push(Span::raw("  "));
-        spans.push(Span::raw(duration));
-    }
-    ListItem::new(Line::from(spans))
+    let duration = if duration == "—" {
+        String::new()
+    } else {
+        duration
+    };
+    vec![
+        track.title.clone(),
+        track.artist.clone(),
+        track.album.clone(),
+        duration,
+    ]
 }
 
 #[cfg(test)]
@@ -653,7 +663,10 @@ mod tests {
         let text = render_to_string(&view, 50, 8);
         assert!(text.contains("My Mix"), "text:\n{text}");
         assert!(text.contains("Chill"), "text:\n{text}");
-        assert!(text.contains("25 tracks"), "text:\n{text}");
+        // The borderless DataTable has a "Tracks" header column carrying the
+        // numeric count.
+        assert!(text.contains("Tracks"), "missing Tracks column:\n{text}");
+        assert!(text.contains("25"), "missing track count:\n{text}");
         assert!(text.contains("2 playlist(s)"), "text:\n{text}");
     }
 
@@ -668,10 +681,24 @@ mod tests {
     }
 
     #[test]
-    fn render_shows_selection_marker() {
+    fn render_highlights_selection_with_primary_bg_and_no_glyph() {
+        // The borderless DataTable cursor is a primary-colored row background,
+        // not a `▶` glyph.
         let view = loaded_list_view();
         let text = render_to_string(&view, 50, 8);
-        assert!(text.contains("▶"), "missing selection marker:\n{text}");
+        assert!(!text.contains('▶'), "stray cursor glyph:\n{text}");
+
+        let backend = TestBackend::new(50, 8);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        terminal
+            .draw(|frame| view.render(frame, frame.area(), &theme))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        assert!(
+            buffer.content().iter().any(|c| c.bg == theme.primary),
+            "selected row not highlighted with primary"
+        );
     }
 
     #[test]

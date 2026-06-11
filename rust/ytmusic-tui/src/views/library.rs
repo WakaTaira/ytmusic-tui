@@ -31,10 +31,10 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Paragraph, TableState};
 use ytmusic_api::{AlbumInfo, ArtistInfo, PlaylistInfo, Track};
 
-use super::{PageState, Theme};
+use super::{PageState, Theme, borderless_table, section_title, table_header, table_row};
 use crate::formatting::format_duration;
 use crate::layout::{Orientation, detect_orientation};
 
@@ -494,7 +494,11 @@ impl LibraryView {
                 .fg(theme.text_muted)
                 .add_modifier(Modifier::ITALIC)
         };
-        frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(text, style)))
+                .style(Style::default().bg(theme.surface)),
+            area,
+        );
     }
 
     /// Compute the status text and whether it is an error (for styling).
@@ -604,77 +608,113 @@ impl LibraryView {
         self.render_pane(frame, cells[2], theme, LibraryPane::Artists);
     }
 
-    /// Draw one pane as a titled, bordered list with the active pane highlighted.
+    /// Draw one pane: a single-line pane title (accent when focused, muted
+    /// otherwise — the library SVG's "Playlists"/"Albums"/"Artists" labels) over
+    /// a borderless DataTable with that pane's columns.
     fn render_pane(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme, pane: LibraryPane) {
+        if area.height == 0 {
+            return;
+        }
         let is_active = pane == self.active_pane;
-        let items = self.pane_items(pane);
+        let [title_area, table_area] =
+            Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
 
-        let title_style = if is_active {
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(theme.text_muted)
-        };
-        let border_style = if is_active {
-            Style::default().fg(theme.accent)
-        } else {
-            Style::default().fg(theme.primary_background)
-        };
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(border_style)
-            .style(Style::default().bg(theme.surface))
-            .title(Span::styled(pane.title(), title_style));
+        // Pane title line.
+        frame.render_widget(
+            Paragraph::new(Line::from(section_title(theme, pane.title(), is_active)))
+                .style(Style::default().bg(theme.surface)),
+            title_area,
+        );
 
-        let list = List::new(items)
-            .block(block)
-            .style(Style::default().fg(theme.text).bg(theme.surface))
-            .highlight_style(super::selected_row_style(theme))
-            .highlight_symbol("▶ ");
+        // Borderless table: per-pane columns, focused styling on the active pane.
+        let (labels, widths) = self.pane_columns(pane);
+        let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+        let header = table_header(theme, &label_refs, is_active);
+        let rows = self
+            .pane_rows(pane)
+            .into_iter()
+            .map(|cols| table_row(theme, &cols, is_active))
+            .collect();
+        let table = borderless_table(theme, header, rows, widths, is_active);
 
-        let mut list_state = ListState::default();
+        let mut state = TableState::default();
         if is_active && self.pane_len(pane) > 0 {
             let cursor = self.cursors[pane.index()].min(self.pane_len(pane) - 1);
-            list_state.select(Some(cursor));
+            state.select(Some(cursor));
         }
-        frame.render_stateful_widget(list, area, &mut list_state);
+        frame.render_stateful_widget(table, table_area, &mut state);
     }
 
-    /// Build the list rows for a pane.
-    fn pane_items(&self, pane: LibraryPane) -> Vec<ListItem<'static>> {
+    /// The column labels and widths for a pane's DataTable.
+    ///
+    /// Mirrors the Python `add_columns` calls (and the library SVG header row):
+    /// Playlists `Title`/`Tracks` (or the drilled-in `Title`/`Artist`/`Album`/
+    /// `Duration`), Albums `Title`/`Artist`/`Year`, Artists `Name`.
+    fn pane_columns(&self, pane: LibraryPane) -> (Vec<String>, Vec<Constraint>) {
+        let owned =
+            |labels: &[&str]| -> Vec<String> { labels.iter().map(|s| (*s).to_owned()).collect() };
         match pane {
-            LibraryPane::Playlists => self.playlists_items(),
+            LibraryPane::Playlists => match &self.playlists_level {
+                PlaylistsLevel::List(_) => (
+                    owned(&["Title", "Tracks"]),
+                    vec![Constraint::Min(10), Constraint::Length(9)],
+                ),
+                PlaylistsLevel::Tracks { .. } => (
+                    owned(&["Title", "Artist", "Album", "Duration"]),
+                    vec![
+                        Constraint::Min(10),
+                        Constraint::Length(18),
+                        Constraint::Length(18),
+                        Constraint::Length(10),
+                    ],
+                ),
+            },
+            LibraryPane::Albums => (
+                owned(&["Title", "Artist", "Year"]),
+                vec![
+                    Constraint::Min(10),
+                    Constraint::Length(14),
+                    Constraint::Length(6),
+                ],
+            ),
+            LibraryPane::Artists => (owned(&["Name"]), vec![Constraint::Min(6)]),
+        }
+    }
+
+    /// Build the column data for a pane's rows.
+    fn pane_rows(&self, pane: LibraryPane) -> Vec<Vec<String>> {
+        match pane {
+            LibraryPane::Playlists => self.playlists_rows(),
             LibraryPane::Albums => self
                 .albums
                 .loaded()
-                .map(|albums| albums.iter().map(album_row).collect())
+                .map(|albums| albums.iter().map(album_columns).collect())
                 .unwrap_or_default(),
             LibraryPane::Artists => self
                 .artists
                 .loaded()
-                .map(|artists| artists.iter().map(artist_row).collect())
+                .map(|artists| artists.iter().map(artist_columns).collect())
                 .unwrap_or_default(),
         }
     }
 
-    /// Build the Playlists pane rows (the liked-songs row + playlists, or the
-    /// drilled-in track rows).
-    fn playlists_items(&self) -> Vec<ListItem<'static>> {
+    /// Build the Playlists pane column rows (the liked-songs row + playlists, or
+    /// the drilled-in track rows).
+    fn playlists_rows(&self) -> Vec<Vec<String>> {
         match &self.playlists_level {
             PlaylistsLevel::List(state) => {
-                let mut items: Vec<ListItem<'static>> = Vec::new();
+                let mut rows: Vec<Vec<String>> = Vec::new();
                 if self.has_liked_row() {
-                    items.push(liked_songs_row(self.liked_songs.len()));
+                    rows.push(liked_songs_columns(self.liked_songs.len()));
                 }
                 if let Some(playlists) = state.loaded() {
-                    items.extend(playlists.iter().map(playlist_row));
+                    rows.extend(playlists.iter().map(playlist_columns));
                 }
-                items
+                rows
             }
             PlaylistsLevel::Tracks { state, .. } => state
                 .loaded()
-                .map(|tracks| tracks.iter().map(track_row).collect())
+                .map(|tracks| tracks.iter().map(track_columns).collect())
                 .unwrap_or_default(),
         }
     }
@@ -695,70 +735,52 @@ fn error_message<T>(state: &PageState<Vec<T>>) -> Option<&str> {
 // Row formatters
 // ---------------------------------------------------------------------------
 
-/// The synthetic "★ Liked Songs (N)" pseudo-playlist row.
-fn liked_songs_row(count: usize) -> ListItem<'static> {
-    ListItem::new(Line::from(vec![
-        Span::styled(
-            LIKED_SONGS_LABEL,
-            Style::default().add_modifier(Modifier::BOLD),
-        ),
-        Span::raw("  "),
-        Span::styled(
-            format!("{count} tracks"),
-            Style::default().add_modifier(Modifier::DIM),
-        ),
-    ]))
+/// The synthetic "★ Liked Songs (N)" pseudo-playlist row, as `Title`/`Tracks`
+/// columns. The label keeps its star so it reads as the special row even though
+/// the table styles every cell uniformly.
+fn liked_songs_columns(count: usize) -> Vec<String> {
+    vec![LIKED_SONGS_LABEL.to_owned(), format!("{count}")]
 }
 
-/// Format a playlist row: `Title  (N tracks)`.
-fn playlist_row(playlist: &PlaylistInfo) -> ListItem<'static> {
+/// Format a playlist row into `Title`/`Tracks` columns.
+fn playlist_columns(playlist: &PlaylistInfo) -> Vec<String> {
     let count = if playlist.track_count > 0 {
-        format!("{} tracks", playlist.track_count)
+        playlist.track_count.to_string()
     } else {
-        "Playlist".to_owned()
+        String::new()
     };
-    ListItem::new(Line::from(vec![
-        Span::raw(playlist.title.clone()),
-        Span::raw("  "),
-        Span::styled(count, Style::default().add_modifier(Modifier::DIM)),
-    ]))
+    vec![playlist.title.clone(), count]
 }
 
-/// Format an album row: `Title — Artist  Year`.
-fn album_row(album: &AlbumInfo) -> ListItem<'static> {
-    let mut spans = vec![Span::raw(album.title.clone())];
-    if !album.artist.is_empty() {
-        spans.push(Span::raw(" — "));
-        spans.push(Span::raw(album.artist.clone()));
-    }
-    if !album.year.is_empty() {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            album.year.clone(),
-            Style::default().add_modifier(Modifier::DIM),
-        ));
-    }
-    ListItem::new(Line::from(spans))
+/// Format an album row into `Title`/`Artist`/`Year` columns.
+fn album_columns(album: &AlbumInfo) -> Vec<String> {
+    vec![
+        album.title.clone(),
+        album.artist.clone(),
+        album.year.clone(),
+    ]
 }
 
-/// Format an artist row: just the name.
-fn artist_row(artist: &ArtistInfo) -> ListItem<'static> {
-    ListItem::new(Line::from(Span::raw(artist.name.clone())))
+/// Format an artist row into a single `Name` column.
+fn artist_columns(artist: &ArtistInfo) -> Vec<String> {
+    vec![artist.name.clone()]
 }
 
-/// Format a track row (the drill-down): `Title — Artist  Duration`.
-fn track_row(track: &Track) -> ListItem<'static> {
-    let mut spans = vec![Span::raw(track.title.clone())];
-    if !track.artist.is_empty() {
-        spans.push(Span::raw(" — "));
-        spans.push(Span::raw(track.artist.clone()));
-    }
+/// Format a drilled-in track row into `Title`/`Artist`/`Album`/`Duration`
+/// columns (matching the drilled-in Playlists `add_columns`).
+fn track_columns(track: &Track) -> Vec<String> {
     let duration = format_duration(track.duration_seconds);
-    if duration != "—" {
-        spans.push(Span::raw("  "));
-        spans.push(Span::raw(duration));
-    }
-    ListItem::new(Line::from(spans))
+    let duration = if duration == "—" {
+        String::new()
+    } else {
+        duration
+    };
+    vec![
+        track.title.clone(),
+        track.artist.clone(),
+        track.album.clone(),
+        duration,
+    ]
 }
 
 #[cfg(test)]
@@ -1107,5 +1129,63 @@ mod tests {
         );
         assert!(stacked.contains("Albums"), "missing Albums:\n{stacked}");
         assert!(stacked.contains("Artists"), "missing Artists:\n{stacked}");
+    }
+
+    // -- contract: borderless 3-pane DataTables ----------------------------
+
+    fn render_to_terminal(view: &LibraryView, w: u16, h: u16) -> Terminal<TestBackend> {
+        let backend = TestBackend::new(w, h);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        terminal
+            .draw(|frame| view.render(frame, frame.area(), &theme))
+            .unwrap();
+        terminal
+    }
+
+    #[test]
+    fn render_shows_each_panes_column_headers() {
+        // Playlists Title/Tracks, Albums Title/Artist/Year, Artists Name —
+        // matching the Python add_columns and the library SVG header row.
+        let view = loaded_view();
+        let text = render_to_string(&view, 110, 16);
+        for col in ["Tracks", "Year", "Name"] {
+            assert!(text.contains(col), "missing '{col}' column header:\n{text}");
+        }
+    }
+
+    #[test]
+    fn render_is_borderless() {
+        let view = loaded_view();
+        let text = render_to_string(&view, 110, 16);
+        assert!(
+            !text.contains('┌') && !text.contains('│') && !text.contains('└'),
+            "library drew a box border:\n{text}"
+        );
+    }
+
+    #[test]
+    fn focused_pane_header_uses_header_bg_unfocused_uses_panel_bg() {
+        // Playlists is the default active pane: its header row uses the brighter
+        // focused header_bg; the Albums pane header uses the dimmer panel_bg.
+        let view = loaded_view();
+        let terminal = render_to_terminal(&view, 110, 16);
+        let theme = Theme::default();
+        let buffer = terminal.backend().buffer();
+        // Playlists pane starts at col 0; row 0 = status, row 1 = pane title,
+        // row 2 = header. A cell inside the Playlists header carries header_bg.
+        assert_eq!(
+            buffer[(1, 2)].bg,
+            theme.header_bg,
+            "focused Playlists header not header_bg"
+        );
+        // The Albums pane begins at ~2/5 of the width (col ~44); its header at
+        // the same row uses panel_bg.
+        let albums_col = (110 * 2 / 5) + 1;
+        assert_eq!(
+            buffer[(albums_col, 2)].bg,
+            theme.panel_bg,
+            "unfocused Albums header not panel_bg"
+        );
     }
 }

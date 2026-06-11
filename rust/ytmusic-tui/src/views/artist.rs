@@ -21,10 +21,10 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Paragraph, Row, TableState};
 use ytmusic_api::{AlbumInfo, ArtistInfo, RelatedArtist, Track};
 
-use super::{PageState, Theme};
+use super::{PageState, Theme, borderless_table, section_title, table_header, table_row};
 use crate::formatting::format_duration;
 
 // ---------------------------------------------------------------------------
@@ -257,20 +257,19 @@ impl ArtistView {
     // -- Rendering -----------------------------------------------------------
 
     /// Render the artist view into `area`.
+    ///
+    /// An accent artist-name line + muted status line, over three borderless
+    /// DataTable sections (Top Songs / Albums / Related Artists) stacked
+    /// vertically, each with a section-label line and focused styling on the
+    /// active section (no "Artist" panel border — flat `surface`).
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        // Wrap in a bordered, surface-filled "Artist" panel. The artist name,
-        // status, and the three sub-sections draw inside the border.
-        let block = super::panel_block(theme, "Artist");
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
         // Name (1 row) + status (1 row) + three sections.
         let chunks = Layout::vertical([
             Constraint::Length(1), // artist name
             Constraint::Length(1), // status
             Constraint::Min(1),    // three-section body
         ])
-        .split(inner);
+        .split(area);
 
         self.render_name(frame, chunks[0], theme);
         self.render_status(frame, chunks[1], theme);
@@ -285,7 +284,8 @@ impl ArtistView {
                 Style::default()
                     .fg(theme.accent)
                     .add_modifier(Modifier::BOLD),
-            ))),
+            )))
+            .style(Style::default().bg(theme.surface)),
             area,
         );
     }
@@ -299,7 +299,11 @@ impl ArtistView {
                 .fg(theme.text_muted)
                 .add_modifier(Modifier::ITALIC)
         };
-        frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(text, style)))
+                .style(Style::default().bg(theme.surface)),
+            area,
+        );
     }
 
     fn status_text(&self) -> (String, bool) {
@@ -315,8 +319,8 @@ impl ArtistView {
             return; // loading / error: status line carries the message
         };
 
-        // Three equal-height vertical sections stacked.
-        // Each section: 1 title row + up to SECTION_CAP item rows.
+        // Three vertical sections stacked. Each: 1 label row + 1 header row +
+        // up to SECTION_CAP item rows.
         let song_h = section_height(artist.top_songs.len());
         let album_h = section_height(artist.albums.len());
         let related_h = section_height(artist.related_artists.len());
@@ -328,72 +332,89 @@ impl ArtistView {
         ])
         .split(area);
 
+        let song_focus = self.focused == ArtistSection::TopSongs;
         self.render_section(
             frame,
             chunks[0],
             theme,
             ArtistSection::TopSongs,
-            artist.top_songs.iter().map(song_row).collect(),
+            table_header(theme, &["Title", "Album", "Duration"], song_focus),
+            artist
+                .top_songs
+                .iter()
+                .map(|t| table_row(theme, &song_columns(t), song_focus))
+                .collect(),
+            vec![
+                Constraint::Min(10),
+                Constraint::Length(24),
+                Constraint::Length(10),
+            ],
         );
+
+        let album_focus = self.focused == ArtistSection::Albums;
         self.render_section(
             frame,
             chunks[1],
             theme,
             ArtistSection::Albums,
-            artist.albums.iter().map(album_row).collect(),
+            table_header(theme, &["Title", "Year"], album_focus),
+            artist
+                .albums
+                .iter()
+                .map(|a| table_row(theme, &album_columns(a), album_focus))
+                .collect(),
+            vec![Constraint::Min(10), Constraint::Length(6)],
         );
+
+        let related_focus = self.focused == ArtistSection::RelatedArtists;
         self.render_section(
             frame,
             chunks[2],
             theme,
             ArtistSection::RelatedArtists,
-            artist.related_artists.iter().map(related_row).collect(),
+            table_header(theme, &["Name"], related_focus),
+            artist
+                .related_artists
+                .iter()
+                .map(|r| table_row(theme, &related_columns(r), related_focus))
+                .collect(),
+            vec![Constraint::Min(6)],
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_section(
         &self,
         frame: &mut Frame<'_>,
         area: Rect,
         theme: &Theme,
         section: ArtistSection,
-        items: Vec<ListItem>,
+        header: Row<'static>,
+        rows: Vec<Row<'static>>,
+        widths: Vec<Constraint>,
     ) {
+        if area.height == 0 {
+            return;
+        }
         let is_active = section == self.focused;
-        // Inside the outer panel, the sub-sections use a LEFT accent divider
-        // (the active section brightens to `primary`; inactive uses the muted
-        // `primary-background` so it is still visible on the surface fill — the
-        // old `surface` border was invisible against the surface background).
-        let border_style = if is_active {
-            Style::default().fg(theme.primary)
-        } else {
-            Style::default().fg(theme.primary_background)
-        };
-        let title_style = if is_active {
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(theme.text_muted)
-        };
-        let block = Block::default()
-            .borders(Borders::LEFT)
-            .border_style(border_style)
-            .style(Style::default().bg(theme.surface))
-            .title(Span::styled(section.title(), title_style));
+        let [title_area, table_area] =
+            Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
 
-        let list = List::new(items)
-            .block(block)
-            .style(Style::default().fg(theme.text).bg(theme.surface))
-            .highlight_style(super::selected_row_style(theme))
-            .highlight_symbol("▶ ");
+        // Section label (accent when focused, muted otherwise — the Python
+        // `.section-label { color: $accent }`, dimmed for the inactive ones).
+        frame.render_widget(
+            Paragraph::new(Line::from(section_title(theme, section.title(), is_active)))
+                .style(Style::default().bg(theme.surface)),
+            title_area,
+        );
 
-        let mut list_state = ListState::default();
+        let table = borderless_table(theme, header, rows, widths, is_active);
+        let mut state = TableState::default();
         if is_active && self.section_len(section) > 0 {
             let cursor = self.cursors[section.index()].min(self.section_len(section) - 1);
-            list_state.select(Some(cursor));
+            state.select(Some(cursor));
         }
-        frame.render_stateful_widget(list, area, &mut list_state);
+        frame.render_stateful_widget(table, table_area, &mut state);
     }
 }
 
@@ -403,40 +424,29 @@ const SECTION_ITEM_CAP: u16 = 15;
 
 fn section_height(item_count: usize) -> u16 {
     let items = item_count.min(SECTION_ITEM_CAP as usize) as u16;
-    items.saturating_add(1) // +1 for the section title
+    // +1 for the section label, +1 for the column header row.
+    items.saturating_add(2)
 }
 
-fn song_row(track: &Track) -> ListItem<'static> {
-    let mut spans = vec![Span::raw(track.title.clone())];
-    if !track.album.is_empty() {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            track.album.clone(),
-            Style::default().add_modifier(Modifier::DIM),
-        ));
-    }
+/// Top-songs columns: `Title`/`Album`/`Duration`.
+fn song_columns(track: &Track) -> Vec<String> {
     let duration = format_duration(track.duration_seconds);
-    if duration != "—" {
-        spans.push(Span::raw("  "));
-        spans.push(Span::raw(duration));
-    }
-    ListItem::new(Line::from(spans))
+    let duration = if duration == "—" {
+        String::new()
+    } else {
+        duration
+    };
+    vec![track.title.clone(), track.album.clone(), duration]
 }
 
-fn album_row(album: &AlbumInfo) -> ListItem<'static> {
-    let mut spans = vec![Span::raw(album.title.clone())];
-    if !album.year.is_empty() {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            album.year.clone(),
-            Style::default().add_modifier(Modifier::DIM),
-        ));
-    }
-    ListItem::new(Line::from(spans))
+/// Albums columns: `Title`/`Year`.
+fn album_columns(album: &AlbumInfo) -> Vec<String> {
+    vec![album.title.clone(), album.year.clone()]
 }
 
-fn related_row(artist: &RelatedArtist) -> ListItem<'static> {
-    ListItem::new(Line::from(Span::raw(artist.name.clone())))
+/// Related-artists columns: `Name`.
+fn related_columns(artist: &RelatedArtist) -> Vec<String> {
+    vec![artist.name.clone()]
 }
 
 #[cfg(test)]
@@ -654,9 +664,30 @@ mod tests {
     }
 
     #[test]
-    fn loaded_render_shows_selection_marker() {
+    fn loaded_render_highlights_active_section_with_primary_no_glyph() {
+        // The focused (Top Songs) section's selected row uses a primary-bg
+        // cursor (no `▶` glyph), and the three section labels render.
         let view = loaded_view();
         let text = render_to_string(&view, 70, 20);
-        assert!(text.contains("▶"), "missing selection marker:\n{text}");
+        assert!(!text.contains('▶'), "stray cursor glyph:\n{text}");
+        for label in ["Top Songs", "Albums", "Related Artists"] {
+            assert!(text.contains(label), "missing '{label}' label:\n{text}");
+        }
+
+        let backend = TestBackend::new(70, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        terminal
+            .draw(|frame| view.render(frame, frame.area(), &theme))
+            .unwrap();
+        assert!(
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .any(|c| c.bg == theme.primary),
+            "active section's selected row not highlighted with primary"
+        );
     }
 }
