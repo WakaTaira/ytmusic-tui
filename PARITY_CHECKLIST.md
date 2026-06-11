@@ -15,7 +15,7 @@
 | Home (recommendations) | works | `views/home.rs`; `FetchHome` → `HomeLoaded` |
 | Search (4-pane grid) | works | `views/search.rs`; Enter-confirm, 2×2 grid |
 | Search filter (`#songs:` …) | works | `Search { filter }` → `search_all(filter)` |
-| Library (3-pane) | works | `views/library.rs`; playlists/albums/artists + liked-songs row |
+| Library (3-pane) | works | `views/library.rs`; playlists/albums/artists |
 | Playlist browse + drill | works | `views/playlist.rs`; two-level, nav-stack pop-back |
 | Album / Artist detail | works | `views/album.rs`, `views/artist.rs`; re-fetch on pop-back |
 | Queue management | works | `views/queue_view.rs`; jump-to, **Remove from queue** (M5d) |
