@@ -80,7 +80,9 @@ use std::thread::{self, JoinHandle};
 
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use ytmusic_api::{HomeSection, InnerTubeClient, PlaylistInfo, Track};
+use ytmusic_api::{
+    AlbumInfo, ArtistInfo, HomeSection, InnerTubeClient, PlaylistInfo, SearchResults, Track,
+};
 
 use crate::player::{Player, PlayerEvent};
 use crate::queue::{QueueManager, RepeatMode};
@@ -103,6 +105,25 @@ pub enum AppCommand {
     /// can label the track list without a second lookup. Replies with
     /// [`AppEvent::PlaylistTracksLoaded`] or [`AppEvent::ApiError`].
     FetchPlaylistTracks { playlist_id: String, title: String },
+    /// Run a search (the search view's Enter-confirm). `query` is the text to
+    /// search; `filter` restricts the result type when a `#category:` prefix was
+    /// used (`"songs"` / `"albums"` / `"artists"` / `"playlists"`), or `None`
+    /// for an all-category search. Replies with [`AppEvent::SearchLoaded`] or
+    /// [`AppEvent::ApiError`].
+    Search {
+        query: String,
+        filter: Option<String>,
+    },
+    /// Fetch the user's library albums (the library view's albums pane). Replies
+    /// with [`AppEvent::LibraryAlbumsLoaded`] or [`AppEvent::ApiError`].
+    FetchLibraryAlbums,
+    /// Fetch the user's library artists (the library view's artists pane).
+    /// Replies with [`AppEvent::LibraryArtistsLoaded`] or [`AppEvent::ApiError`].
+    FetchLibraryArtists,
+    /// Fetch the user's liked songs (mirrors Python's library "Liked Songs"
+    /// pseudo-playlist). Replies with [`AppEvent::LikedSongsLoaded`] or
+    /// [`AppEvent::ApiError`].
+    FetchLikedSongs,
     /// Play a single track immediately: the queue is replaced with `[track]`
     /// (spotify_player "play this one" semantics). Emits [`AppEvent::NowPlaying`].
     Play(Track),
@@ -181,6 +202,14 @@ pub enum AppEvent {
     /// A playlist's tracks finished loading (playlist view level 2). `title` is
     /// the playlist name echoed from the request so the view can label the list.
     PlaylistTracksLoaded { title: String, tracks: Vec<Track> },
+    /// A search finished, carrying the categorized results for all four panes.
+    SearchLoaded(SearchResults),
+    /// The library albums finished loading (library view's albums pane).
+    LibraryAlbumsLoaded(Vec<AlbumInfo>),
+    /// The library artists finished loading (library view's artists pane).
+    LibraryArtistsLoaded(Vec<ArtistInfo>),
+    /// The liked songs finished loading (library view's "Liked Songs" entry).
+    LikedSongsLoaded(Vec<Track>),
     /// An API call failed; the string is a user-facing, classified message.
     ApiError(String),
     /// The now-playing metadata changed (a new current track, or a mode toggle).
@@ -370,6 +399,18 @@ fn run_runtime(
                 AppCommand::FetchPlaylistTracks { playlist_id, title } => {
                     handle_fetch_playlist_tracks(client.as_ref(), &playlist_id, title, events)
                         .await;
+                }
+                AppCommand::Search { query, filter } => {
+                    handle_search(client.as_ref(), &query, filter.as_deref(), events).await;
+                }
+                AppCommand::FetchLibraryAlbums => {
+                    handle_fetch_library_albums(client.as_ref(), events).await;
+                }
+                AppCommand::FetchLibraryArtists => {
+                    handle_fetch_library_artists(client.as_ref(), events).await;
+                }
+                AppCommand::FetchLikedSongs => {
+                    handle_fetch_liked_songs(client.as_ref(), events).await;
                 }
                 AppCommand::CheckSession => handle_check_session(client.as_ref(), events).await,
                 AppCommand::Play(track) => {
@@ -569,6 +610,90 @@ async fn handle_fetch_playlist_tracks(
     };
     let event = match client.get_playlist_tracks(playlist_id).await {
         Ok(tracks) => AppEvent::PlaylistTracksLoaded { title, tracks },
+        Err(err) => AppEvent::ApiError(ytmusic_api::classify_api_error(&err)),
+    };
+    let _ = events.send(event);
+}
+
+/// Per-category result cap for a search, matching Python's
+/// `search_all(query, limit=20, ...)` in `SearchView._run_search`.
+const SEARCH_LIMIT: usize = 20;
+
+/// Default page size for the library albums/artists/liked-songs fetches.
+/// Mirrors the Python view's `get_library_*` calls (ytmusicapi defaults to 25
+/// for these); a generous cap keeps the panes populated without paging.
+const LIBRARY_LIMIT: usize = 50;
+
+/// Run a search and emit the categorized results (or a classified error).
+///
+/// `filter` is the optional `#category:` restriction (`"songs"` / `"albums"` /
+/// `"artists"` / `"playlists"`); `None` searches across all categories. The
+/// search view fills all four panes from the [`SearchResults`].
+async fn handle_search(
+    client: Option<&InnerTubeClient>,
+    query: &str,
+    filter: Option<&str>,
+    events: &StdSender<AppEvent>,
+) {
+    let Some(client) = client else {
+        let _ = events.send(AppEvent::ApiError(
+            "Not signed in — run: ytmusic-tui auth".to_owned(),
+        ));
+        return;
+    };
+    let event = match client.search_all(query, SEARCH_LIMIT, filter).await {
+        Ok(results) => AppEvent::SearchLoaded(results),
+        Err(err) => AppEvent::ApiError(ytmusic_api::classify_api_error(&err)),
+    };
+    let _ = events.send(event);
+}
+
+/// Fetch the user's library albums and emit the result (or a classified error).
+async fn handle_fetch_library_albums(
+    client: Option<&InnerTubeClient>,
+    events: &StdSender<AppEvent>,
+) {
+    let Some(client) = client else {
+        let _ = events.send(AppEvent::ApiError(
+            "Not signed in — run: ytmusic-tui auth".to_owned(),
+        ));
+        return;
+    };
+    let event = match client.get_library_albums(LIBRARY_LIMIT).await {
+        Ok(albums) => AppEvent::LibraryAlbumsLoaded(albums),
+        Err(err) => AppEvent::ApiError(ytmusic_api::classify_api_error(&err)),
+    };
+    let _ = events.send(event);
+}
+
+/// Fetch the user's library artists and emit the result (or a classified error).
+async fn handle_fetch_library_artists(
+    client: Option<&InnerTubeClient>,
+    events: &StdSender<AppEvent>,
+) {
+    let Some(client) = client else {
+        let _ = events.send(AppEvent::ApiError(
+            "Not signed in — run: ytmusic-tui auth".to_owned(),
+        ));
+        return;
+    };
+    let event = match client.get_library_artists(LIBRARY_LIMIT).await {
+        Ok(artists) => AppEvent::LibraryArtistsLoaded(artists),
+        Err(err) => AppEvent::ApiError(ytmusic_api::classify_api_error(&err)),
+    };
+    let _ = events.send(event);
+}
+
+/// Fetch the user's liked songs and emit the result (or a classified error).
+async fn handle_fetch_liked_songs(client: Option<&InnerTubeClient>, events: &StdSender<AppEvent>) {
+    let Some(client) = client else {
+        let _ = events.send(AppEvent::ApiError(
+            "Not signed in — run: ytmusic-tui auth".to_owned(),
+        ));
+        return;
+    };
+    let event = match client.get_liked_songs(LIBRARY_LIMIT).await {
+        Ok(tracks) => AppEvent::LikedSongsLoaded(tracks),
         Err(err) => AppEvent::ApiError(ytmusic_api::classify_api_error(&err)),
     };
     let _ = events.send(event);

@@ -14,11 +14,15 @@
 //!   [`crate::config::get_theme_palette`] hex strings into [`ratatui::Color`]s.
 //! * [`home`] — the home recommendations view.
 //! * [`playlist`] — the two-level playlist browser.
+//! * [`search`] — the 4-pane search view (Tracks/Albums/Artists/Playlists).
+//! * [`library`] — the 3-pane library view (Playlists/Albums/Artists).
 //! * [`player_bar`] — the bottom now-playing bar.
 
 pub mod home;
+pub mod library;
 pub mod player_bar;
 pub mod playlist;
+pub mod search;
 
 use ratatui::style::Color;
 
