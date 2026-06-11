@@ -46,6 +46,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use unicode_width::UnicodeWidthStr;
 
 use super::Theme;
 
@@ -84,6 +85,15 @@ impl Severity {
         }
     }
 
+    /// The bold title line shown at the top of the toast (textual's `.toast--title`).
+    fn title(self) -> &'static str {
+        match self {
+            Severity::Info => "Information",
+            Severity::Warning => "Warning",
+            Severity::Error => "Error",
+        }
+    }
+
     /// The theme color for this severity's border and title.
     ///
     /// The Rust palette has no semantic success/warning/error keys, so the
@@ -117,7 +127,7 @@ pub struct Toast {
 const MAX_VISIBLE: usize = 4;
 
 /// Outer width of a toast box in columns, clamped to the available area.
-const TOAST_WIDTH: u16 = 40;
+const TOAST_WIDTH: u16 = 60;
 
 /// Holds the live toasts and expires them over time.
 ///
@@ -227,37 +237,89 @@ impl ToastManager {
     }
 }
 
-/// Box height for `message` at `width`: the wrapped line count plus the two
-/// border rows, capped so a very long message cannot dominate the screen.
+/// Box height for `message` at `width`.
+///
+/// Layout: 1 top-pad + 1 title + 1 blank + msg_lines + 1 bottom-pad.
+/// The left-border-only style (textual `border-left: outer`) adds no extra
+/// rows. Message lines are capped so a burst of text cannot dominate the screen.
 fn toast_height(message: &str, width: u16) -> u16 {
-    const MAX_LINES: u16 = 4;
-    // Inner text width excludes the two vertical border columns and one padding
-    // column each side.
-    let inner = width.saturating_sub(4).max(1) as usize;
-    let chars = message.chars().count().max(1);
-    // Ceil-div the character count by the inner width for a wrap estimate.
-    let lines = chars.div_ceil(inner) as u16;
-    lines.clamp(1, MAX_LINES) + 2
+    const MAX_MSG_LINES: u16 = 4;
+    // Inner text width: subtract 1 (left border) + 1 (left pad) + 1 (right pad).
+    let inner = width.saturating_sub(3).max(1) as usize;
+    // Measure DISPLAY width, not chars: ratatui wraps by display width, and a
+    // CJK/emoji glyph occupies two columns — counting chars underestimates the
+    // height and silently clips the bottom of e.g. Japanese error messages.
+    let display_width = UnicodeWidthStr::width(message).max(1);
+    let msg_lines = (display_width.div_ceil(inner) as u16).clamp(1, MAX_MSG_LINES);
+    // 1 top-pad + 1 title + 1 blank + msg_lines + 1 bottom-pad
+    msg_lines + 4
 }
 
-/// Draw one toast box: a bordered, surface-filled paragraph in the severity
-/// color.
+/// Draw one toast box: left-border-only with padding, title + message body.
+///
+/// Mirrors Textual's Toast CSS: `border-left: outer $severity`, `padding: 1 1`,
+/// title in bold above the message body.
 fn render_one(frame: &mut Frame<'_>, area: Rect, theme: &Theme, toast: &Toast) {
     let color = toast.severity.color(theme);
+    let title_text = toast.severity.title();
+
+    // Left border only (textual `border-left: outer`) + surface background.
     let block = Block::default()
-        .borders(Borders::ALL)
+        .borders(Borders::LEFT)
         .border_style(Style::default().fg(color))
         .style(Style::default().bg(theme.surface));
 
-    let paragraph = Paragraph::new(Line::from(Span::styled(
-        toast.message.as_str(),
-        Style::default().fg(color).add_modifier(Modifier::BOLD),
-    )))
-    .block(block)
-    .wrap(Wrap { trim: true });
+    // Inner area after the left border.
+    let inner = block.inner(area);
 
     frame.render_widget(Clear, area);
-    frame.render_widget(paragraph, area);
+    frame.render_widget(block, area);
+
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    // Apply 1-cell padding on all sides within the inner area.
+    let padded = Rect {
+        x: inner.x + 1,
+        y: inner.y + 1,
+        width: inner.width.saturating_sub(2),
+        height: inner.height.saturating_sub(2),
+    };
+
+    if padded.height == 0 || padded.width == 0 {
+        return;
+    }
+
+    // Title line (bold, severity color).
+    let title_area = Rect {
+        height: 1,
+        ..padded
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            title_text,
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ))),
+        title_area,
+    );
+
+    // Message body below the title (if room).
+    if padded.height > 2 {
+        let msg_area = Rect {
+            y: padded.y + 2,
+            height: padded.height.saturating_sub(2),
+            ..padded
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                toast.message.as_str(),
+                Style::default().fg(theme.text),
+            )))
+            .wrap(Wrap { trim: true }),
+            msg_area,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -268,6 +330,17 @@ mod tests {
 
     fn t0() -> Instant {
         Instant::now()
+    }
+
+    // -- height math --------------------------------------------------------
+
+    #[test]
+    fn toast_height_counts_display_width_for_cjk() {
+        // 28 CJK chars render as 56 columns. At box width 30 (inner 27), a
+        // char-count estimate gives ceil(28/27) = 2 lines, but the real wrap
+        // needs ceil(56/27) = 3. Regression for the clipped-Japanese-toast bug.
+        let msg = "あ".repeat(28);
+        assert_eq!(toast_height(&msg, 30), 3 + 4);
     }
 
     // -- timeouts ----------------------------------------------------------
@@ -368,7 +441,8 @@ mod tests {
     fn render_draws_message_text() {
         let mut mgr = ToastManager::new();
         mgr.push("Liked song", Severity::Info, t0());
-        let terminal = render(&mgr, 50, 12);
+        // Terminal must be tall enough: toast_height for a short message = 5 rows.
+        let terminal = render(&mgr, 70, 20);
         let text = buffer_text(&terminal);
         assert!(text.contains("Liked song"), "missing toast text:\n{text}");
     }
@@ -387,7 +461,8 @@ mod tests {
         let mut mgr = ToastManager::new();
         mgr.push("Alpha message", Severity::Info, t0());
         mgr.push("Bravo message", Severity::Error, t0());
-        let terminal = render(&mgr, 50, 12);
+        // Each toast now needs 5+ rows (padding + title + gap + message + padding).
+        let terminal = render(&mgr, 70, 30);
         let text = buffer_text(&terminal);
         assert!(text.contains("Alpha message"), "missing first:\n{text}");
         assert!(text.contains("Bravo message"), "missing second:\n{text}");
@@ -400,7 +475,8 @@ mod tests {
             mgr.push(format!("Toast number {i}"), Severity::Info, t0());
         }
         // A tall enough terminal would fit all 8, but only MAX_VISIBLE draw.
-        let terminal = render(&mgr, 50, 40);
+        // Each toast is now ~5 rows tall; 4 × 5 = 20 rows minimum.
+        let terminal = render(&mgr, 70, 80);
         let text = buffer_text(&terminal);
         // The newest four (4..=7) are visible; the oldest (0) is not.
         assert!(text.contains("Toast number 7"), "newest missing:\n{text}");
@@ -414,25 +490,37 @@ mod tests {
     fn render_anchors_to_bottom_right() {
         let mut mgr = ToastManager::new();
         mgr.push("Edge", Severity::Info, t0());
-        let terminal = render(&mgr, 50, 12);
+        // With left-border-only, the right edge has no border char, but the
+        // left edge of the toast (width 60, terminal 70 wide → left at col 10)
+        // carries the │ border character.
+        let terminal = render(&mgr, 70, 20);
         let buffer = terminal.backend().buffer();
-        // The bottom-right corner cell should be a box border (the toast hugs
-        // the corner), not blank.
-        let corner = &buffer[(49, 11)];
-        assert_ne!(corner.symbol(), " ", "toast did not reach the bottom-right");
+        let mut found_border = false;
+        for row in 0..buffer.area().height {
+            let cell = &buffer[(10, row)]; // TOAST_WIDTH=60 in a 70-col terminal → left at col 10
+            if cell.symbol() == "│" {
+                found_border = true;
+                break;
+            }
+        }
+        assert!(
+            found_border,
+            "toast left border not rendered at expected column"
+        );
     }
 
     #[test]
     fn error_toast_border_uses_primary_color() {
         let mut mgr = ToastManager::new();
         mgr.push("boom", Severity::Error, t0());
-        let terminal = render(&mgr, 50, 12);
+        // Use a terminal tall enough for the new layout (5 rows per toast).
+        let terminal = render(&mgr, 70, 20);
         let theme = Theme::default();
         let buffer = terminal.backend().buffer();
-        // Find a border cell and confirm it carries the error (primary) fg.
+        // Find the left-border cell (│) and confirm it carries the error (primary) fg.
         let mut found = false;
         for cell in buffer.content() {
-            if cell.symbol() == "─" || cell.symbol() == "│" {
+            if cell.symbol() == "│" {
                 assert_eq!(cell.style().fg, Some(theme.primary));
                 found = true;
                 break;
@@ -445,7 +533,7 @@ mod tests {
     fn toast_carries_surface_background() {
         let mut mgr = ToastManager::new();
         mgr.push("bg check", Severity::Info, t0());
-        let terminal = render(&mgr, 50, 12);
+        let terminal = render(&mgr, 70, 20);
         let theme = Theme::default();
         let buffer = terminal.backend().buffer();
         // The interior of the toast (where the text sits) carries the surface bg.
@@ -457,5 +545,21 @@ mod tests {
             }
         }
         assert!(found_surface, "toast interior missing surface background");
+    }
+
+    #[test]
+    fn render_shows_severity_title() {
+        let mut mgr = ToastManager::new();
+        mgr.push("some message", Severity::Info, t0());
+        let terminal = render(&mgr, 70, 20);
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("Information"),
+            "severity title missing:\n{text}"
+        );
+        assert!(
+            text.contains("some message"),
+            "message body missing:\n{text}"
+        );
     }
 }
