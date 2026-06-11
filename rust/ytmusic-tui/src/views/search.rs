@@ -36,6 +36,7 @@ use ytmusic_api::{AlbumInfo, PlaylistInfo, RelatedArtist, SearchResults, Track};
 
 use super::{PageState, Theme};
 use crate::formatting::format_duration;
+use crate::layout::{Orientation, detect_orientation};
 
 // ---------------------------------------------------------------------------
 // Prefix parsing (ported 1:1 from search.py::_parse_search_prefix)
@@ -346,6 +347,30 @@ impl SearchView {
         }
     }
 
+    /// The item under the cursor in the focused pane as a [`PopupItem`] for the
+    /// action popup. The Artists pane has no [`PopupItem`] variant (artists are
+    /// not actionable here), so it yields `None`.
+    #[must_use]
+    pub fn selected_popup_item(&self) -> Option<super::popup::PopupItem> {
+        let results = self.results()?;
+        let cursor = self.cursors[self.focused_pane.index()];
+        match self.focused_pane {
+            Pane::Tracks => results
+                .tracks
+                .get(cursor)
+                .map(|t| super::popup::PopupItem::Track(t.clone())),
+            Pane::Albums => results
+                .albums
+                .get(cursor)
+                .map(|a| super::popup::PopupItem::Album(a.clone())),
+            Pane::Playlists => results
+                .playlists
+                .get(cursor)
+                .map(|p| super::popup::PopupItem::Playlist(p.clone())),
+            Pane::Artists => None,
+        }
+    }
+
     // -- Rendering ---------------------------------------------------------
 
     /// Render the search view into `area`: input row, status line, 2x2 grid.
@@ -431,20 +456,46 @@ impl SearchView {
         }
     }
 
-    /// Draw the 2x2 grid of panes (top row: Tracks, Albums; bottom: Artists,
-    /// Playlists).
+    /// Draw the four panes responsively (port of spotify_player's layout switch).
+    ///
+    /// * **Horizontal** (wide terminal, aspect > 2.3): a 2x2 grid — Tracks,
+    ///   Albums on top; Artists, Playlists below.
+    /// * **Vertical** (portrait-ish, aspect ≤ 2.3): the four panes stacked in
+    ///   one column, so each keeps a usable width on a narrow terminal.
+    ///
+    /// The orientation comes from [`crate::layout::detect_orientation`] over the
+    /// available area, matching Python's `layout.py` consumed by the view.
     fn render_grid(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        let rows =
-            Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).split(area);
-        let top = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(rows[0]);
-        let bottom = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(rows[1]);
-
-        self.render_pane(frame, top[0], theme, Pane::Tracks);
-        self.render_pane(frame, top[1], theme, Pane::Albums);
-        self.render_pane(frame, bottom[0], theme, Pane::Artists);
-        self.render_pane(frame, bottom[1], theme, Pane::Playlists);
+        match detect_orientation(area.width, area.height) {
+            Orientation::Horizontal => {
+                let rows =
+                    Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)])
+                        .split(area);
+                let top =
+                    Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                        .split(rows[0]);
+                let bottom =
+                    Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                        .split(rows[1]);
+                self.render_pane(frame, top[0], theme, Pane::Tracks);
+                self.render_pane(frame, top[1], theme, Pane::Albums);
+                self.render_pane(frame, bottom[0], theme, Pane::Artists);
+                self.render_pane(frame, bottom[1], theme, Pane::Playlists);
+            }
+            Orientation::Vertical => {
+                let cells = Layout::vertical([
+                    Constraint::Percentage(25),
+                    Constraint::Percentage(25),
+                    Constraint::Percentage(25),
+                    Constraint::Percentage(25),
+                ])
+                .split(area);
+                self.render_pane(frame, cells[0], theme, Pane::Tracks);
+                self.render_pane(frame, cells[1], theme, Pane::Albums);
+                self.render_pane(frame, cells[2], theme, Pane::Artists);
+                self.render_pane(frame, cells[3], theme, Pane::Playlists);
+            }
+        }
     }
 
     /// Draw one pane: a titled, bordered list with the active pane highlighted.
@@ -958,6 +1009,21 @@ mod tests {
     fn render_shows_four_pane_titles() {
         let view = SearchView::new();
         let text = render_to_string(&view, 70, 20, false);
+        assert!(text.contains("Tracks"), "missing Tracks pane:\n{text}");
+        assert!(text.contains("Albums"), "missing Albums pane:\n{text}");
+        assert!(text.contains("Artists"), "missing Artists pane:\n{text}");
+        assert!(
+            text.contains("Playlists"),
+            "missing Playlists pane:\n{text}"
+        );
+    }
+
+    #[test]
+    fn portrait_layout_stacks_all_four_panes() {
+        // A narrow/tall terminal (aspect < 2.3) stacks the four panes; all four
+        // titles must still render.
+        let view = SearchView::new();
+        let text = render_to_string(&view, 40, 40, false); // 40/40 = 1.0 → vertical
         assert!(text.contains("Tracks"), "missing Tracks pane:\n{text}");
         assert!(text.contains("Albums"), "missing Albums pane:\n{text}");
         assert!(text.contains("Artists"), "missing Artists pane:\n{text}");

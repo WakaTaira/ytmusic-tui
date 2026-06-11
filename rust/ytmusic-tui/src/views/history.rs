@@ -20,6 +20,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ytmusic_api::Track;
 
+use super::filter_bar::matches_filter;
 use super::{PageState, Theme};
 use crate::formatting::format_duration;
 
@@ -37,10 +38,17 @@ pub enum HistoryAction {
 }
 
 /// The history view: a fetch state plus a single cursor over the track list.
+///
+/// When the in-page filter is active (`filter` is `Some`), the cursor and
+/// activation operate over the *filtered* subset — the rows the user actually
+/// sees — so navigation and "play from here" stay consistent with the display.
 #[derive(Debug, Clone)]
 pub struct HistoryView {
     state: PageState<Vec<Track>>,
     cursor: usize,
+    /// The active in-page filter query (`None` = no filter). Set by the main
+    /// loop from the filter bar.
+    filter: Option<String>,
 }
 
 impl Default for HistoryView {
@@ -56,6 +64,7 @@ impl HistoryView {
         Self {
             state: PageState::Loading,
             cursor: 0,
+            filter: None,
         }
     }
 
@@ -67,10 +76,11 @@ impl HistoryView {
 
     // -- Data loading --------------------------------------------------------
 
-    /// Load the history and reset the cursor.
+    /// Load the history and reset the cursor (clears any active filter).
     pub fn set_tracks(&mut self, tracks: Vec<Track>) {
         self.state = PageState::Loaded(tracks);
         self.cursor = 0;
+        self.filter = None;
     }
 
     /// Transition into the error state.
@@ -82,12 +92,73 @@ impl HistoryView {
     pub fn set_loading(&mut self) {
         self.state = PageState::Loading;
         self.cursor = 0;
+        self.filter = None;
+    }
+
+    // -- In-page filter ------------------------------------------------------
+
+    /// Set (or clear) the in-page filter query. A change resets the cursor to
+    /// the top of the filtered list so it never points past the visible rows.
+    pub fn set_filter(&mut self, query: Option<&str>) {
+        let new = query.map(str::to_owned);
+        if new != self.filter {
+            self.filter = new;
+            self.cursor = 0;
+        }
+    }
+
+    /// The indices into the loaded track list that pass the active filter, in
+    /// order. With no filter, every index is returned. Empty when not loaded.
+    fn visible_indices(&self) -> Vec<usize> {
+        let Some(tracks) = self.state.loaded() else {
+            return Vec::new();
+        };
+        match &self.filter {
+            None => (0..tracks.len()).collect(),
+            Some(q) => tracks
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| matches_filter(q, &[&t.title, &t.artist, &t.album]))
+                .map(|(i, _)| i)
+                .collect(),
+        }
+    }
+
+    /// The `(visible, total)` row counts for the filter bar's label: the number
+    /// of rows passing the filter, and the total loaded row count.
+    #[must_use]
+    pub fn filter_counts(&self) -> (usize, usize) {
+        let total = self.state.loaded().map_or(0, Vec::len);
+        (self.visible_indices().len(), total)
+    }
+
+    /// The track under the cursor, as a [`PopupItem`] for the action popup.
+    /// `None` when the list is empty / not loaded. Respects the active filter.
+    #[must_use]
+    pub fn selected_popup_item(&self) -> Option<super::popup::PopupItem> {
+        let visible = self.visible_indices();
+        let original = *visible.get(self.cursor)?;
+        let track = self.state.loaded()?.get(original)?;
+        Some(super::popup::PopupItem::Track(track.clone()))
+    }
+
+    /// The tracks that pass the active filter (the visible rows), cloned for
+    /// playback queueing.
+    fn visible_tracks(&self) -> Vec<Track> {
+        let Some(tracks) = self.state.loaded() else {
+            return Vec::new();
+        };
+        self.visible_indices()
+            .into_iter()
+            .filter_map(|i| tracks.get(i).cloned())
+            .collect()
     }
 
     // -- Navigation ----------------------------------------------------------
 
+    /// The number of *visible* (post-filter) rows.
     fn track_count(&self) -> usize {
-        self.state.loaded().map_or(0, Vec::len)
+        self.visible_indices().len()
     }
 
     /// Move the cursor down one row, clamping at the end.
@@ -105,15 +176,18 @@ impl HistoryView {
 
     /// Resolve an Enter keypress into a [`HistoryAction`], or `None`.
     ///
-    /// Mirrors Python: `set_playlist(self._tracks, start_index=row_index)`.
+    /// Plays from the selected (visible) row, queueing the rest of the *visible*
+    /// rows — so with a filter active, only the filtered subset is queued, which
+    /// matches what the user sees. Mirrors Python's
+    /// `set_playlist(self._tracks, start_index=row_index)` over the visible rows.
     #[must_use]
     pub fn activate_selected(&self) -> Option<HistoryAction> {
-        let tracks = self.state.loaded()?;
-        if tracks.is_empty() || self.cursor >= tracks.len() {
+        let visible = self.visible_tracks();
+        if visible.is_empty() || self.cursor >= visible.len() {
             return None;
         }
         Some(HistoryAction::PlayTracks {
-            tracks: tracks.clone(),
+            tracks: visible,
             start_index: self.cursor,
         })
     }
@@ -164,6 +238,13 @@ impl HistoryView {
             PageState::Loaded(tracks) => {
                 if tracks.is_empty() {
                     ("No history".to_owned(), false)
+                } else if self.filter.is_some() {
+                    // With a filter active, report the visible / total counts.
+                    let visible = self.track_count();
+                    (
+                        format!("{visible}/{} track(s) [Esc to go back]", tracks.len()),
+                        false,
+                    )
                 } else {
                     (format!("{} track(s) [Esc to go back]", tracks.len()), false)
                 }
@@ -175,11 +256,16 @@ impl HistoryView {
         let PageState::Loaded(tracks) = &self.state else {
             return;
         };
-        if tracks.is_empty() {
+        let visible = self.visible_indices();
+        if visible.is_empty() {
             return;
         }
 
-        let items: Vec<ListItem> = tracks.iter().map(track_row).collect();
+        let items: Vec<ListItem> = visible
+            .iter()
+            .filter_map(|&i| tracks.get(i))
+            .map(track_row)
+            .collect();
 
         let list = List::new(items)
             .block(Block::default().borders(Borders::NONE))
@@ -193,9 +279,7 @@ impl HistoryView {
             .highlight_symbol("▶ ");
 
         let mut list_state = ListState::default();
-        if !tracks.is_empty() {
-            list_state.select(Some(self.cursor.min(tracks.len() - 1)));
-        }
+        list_state.select(Some(self.cursor.min(visible.len() - 1)));
         frame.render_stateful_widget(list, area, &mut list_state);
     }
 }
@@ -375,5 +459,79 @@ mod tests {
             text.contains("No history"),
             "missing no-history message:\n{text}"
         );
+    }
+
+    // -- in-page filter ------------------------------------------------------
+
+    #[test]
+    fn filter_narrows_visible_rows() {
+        let mut view = HistoryView::new();
+        view.set_tracks(vec![
+            make_track("v1", "Pyramid Song", "Radiohead"),
+            make_track("v2", "Get Lucky", "Daft Punk"),
+            make_track("v3", "Idioteque", "Radiohead"),
+        ]);
+        view.set_filter(Some("daft"));
+        assert_eq!(view.track_count(), 1, "only the Daft Punk track matches");
+    }
+
+    #[test]
+    fn filter_render_shows_only_matches_and_count() {
+        let mut view = HistoryView::new();
+        view.set_tracks(vec![
+            make_track("v1", "Pyramid Song", "Radiohead"),
+            make_track("v2", "Get Lucky", "Daft Punk"),
+        ]);
+        view.set_filter(Some("lucky"));
+        let text = render_to_string(&view, 70, 12);
+        assert!(text.contains("Get Lucky"), "missing match:\n{text}");
+        assert!(!text.contains("Pyramid Song"), "non-match shown:\n{text}");
+        assert!(
+            text.contains("1/2 track(s)"),
+            "missing filtered count:\n{text}"
+        );
+    }
+
+    #[test]
+    fn filter_activate_queues_visible_subset() {
+        let mut view = HistoryView::new();
+        view.set_tracks(vec![
+            make_track("v1", "Pyramid Song", "Radiohead"),
+            make_track("v2", "Get Lucky", "Daft Punk"),
+            make_track("v3", "Idioteque", "Radiohead"),
+        ]);
+        view.set_filter(Some("radiohead"));
+        // Two Radiohead tracks visible; play from the first.
+        match view.activate_selected() {
+            Some(HistoryAction::PlayTracks {
+                tracks,
+                start_index,
+            }) => {
+                assert_eq!(tracks.len(), 2, "only the filtered subset is queued");
+                assert_eq!(start_index, 0);
+                assert_eq!(tracks[0].video_id, "v1");
+                assert_eq!(tracks[1].video_id, "v3");
+            }
+            other => panic!("expected PlayTracks, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn clearing_filter_restores_full_list() {
+        let mut view = loaded_view();
+        view.set_filter(Some("nomatch"));
+        assert_eq!(view.track_count(), 0);
+        view.set_filter(None);
+        assert_eq!(view.track_count(), 3, "clearing restores all rows");
+    }
+
+    #[test]
+    fn changing_filter_resets_cursor() {
+        let mut view = loaded_view();
+        view.select_next();
+        view.select_next();
+        assert_eq!(view.cursor, 2);
+        view.set_filter(Some("radiohead"));
+        assert_eq!(view.cursor, 0, "cursor resets when the filter changes");
     }
 }

@@ -25,12 +25,14 @@
 
 pub mod album;
 pub mod artist;
+pub mod filter_bar;
 pub mod history;
 pub mod home;
 pub mod library;
 pub mod lyrics;
 pub mod player_bar;
 pub mod playlist;
+pub mod popup;
 pub mod queue_view;
 pub mod search;
 

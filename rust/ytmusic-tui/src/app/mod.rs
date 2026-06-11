@@ -153,6 +153,11 @@ pub enum AppCommand {
     SetVolume(i64),
     /// Adjust the volume by a relative delta.
     AdjustVolume(i64),
+    /// Cycle the audio quality low → normal → high → low (the `b` key). The
+    /// change applies from the next track (ytdl-format is read at loadfile
+    /// time). Replies with [`AppEvent::AudioQualityChanged`] carrying the new
+    /// level so the UI can toast it.
+    CycleAudioQuality,
     /// Fetch a single album's tracks. `browse_id` identifies the album.
     /// Replies with [`AppEvent::AlbumLoaded`] or [`AppEvent::ApiError`].
     FetchAlbum(String),
@@ -174,6 +179,29 @@ pub enum AppCommand {
     /// with [`AppEvent::SessionInvalid`] only when the session is *not* valid;
     /// a valid session produces no event (the UI assumes valid by default).
     CheckSession,
+    /// Append a single track to the end of the queue (the action popup's "Add to
+    /// queue"). No playback change; emits an updated [`AppEvent::QueueSnapshot`]
+    /// so an open queue view reflects the addition.
+    AddToQueue(Track),
+    /// Start a radio seeded by `video_id` (the `R` key / "Start radio" action).
+    /// Fetches the radio tracks and plays them as a fresh queue. Replies with
+    /// [`AppEvent::NowPlaying`] on success or [`AppEvent::ApiError`] on failure.
+    StartRadio(String),
+    /// Toggle the like state of `video_id` (the `f` key / "Like / Unlike"). Reads
+    /// the current status then flips it. Replies with [`AppEvent::ActionResult`]
+    /// (a toast) or [`AppEvent::ApiError`].
+    ToggleLike(String),
+    /// Add `video_id` to the playlist `playlist_id` (the "Add to playlist"
+    /// action after picking an existing playlist). Replies with
+    /// [`AppEvent::ActionResult`] or [`AppEvent::ApiError`].
+    AddToPlaylist {
+        playlist_id: String,
+        video_id: String,
+    },
+    /// Create a new playlist titled `title` and add `video_id` to it (the
+    /// picker's "New playlist…" choice). Replies with [`AppEvent::ActionResult`]
+    /// or [`AppEvent::ApiError`].
+    CreatePlaylistAndAdd { title: String, video_id: String },
     /// Shut the runtime down cleanly; the command loop exits after this.
     Quit,
 }
@@ -241,6 +269,13 @@ pub enum AppEvent {
     /// A `volume` observation from the player (0–100). Corrects the bar's
     /// optimistic volume after mpv applies (or clamps) a change.
     PlayerVolume(i64),
+    /// The audio quality was cycled; the string is the new level (`"low"` /
+    /// `"normal"` / `"high"`). The UI toasts it on the status line. Applies from
+    /// the next track.
+    AudioQualityChanged(String),
+    /// A non-playback mutation (like/unlike, add-to-queue, add-to-playlist)
+    /// succeeded; the string is a short user-facing confirmation toast.
+    ActionResult(String),
     /// The current track started loading in mpv. This collapses both mpv
     /// `start-file` and `file-loaded` (see [`translate_player_event`]); M6's
     /// MPRIS may need to split them for metadata publishing.
@@ -473,19 +508,7 @@ fn run_runtime(
                 AppCommand::FetchHistory => {
                     handle_fetch_history(client.as_ref(), events).await;
                 }
-                AppCommand::FetchQueue => {
-                    // Emit a snapshot of the current queue; no API call needed.
-                    // The current track's index is derived from the queue's
-                    // current_track(), which already handles the -1 sentinel.
-                    let tracks = queue.tracks();
-                    let current_index = queue
-                        .current_track()
-                        .and_then(|ct| tracks.iter().position(|t| t == ct));
-                    let _ = events.send(AppEvent::QueueSnapshot(QueueSnapshot {
-                        tracks,
-                        current_index,
-                    }));
-                }
+                AppCommand::FetchQueue => emit_queue_snapshot(&queue, events),
                 AppCommand::CheckSession => handle_check_session(client.as_ref(), events).await,
                 AppCommand::Play(track) => {
                     play_single(&mut queue, &mut player, track, events);
@@ -514,6 +537,38 @@ fn run_runtime(
                 }
                 AppCommand::AdjustVolume(delta) => {
                     report_player_result(player.adjust_volume(delta), events);
+                }
+                AppCommand::CycleAudioQuality => match player.cycle_audio_quality() {
+                    Ok(quality) => {
+                        let _ = events.send(AppEvent::AudioQualityChanged(quality.to_owned()));
+                    }
+                    Err(err) => {
+                        let _ = events.send(AppEvent::TrackError(err.to_string()));
+                    }
+                },
+                AppCommand::AddToQueue(track) => {
+                    let title = track.title.clone();
+                    queue.add(track);
+                    // Reflect the addition in an open queue view.
+                    emit_queue_snapshot(&queue, events);
+                    let _ = events.send(AppEvent::ActionResult(format!("Added to queue: {title}")));
+                }
+                AppCommand::StartRadio(video_id) => {
+                    handle_start_radio(client.as_ref(), &video_id, &mut queue, &mut player, events)
+                        .await;
+                }
+                AppCommand::ToggleLike(video_id) => {
+                    handle_toggle_like(client.as_ref(), &video_id, events).await;
+                }
+                AppCommand::AddToPlaylist {
+                    playlist_id,
+                    video_id,
+                } => {
+                    handle_add_to_playlist(client.as_ref(), &playlist_id, &video_id, events).await;
+                }
+                AppCommand::CreatePlaylistAndAdd { title, video_id } => {
+                    handle_create_playlist_and_add(client.as_ref(), &title, &video_id, events)
+                        .await;
                 }
             }
         }
@@ -557,6 +612,21 @@ fn now_playing_snapshot(queue: &QueueManager) -> NowPlaying {
 /// Emit the queue's current now-playing snapshot to the UI.
 fn emit_now_playing(queue: &QueueManager, events: &StdSender<AppEvent>) {
     let _ = events.send(AppEvent::NowPlaying(now_playing_snapshot(queue)));
+}
+
+/// Emit a snapshot of the current queue state (the response to
+/// [`AppCommand::FetchQueue`], and after any queue-mutating command). The
+/// current track's index is derived from the queue's `current_track()`, which
+/// already handles the -1 sentinel.
+fn emit_queue_snapshot(queue: &QueueManager, events: &StdSender<AppEvent>) {
+    let tracks = queue.tracks();
+    let current_index = queue
+        .current_track()
+        .and_then(|ct| tracks.iter().position(|t| t == ct));
+    let _ = events.send(AppEvent::QueueSnapshot(QueueSnapshot {
+        tracks,
+        current_index,
+    }));
 }
 
 /// Play a single track: replace the queue with `[track]` and start it.
@@ -877,6 +947,153 @@ async fn handle_fetch_history(client: Option<&InnerTubeClient>, events: &StdSend
         Err(err) => AppEvent::ApiError(ytmusic_api::classify_api_error(&err)),
     };
     let _ = events.send(event);
+}
+
+/// Default radio length, matching Python's `get_radio(video_id)` (ytmusicapi
+/// returns ~25 watch-playlist tracks by default).
+const RADIO_LIMIT: usize = 25;
+
+/// Start a radio seeded by `video_id`: fetch the radio tracks and play them as a
+/// fresh queue. Mirrors Python's `_start_radio` → `_queue_and_play`. An empty
+/// result is a warning toast, not an error.
+async fn handle_start_radio(
+    client: Option<&InnerTubeClient>,
+    video_id: &str,
+    queue: &mut QueueManager,
+    player: &mut Player,
+    events: &StdSender<AppEvent>,
+) {
+    let Some(client) = client else {
+        let _ = events.send(AppEvent::ApiError(
+            "Not signed in — run: ytmusic-tui auth".to_owned(),
+        ));
+        return;
+    };
+    match client.get_radio(video_id, RADIO_LIMIT).await {
+        Ok(tracks) if tracks.is_empty() => {
+            let _ = events.send(AppEvent::ActionResult(
+                "Radio returned no tracks".to_owned(),
+            ));
+        }
+        Ok(tracks) => {
+            play_playlist(queue, player, tracks, 0, events);
+            let _ = events.send(AppEvent::ActionResult("Started radio".to_owned()));
+        }
+        Err(err) => {
+            let _ = events.send(AppEvent::ApiError(ytmusic_api::classify_api_error(&err)));
+        }
+    }
+}
+
+/// Toggle the like state of `video_id`: read the current status and flip it.
+/// Mirrors Python's `_toggle_like` (`INDIFFERENT if status == "LIKE" else
+/// "LIKE"`).
+async fn handle_toggle_like(
+    client: Option<&InnerTubeClient>,
+    video_id: &str,
+    events: &StdSender<AppEvent>,
+) {
+    let Some(client) = client else {
+        let _ = events.send(AppEvent::ApiError(
+            "Not signed in — run: ytmusic-tui auth".to_owned(),
+        ));
+        return;
+    };
+    let status = match client.get_like_status(video_id).await {
+        Ok(status) => status,
+        Err(err) => {
+            let _ = events.send(AppEvent::ApiError(ytmusic_api::classify_api_error(&err)));
+            return;
+        }
+    };
+    let new_status = if status.as_deref() == Some("LIKE") {
+        "INDIFFERENT"
+    } else {
+        "LIKE"
+    };
+    match client.rate_track(video_id, new_status).await {
+        Ok(()) => {
+            let toast = if new_status == "LIKE" {
+                "Liked"
+            } else {
+                "Like removed"
+            };
+            let _ = events.send(AppEvent::ActionResult(toast.to_owned()));
+        }
+        Err(err) => {
+            let _ = events.send(AppEvent::ApiError(ytmusic_api::classify_api_error(&err)));
+        }
+    }
+}
+
+/// Add `video_id` to the playlist `playlist_id`. Mirrors Python's
+/// `add_playlist_items(playlist_id, [video_id])`.
+async fn handle_add_to_playlist(
+    client: Option<&InnerTubeClient>,
+    playlist_id: &str,
+    video_id: &str,
+    events: &StdSender<AppEvent>,
+) {
+    let Some(client) = client else {
+        let _ = events.send(AppEvent::ApiError(
+            "Not signed in — run: ytmusic-tui auth".to_owned(),
+        ));
+        return;
+    };
+    match client
+        .add_playlist_items(playlist_id, &[video_id.to_owned()])
+        .await
+    {
+        Ok(()) => {
+            let _ = events.send(AppEvent::ActionResult("Added to playlist".to_owned()));
+        }
+        Err(err) => {
+            let _ = events.send(AppEvent::ApiError(ytmusic_api::classify_api_error(&err)));
+        }
+    }
+}
+
+/// Privacy level for playlists created from the picker's "New playlist…" choice,
+/// matching Python's default `create_playlist(..., "PRIVATE")`.
+const NEW_PLAYLIST_PRIVACY: &str = "PRIVATE";
+
+/// Create a playlist titled `title` and add `video_id` to it. Mirrors Python's
+/// create-then-add flow for the picker's "New playlist…" choice.
+async fn handle_create_playlist_and_add(
+    client: Option<&InnerTubeClient>,
+    title: &str,
+    video_id: &str,
+    events: &StdSender<AppEvent>,
+) {
+    let Some(client) = client else {
+        let _ = events.send(AppEvent::ApiError(
+            "Not signed in — run: ytmusic-tui auth".to_owned(),
+        ));
+        return;
+    };
+    let playlist_id = match client
+        .create_playlist(title, "", NEW_PLAYLIST_PRIVACY)
+        .await
+    {
+        Ok(id) => id,
+        Err(err) => {
+            let _ = events.send(AppEvent::ApiError(ytmusic_api::classify_api_error(&err)));
+            return;
+        }
+    };
+    match client
+        .add_playlist_items(&playlist_id, &[video_id.to_owned()])
+        .await
+    {
+        Ok(()) => {
+            let _ = events.send(AppEvent::ActionResult(format!(
+                "Created playlist '{title}' and added track"
+            )));
+        }
+        Err(err) => {
+            let _ = events.send(AppEvent::ApiError(ytmusic_api::classify_api_error(&err)));
+        }
+    }
 }
 
 #[cfg(test)]
