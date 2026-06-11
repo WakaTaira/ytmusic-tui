@@ -43,6 +43,21 @@ pub enum RepeatMode {
     One,
 }
 
+impl From<crate::queue::RepeatMode> for RepeatMode {
+    /// Map the queue's authoritative repeat mode onto the bar's display mirror.
+    ///
+    /// The two enums are kept separate so the view layer carries no implicit
+    /// dependency on queue internals beyond this one explicit conversion; the
+    /// variant order is identical, so the mapping is total and obvious.
+    fn from(mode: crate::queue::RepeatMode) -> Self {
+        match mode {
+            crate::queue::RepeatMode::Off => RepeatMode::Off,
+            crate::queue::RepeatMode::All => RepeatMode::All,
+            crate::queue::RepeatMode::One => RepeatMode::One,
+        }
+    }
+}
+
 /// Immutable snapshot driving the player bar's render.
 ///
 /// Equivalent to the data Python's `PlayerBar.update_state` consumed (a
@@ -59,8 +74,16 @@ pub struct PlayerBarState {
     pub is_muted: bool,
     /// Current position in seconds.
     pub position: f64,
-    /// Track duration in seconds (0.0 until mpv resolves it).
+    /// Track duration in seconds, as reported by mpv (0.0 until the ytdl-hook
+    /// resolves it). The render uses [`PlayerBarState::effective_duration`]
+    /// which falls back to [`PlayerBarState::api_duration`] while this is 0.
     pub duration: f64,
+    /// The current track's duration from the API ([`NowPlaying`]). Used as the
+    /// fallback while mpv still reports `duration == 0` (Python's
+    /// `track.duration_seconds` fallback in `_poll_player_state`).
+    ///
+    /// [`NowPlaying`]: crate::app::NowPlaying
+    pub api_duration: f64,
     /// Current track title (empty when nothing is loaded).
     pub title: String,
     /// Current track artist.
@@ -87,6 +110,7 @@ impl Default for PlayerBarState {
             is_muted: false,
             position: 0.0,
             duration: 0.0,
+            api_duration: 0.0,
             title: String::new(),
             artist: String::new(),
             album: String::new(),
@@ -98,15 +122,33 @@ impl Default for PlayerBarState {
 }
 
 impl PlayerBarState {
+    /// The duration to display/measure against: mpv's reported [`duration`] when
+    /// known, else the [`api_duration`] fallback (Python preferred the live mpv
+    /// value and fell back to the track metadata while it was still 0).
+    ///
+    /// [`duration`]: PlayerBarState::duration
+    /// [`api_duration`]: PlayerBarState::api_duration
+    #[must_use]
+    pub fn effective_duration(&self) -> f64 {
+        if self.duration > 0.0 {
+            self.duration
+        } else {
+            self.api_duration
+        }
+    }
+
     /// Playback progress as a 0.0–1.0 ratio (0.0 when duration is non-positive).
     ///
-    /// Same math as `PlayerState::progress` in the player module.
+    /// Same math as `PlayerState::progress` in the player module, measured
+    /// against [`effective_duration`](PlayerBarState::effective_duration) so the
+    /// bar fills even before mpv resolves the real duration.
     #[must_use]
     pub fn progress(&self) -> f64 {
-        if self.duration <= 0.0 {
+        let duration = self.effective_duration();
+        if duration <= 0.0 {
             0.0
         } else {
-            (self.position / self.duration).clamp(0.0, 1.0)
+            (self.position / duration).clamp(0.0, 1.0)
         }
     }
 
@@ -125,22 +167,65 @@ impl PlayerBarState {
 
     /// Mark a track active and playing (`AppEvent::PlayerStarted`).
     ///
-    /// Resets the position so the bar does not briefly show the previous
-    /// track's elapsed time before the first progress tick lands.
+    /// Resets the position and the stale mpv duration so the bar does not
+    /// briefly show the previous track's elapsed time or length before the new
+    /// track's first progress/duration tick lands. The [`api_duration`]
+    /// fallback is *not* cleared here: it is owned by the now-playing fold and
+    /// is refreshed when the matching `NowPlaying` arrives.
+    ///
+    /// [`api_duration`]: PlayerBarState::api_duration
     pub fn on_started(&mut self) {
         self.has_track = true;
         self.is_playing = true;
         self.position = 0.0;
+        self.duration = 0.0;
+    }
+
+    /// Fold the now-playing metadata in (`AppEvent::NowPlaying`).
+    ///
+    /// Replaces the static-per-track fields (title/artist/album) and the queue
+    /// modes (shuffle/repeat), and seeds the [`api_duration`] fallback. An empty
+    /// `video_id` is the idle snapshot (end of queue): it clears the metadata so
+    /// the bar shows "No track" while leaving the live position/duration to the
+    /// player-event folds.
+    ///
+    /// [`api_duration`]: PlayerBarState::api_duration
+    pub fn on_now_playing(
+        &mut self,
+        title: impl Into<String>,
+        artist: impl Into<String>,
+        album: impl Into<String>,
+        api_duration: f64,
+        shuffle: bool,
+        repeat: RepeatMode,
+    ) {
+        self.title = title.into();
+        self.artist = artist.into();
+        self.album = album.into();
+        self.api_duration = api_duration.max(0.0);
+        self.shuffle = shuffle;
+        self.repeat = repeat;
+    }
+
+    /// Fold a volume observation in (`AppEvent::PlayerVolume`).
+    ///
+    /// Corrects the optimistic volume the key handler applied immediately, using
+    /// mpv's actual (possibly clamped) value. Clamped defensively to 0–100.
+    pub fn on_volume(&mut self, volume: i64) {
+        self.volume = volume.clamp(0, 100);
     }
 
     /// Clear the now-playing state when the track ends (`AppEvent::TrackEnded`).
     ///
-    /// Until the queue auto-advance is wired (M5b) this returns the bar to idle.
+    /// Returns the bar to idle. The runtime's auto-advance (M5b) may then send a
+    /// fresh `NowPlaying` + `PlayerStarted` for the next track; if the queue is
+    /// exhausted the idle `NowPlaying` keeps the bar cleared.
     pub fn on_track_ended(&mut self) {
         self.has_track = false;
         self.is_playing = false;
         self.position = 0.0;
         self.duration = 0.0;
+        self.api_duration = 0.0;
         self.title.clear();
         self.artist.clear();
         self.album.clear();
@@ -207,10 +292,11 @@ fn volume_text(state: &PlayerBarState) -> String {
 /// dash signals "no known duration".
 fn time_text(state: &PlayerBarState) -> String {
     let pos = format_position(state.position);
+    let duration = state.effective_duration();
     let dur = if state.has_track {
-        format_position(state.duration)
+        format_position(duration)
     } else {
-        format_duration(state.duration)
+        format_duration(duration)
     };
     format!("{pos} / {dur}")
 }
@@ -532,6 +618,7 @@ mod tests {
             is_playing: true,
             position: 100.0,
             duration: 200.0,
+            api_duration: 200.0,
             title: "Song".to_owned(),
             artist: "Band".to_owned(),
             album: "Album".to_owned(),
@@ -541,8 +628,93 @@ mod tests {
         assert!(!state.has_track);
         assert!(!state.is_playing);
         assert_eq!(state.position, 0.0);
+        assert_eq!(state.api_duration, 0.0);
         assert!(state.title.is_empty());
         assert!(state.album.is_empty());
+    }
+
+    // -- now-playing / volume folds (M5b) ----------------------------------
+
+    #[test]
+    fn on_now_playing_sets_metadata_and_modes() {
+        let mut state = PlayerBarState::default();
+        state.on_now_playing("Title", "Artist", "Album", 240.0, true, RepeatMode::All);
+        assert_eq!(state.title, "Title");
+        assert_eq!(state.artist, "Artist");
+        assert_eq!(state.album, "Album");
+        assert_eq!(state.api_duration, 240.0);
+        assert!(state.shuffle);
+        assert_eq!(state.repeat, RepeatMode::All);
+    }
+
+    #[test]
+    fn on_now_playing_idle_snapshot_clears_metadata() {
+        let mut state = PlayerBarState {
+            title: "Old".to_owned(),
+            artist: "Stale".to_owned(),
+            album: "Gone".to_owned(),
+            ..Default::default()
+        };
+        state.on_now_playing("", "", "", 0.0, false, RepeatMode::Off);
+        assert!(state.title.is_empty());
+        assert!(state.artist.is_empty());
+        assert!(state.album.is_empty());
+    }
+
+    #[test]
+    fn on_volume_corrects_and_clamps() {
+        let mut state = PlayerBarState::default();
+        state.on_volume(42);
+        assert_eq!(state.volume, 42);
+        state.on_volume(150);
+        assert_eq!(state.volume, 100);
+        state.on_volume(-5);
+        assert_eq!(state.volume, 0);
+    }
+
+    #[test]
+    fn effective_duration_prefers_mpv_then_api_fallback() {
+        let mut state = PlayerBarState {
+            api_duration: 200.0,
+            ..Default::default()
+        };
+        // mpv unknown -> API fallback.
+        assert_eq!(state.effective_duration(), 200.0);
+        // mpv resolves -> live value wins.
+        state.duration = 195.0;
+        assert_eq!(state.effective_duration(), 195.0);
+    }
+
+    #[test]
+    fn time_text_uses_api_duration_while_mpv_unresolved() {
+        // has_track, mpv duration still 0, but API duration known -> show it.
+        let state = PlayerBarState {
+            has_track: true,
+            position: 0.0,
+            duration: 0.0,
+            api_duration: 225.0,
+            ..Default::default()
+        };
+        assert_eq!(time_text(&state), "0:00 / 3:45");
+    }
+
+    #[test]
+    fn progress_uses_api_duration_fallback() {
+        let state = PlayerBarState {
+            position: 50.0,
+            duration: 0.0,
+            api_duration: 100.0,
+            ..Default::default()
+        };
+        assert!((state.progress() - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn repeat_mode_converts_from_queue_mode() {
+        use crate::queue::RepeatMode as QueueRepeat;
+        assert_eq!(RepeatMode::from(QueueRepeat::Off), RepeatMode::Off);
+        assert_eq!(RepeatMode::from(QueueRepeat::All), RepeatMode::All);
+        assert_eq!(RepeatMode::from(QueueRepeat::One), RepeatMode::One);
     }
 
     // -- rendering (TestBackend) -------------------------------------------
