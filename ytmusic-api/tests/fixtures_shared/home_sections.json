@@ -1,0 +1,58 @@
+[
+  {
+    "title": "Quick picks",
+    "contents": [
+      {
+        "category": "Songs",
+        "resultType": "song",
+        "videoId": "home1",
+        "title": "Home Song 1",
+        "artists": [{"name": "Rick Astley", "id": "UCabc"}],
+        "album": {"name": "Whenever You Need Somebody", "id": "MPREabc"},
+        "duration": "3:33",
+        "duration_seconds": 213,
+        "thumbnails": [
+          {"url": "https://lh3.google.com/small.jpg", "width": 60, "height": 60},
+          {"url": "https://lh3.google.com/large.jpg", "width": 226, "height": 226}
+        ],
+        "isExplicit": false
+      },
+      {
+        "resultType": "playlist",
+        "playlistId": "RDCLAK_home",
+        "title": "Chill Mix",
+        "thumbnails": [
+          {"url": "https://lh3.google.com/mix.jpg", "width": 226, "height": 226}
+        ]
+      }
+    ]
+  },
+  {
+    "title": "Forgotten favourites",
+    "contents": [
+      {
+        "category": "Songs",
+        "resultType": "song",
+        "videoId": "home1",
+        "title": "Home Song 1",
+        "artists": [{"name": "Rick Astley", "id": "UCabc"}],
+        "album": {"name": "Whenever You Need Somebody", "id": "MPREabc"},
+        "duration": "3:33",
+        "duration_seconds": 213,
+        "thumbnails": [
+          {"url": "https://lh3.google.com/small.jpg", "width": 60, "height": 60},
+          {"url": "https://lh3.google.com/large.jpg", "width": 226, "height": 226}
+        ],
+        "isExplicit": false
+      },
+      {
+        "resultType": "playlist",
+        "playlistId": "RDCLAK_home",
+        "title": "Chill Mix",
+        "thumbnails": [
+          {"url": "https://lh3.google.com/mix.jpg", "width": 226, "height": 226}
+        ]
+      }
+    ]
+  }
+]

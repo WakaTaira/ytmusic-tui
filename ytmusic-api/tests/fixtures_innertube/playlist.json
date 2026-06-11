@@ -1,0 +1,348 @@
+{
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "secondaryContents": {
+        "sectionListRenderer": {
+          "contents": [
+            {
+              "musicPlaylistShelfRenderer": {
+                "playlistId": "LM",
+                "header": {
+                  "musicSideAlignedItemRenderer": {}
+                },
+                "contents": [
+                  {
+                    "musicResponsiveListItemRenderer": {
+                      "flexColumns": [
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "「宝島」(吹奏楽) ピアノで弾きました",
+                                  "navigationEndpoint": {
+                                    "watchEndpoint": {
+                                      "videoId": "7s4RmXxcZvM"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "Fujii Kaze",
+                                  "navigationEndpoint": {
+                                    "browseEndpoint": {
+                                      "browseId": "UCxjfYUXFwmjUCGHMeBri5_w",
+                                      "browseEndpointContextSupportedConfigs": {
+                                        "browseEndpointContextMusicConfig": {
+                                          "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {}
+                          }
+                        }
+                      ],
+                      "fixedColumns": [
+                        {
+                          "musicResponsiveListItemFixedColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "2:59"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      ],
+                      "overlay": {
+                        "musicItemThumbnailOverlayRenderer": {
+                          "content": {
+                            "musicPlayButtonRenderer": {
+                              "playNavigationEndpoint": {
+                                "watchEndpoint": {
+                                  "videoId": "7s4RmXxcZvM",
+                                  "watchEndpointMusicSupportedConfigs": {
+                                    "watchEndpointMusicConfig": {
+                                      "musicVideoType": "MUSIC_VIDEO_TYPE_OMV"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "menu": {
+                        "menuRenderer": {
+                          "items": [],
+                          "topLevelButtons": [
+                            {
+                              "likeButtonRenderer": {
+                                "likeStatus": "LIKE"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "thumbnail": {
+                        "musicThumbnailRenderer": {
+                          "thumbnail": {
+                            "thumbnails": [
+                              {
+                                "url": "https://i.ytimg.com/vi/7s4RmXxcZvM/sddefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCghqEJQEGHgg6AJIWg&rs=AMzJL3kmiSqGCECzKX_yEwv6iQhQhocvPQ",
+                                "width": 400,
+                                "height": 225
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "musicResponsiveListItemRenderer": {
+                      "flexColumns": [
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "Futon Anthem",
+                                  "navigationEndpoint": {
+                                    "watchEndpoint": {
+                                      "videoId": "KwZFalJdsbQ"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "dankeサン",
+                                  "navigationEndpoint": {
+                                    "browseEndpoint": {
+                                      "browseId": "UCU90PpZ-jViPqj2bjPTQvYA",
+                                      "browseEndpointContextSupportedConfigs": {
+                                        "browseEndpointContextMusicConfig": {
+                                          "pageType": "MUSIC_PAGE_TYPE_USER_CHANNEL"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {}
+                          }
+                        }
+                      ],
+                      "fixedColumns": [
+                        {
+                          "musicResponsiveListItemFixedColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "3:13"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      ],
+                      "overlay": {
+                        "musicItemThumbnailOverlayRenderer": {
+                          "content": {
+                            "musicPlayButtonRenderer": {
+                              "playNavigationEndpoint": {
+                                "watchEndpoint": {
+                                  "videoId": "KwZFalJdsbQ",
+                                  "watchEndpointMusicSupportedConfigs": {
+                                    "watchEndpointMusicConfig": {
+                                      "musicVideoType": "MUSIC_VIDEO_TYPE_UGC"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "menu": {
+                        "menuRenderer": {
+                          "items": [],
+                          "topLevelButtons": [
+                            {
+                              "likeButtonRenderer": {
+                                "likeStatus": "LIKE"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "thumbnail": {
+                        "musicThumbnailRenderer": {
+                          "thumbnail": {
+                            "thumbnails": [
+                              {
+                                "url": "https://i.ytimg.com/vi/KwZFalJdsbQ/sddefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCghqEJQEGHgg6AJIWg&rs=AMzJL3m6SvpUaMpENXfjngkCar8rcWxASQ",
+                                "width": 400,
+                                "height": 225
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "musicResponsiveListItemRenderer": {
+                      "flexColumns": [
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "Returns To Dreamland",
+                                  "navigationEndpoint": {
+                                    "watchEndpoint": {
+                                      "videoId": "hlr_7Za6v0M"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "Mr Goofy Guy"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "Returns To Dreamland",
+                                  "navigationEndpoint": {
+                                    "browseEndpoint": {
+                                      "browseId": "MPREb_gpAy67tM1Mv",
+                                      "browseEndpointContextSupportedConfigs": {
+                                        "browseEndpointContextMusicConfig": {
+                                          "pageType": "MUSIC_PAGE_TYPE_ALBUM"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      ],
+                      "fixedColumns": [
+                        {
+                          "musicResponsiveListItemFixedColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "1:55"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      ],
+                      "overlay": {
+                        "musicItemThumbnailOverlayRenderer": {
+                          "content": {
+                            "musicPlayButtonRenderer": {
+                              "playNavigationEndpoint": {
+                                "watchEndpoint": {
+                                  "videoId": "hlr_7Za6v0M",
+                                  "watchEndpointMusicSupportedConfigs": {
+                                    "watchEndpointMusicConfig": {
+                                      "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "menu": {
+                        "menuRenderer": {
+                          "items": [],
+                          "topLevelButtons": [
+                            {
+                              "likeButtonRenderer": {
+                                "likeStatus": "LIKE"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "thumbnail": {
+                        "musicThumbnailRenderer": {
+                          "thumbnail": {
+                            "thumbnails": [
+                              {
+                                "url": "https://yt3.googleusercontent.com/sbY5RcPwwWRYgt0gwRolK-RAXf3G2Fw-4vXZRWLUSQQOjj_ZUZQt1x8FpoKs1TSUD3DarZg1EgQNyIc=w60-h60-l90-rj",
+                                "width": 60,
+                                "height": 60
+                              },
+                              {
+                                "url": "https://yt3.googleusercontent.com/sbY5RcPwwWRYgt0gwRolK-RAXf3G2Fw-4vXZRWLUSQQOjj_ZUZQt1x8FpoKs1TSUD3DarZg1EgQNyIc=w120-h120-l90-rj",
+                                "width": 120,
+                                "height": 120
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "collapsedItemCount": 40,
+                "contentsMultiSelectable": true,
+                "targetId": "LM"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

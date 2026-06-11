@@ -1,0 +1,9 @@
+{
+  "browseId": "MPREb_lib1",
+  "title": "Lib Album",
+  "artists": [{"name": "Lib Artist", "id": "UClib1"}],
+  "year": "2024",
+  "thumbnails": [
+    {"url": "https://lh3.google.com/lib_album.jpg", "width": 226, "height": 226}
+  ]
+}

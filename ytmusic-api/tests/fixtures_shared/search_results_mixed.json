@@ -1,0 +1,47 @@
+[
+  {
+    "resultType": "song",
+    "videoId": "song1",
+    "title": "Test Song",
+    "artists": [{"name": "Test Artist", "id": "UC1"}],
+    "album": {"name": "Test Album", "id": "MPRE1"},
+    "duration": "3:30",
+    "duration_seconds": 210,
+    "thumbnails": [{"url": "https://example.com/s.jpg", "width": 120, "height": 120}]
+  },
+  {
+    "resultType": "video",
+    "videoId": "vid1",
+    "title": "Test Video",
+    "artists": [{"name": "Video Artist", "id": "UC2"}],
+    "album": null,
+    "duration": "5:00",
+    "duration_seconds": 300,
+    "thumbnails": []
+  },
+  {
+    "resultType": "album",
+    "browseId": "MPREb_alb1",
+    "title": "Great Album",
+    "artists": [{"name": "Album Artist", "id": "UC3"}],
+    "year": "2023",
+    "thumbnails": [{"url": "https://example.com/a.jpg", "width": 226, "height": 226}]
+  },
+  {
+    "resultType": "artist",
+    "browseId": "UCartist1",
+    "title": "Famous Artist",
+    "thumbnails": [{"url": "https://example.com/ar.jpg", "width": 226, "height": 226}]
+  },
+  {
+    "resultType": "playlist",
+    "playlistId": "VLPL_search1",
+    "title": "Cool Playlist",
+    "count": 15,
+    "thumbnails": [{"url": "https://example.com/p.jpg", "width": 226, "height": 226}]
+  },
+  {
+    "resultType": "station",
+    "title": "Some Radio"
+  }
+]
