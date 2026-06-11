@@ -5,7 +5,10 @@ A terminal music player for YouTube Music, built for keyboard-driven workflows.
 > **Status:** Beta. Playback, search, library, history, lyrics, radio, likes,
 > MPRIS, theming, and custom keymaps are functional.
 
-> **Screenshots:** coming soon.
+![ytmusic-tui home view (synthwave theme)](screenshots/out/home-synthwave.png)
+
+<sub>Home view, synthwave theme. All images are generated from a built-in demo
+dataset (`screenshots/generate.sh`) — no real account data.</sub>
 
 ## What is this?
 
@@ -40,6 +43,18 @@ designed for tiling WM setups.
 - **Theme system** with four built-in palettes: synthwave, nord, gruvbox, catppuccin
 - **Theme switcher** (`T` key) — change themes on the fly
 - **Player bar** with progress, volume, and now-playing info
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Search: 4-pane results grid](screenshots/out/search.png) | ![Library: 3-pane layout](screenshots/out/library.png) |
+| *Search — songs, albums, artists, playlists* | *Library — playlists, albums, artists* |
+| ![Queue view](screenshots/out/queue.png) | ![Action popup](screenshots/out/popup.png) |
+| *Queue with current-track marker* | *Action popup (`.`) — context actions* |
+
+The player bar (now playing, progress, shuffle/repeat, volume) is visible at
+the bottom of every view.
 
 ## Requirements
 
@@ -214,6 +229,19 @@ existing files work unchanged.
 | nord       | Blue/teal accent on dark gray         |
 | gruvbox    | Orange/yellow on dark brown           |
 | catppuccin | Lavender/pink on dark                 |
+
+| | |
+|---|---|
+| ![synthwave](screenshots/out/home-synthwave.png) | ![nord](screenshots/out/home-nord.png) |
+| *synthwave* | *nord* |
+| ![gruvbox](screenshots/out/home-gruvbox.png) | ![catppuccin](screenshots/out/home-catppuccin.png) |
+| *gruvbox* | *catppuccin* |
+
+Screenshots are regenerated with `./screenshots/generate.sh` (requires
+[vhs](https://github.com/charmbracelet/vhs); on Arch: `sudo pacman -S vhs ttyd`).
+The script drives the binary in a built-in demo mode (`YTMUSIC_TUI_DEMO=1`)
+with a fictional catalog, so output is deterministic and contains no account
+data.
 
 ## MPRIS2 / waybar / playerctl
 
