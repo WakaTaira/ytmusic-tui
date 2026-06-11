@@ -258,13 +258,19 @@ impl ArtistView {
 
     /// Render the artist view into `area`.
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+        // Wrap in a bordered, surface-filled "Artist" panel. The artist name,
+        // status, and the three sub-sections draw inside the border.
+        let block = super::panel_block(theme, "Artist");
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
         // Name (1 row) + status (1 row) + three sections.
         let chunks = Layout::vertical([
             Constraint::Length(1), // artist name
             Constraint::Length(1), // status
             Constraint::Min(1),    // three-section body
         ])
-        .split(area);
+        .split(inner);
 
         self.render_name(frame, chunks[0], theme);
         self.render_status(frame, chunks[1], theme);
@@ -354,10 +360,14 @@ impl ArtistView {
         items: Vec<ListItem>,
     ) {
         let is_active = section == self.focused;
+        // Inside the outer panel, the sub-sections use a LEFT accent divider
+        // (the active section brightens to `primary`; inactive uses the muted
+        // `primary-background` so it is still visible on the surface fill — the
+        // old `surface` border was invisible against the surface background).
         let border_style = if is_active {
             Style::default().fg(theme.primary)
         } else {
-            Style::default().fg(theme.surface)
+            Style::default().fg(theme.primary_background)
         };
         let title_style = if is_active {
             Style::default()
@@ -369,17 +379,13 @@ impl ArtistView {
         let block = Block::default()
             .borders(Borders::LEFT)
             .border_style(border_style)
+            .style(Style::default().bg(theme.surface))
             .title(Span::styled(section.title(), title_style));
 
         let list = List::new(items)
             .block(block)
-            .style(Style::default().fg(theme.text))
-            .highlight_style(
-                Style::default()
-                    .fg(theme.background)
-                    .bg(theme.primary)
-                    .add_modifier(Modifier::BOLD),
-            )
+            .style(Style::default().fg(theme.text).bg(theme.surface))
+            .highlight_style(super::selected_row_style(theme))
             .highlight_symbol("▶ ");
 
         let mut list_state = ListState::default();

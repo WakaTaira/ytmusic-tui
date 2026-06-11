@@ -127,6 +127,7 @@ impl FilterBar {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.accent))
+            .style(Style::default().bg(theme.surface))
             .title(Span::styled(
                 "Filter",
                 Style::default()

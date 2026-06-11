@@ -17,7 +17,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Wrap};
 
 use super::{PageState, Theme};
 
@@ -99,12 +99,18 @@ impl LyricsView {
 
     /// Render the lyrics view into `area`.
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+        // Wrap in a bordered, surface-filled "Lyrics" panel. The per-track
+        // header (title - artist) and the body draw inside the border.
+        let block = super::panel_block(theme, "Lyrics");
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
         // Title header (1 row) + status / lyrics body.
         let chunks = Layout::vertical([
             Constraint::Length(1), // header
             Constraint::Min(1),    // body
         ])
-        .split(area);
+        .split(inner);
 
         // Header: track name + artist in accent color (matches Python's
         // `#lyrics-title` which updates to `"{title} - {artist}" or "Lyrics"`).
@@ -163,9 +169,7 @@ impl LyricsView {
             }
             PageState::Loaded(Some(text)) => {
                 // Render the lyrics as a scrollable paragraph with word wrap.
-                let block = Block::default().borders(Borders::NONE);
                 let paragraph = Paragraph::new(text.as_str())
-                    .block(block)
                     .style(Style::default().fg(theme.text))
                     .wrap(Wrap { trim: false })
                     .scroll((self.scroll, 0));

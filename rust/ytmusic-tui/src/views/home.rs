@@ -259,7 +259,9 @@ impl HomeView {
         let items: Vec<ListItem> = section.items.iter().map(|i| item_to_list_item(i)).collect();
 
         // The section title is rendered as the block title in the accent color
-        // (Python: `.section-title { color: $accent; text-style: bold }`).
+        // (Python: `.section-title { color: $accent; text-style: bold }`). The
+        // active section's border brightens to `primary` (Python's focused-pane
+        // accent border); inactive sections use the muted `primary-background`.
         let title = Span::styled(
             section.title.clone(),
             Style::default()
@@ -267,23 +269,19 @@ impl HomeView {
                 .add_modifier(Modifier::BOLD),
         );
         let block = Block::default()
-            .borders(Borders::LEFT)
+            .borders(Borders::ALL)
             .border_style(Style::default().fg(if is_active {
                 theme.primary
             } else {
-                theme.surface
+                theme.primary_background
             }))
+            .style(Style::default().bg(theme.surface))
             .title(title);
 
         let list = List::new(items)
             .block(block)
-            .style(Style::default().fg(theme.text))
-            .highlight_style(
-                Style::default()
-                    .fg(theme.background)
-                    .bg(theme.primary)
-                    .add_modifier(Modifier::BOLD),
-            )
+            .style(Style::default().fg(theme.text).bg(theme.surface))
+            .highlight_style(super::selected_row_style(theme))
             .highlight_symbol("▶ ");
 
         // Only the active section shows a selection; inactive sections render
@@ -302,12 +300,13 @@ impl HomeView {
 /// the title line, so the chunk height is `1 + min(items, CAP)`.
 const SECTION_ITEM_CAP: u16 = 12;
 
-/// Chunk height for a section with `item_count` items: a title row plus up to
-/// [`SECTION_ITEM_CAP`] item rows.
+/// Chunk height for a section with `item_count` items: up to
+/// [`SECTION_ITEM_CAP`] item rows plus the two border rows (top carries the
+/// section title, bottom closes the box).
 fn section_height(item_count: usize) -> u16 {
     // Cap BEFORE narrowing: a usize -> u16 cast first would wrap huge counts.
     let items = item_count.min(SECTION_ITEM_CAP as usize) as u16;
-    items.saturating_add(1)
+    items.saturating_add(2)
 }
 
 /// Format one home item as a list row.
@@ -571,6 +570,48 @@ mod tests {
         let text = render_to_string(&view, 60, 20);
         // The highlight symbol marks the selected row.
         assert!(text.contains("▶"), "missing selection marker:\n{text}");
+    }
+
+    /// Render the view to a TestBackend terminal (for cell-style assertions).
+    fn render_to_terminal(view: &HomeView, w: u16, h: u16) -> Terminal<TestBackend> {
+        let backend = TestBackend::new(w, h);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        terminal
+            .draw(|frame| view.render(frame, frame.area(), &theme))
+            .unwrap();
+        terminal
+    }
+
+    #[test]
+    fn loaded_render_draws_bordered_sections_with_surface_fill() {
+        // Each section is a full-bordered panel on a surface background.
+        let view = two_section_view();
+        let terminal = render_to_terminal(&view, 60, 20);
+        let theme = Theme::default();
+        let buffer = terminal.backend().buffer();
+        // The top-left corner of the first section panel is a box corner.
+        assert_eq!(buffer[(0, 0)].symbol(), "┌", "section is not box-bordered");
+        // Some interior cell carries the surface background fill.
+        let has_surface = buffer
+            .content()
+            .iter()
+            .any(|c| c.style().bg == Some(theme.surface));
+        assert!(has_surface, "section panel missing surface background");
+    }
+
+    #[test]
+    fn active_section_border_uses_primary() {
+        // The focused (first) section's border is the brighter `primary`.
+        let view = two_section_view();
+        let terminal = render_to_terminal(&view, 60, 20);
+        let theme = Theme::default();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(
+            buffer[(0, 0)].style().fg,
+            Some(theme.primary),
+            "active section border is not the primary color"
+        );
     }
 
     #[test]

@@ -23,7 +23,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 use ytmusic_api::{PlaylistInfo, Track};
 
 use super::filter_bar::matches_filter;
@@ -314,8 +314,19 @@ impl PlaylistView {
 
     /// Render the active level into `area`.
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        // A one-row status header + the list below it.
-        let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
+        // Wrap the view in a bordered, surface-filled panel (Python's Screen
+        // surface bg + a titled pane). The status header + list draw inside.
+        let title = if self.is_viewing_tracks() {
+            "Playlist"
+        } else {
+            "Playlists"
+        };
+        let block = super::panel_block(theme, title);
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        // A one-row status header + the list below it, inside the panel border.
+        let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(inner);
         self.render_status(frame, chunks[0], theme);
         self.render_list(frame, chunks[1], theme);
     }
@@ -393,14 +404,8 @@ impl PlaylistView {
         };
 
         let list = List::new(items)
-            .block(Block::default().borders(Borders::NONE))
-            .style(Style::default().fg(theme.text))
-            .highlight_style(
-                Style::default()
-                    .fg(theme.background)
-                    .bg(theme.primary)
-                    .add_modifier(Modifier::BOLD),
-            )
+            .style(Style::default().fg(theme.text).bg(theme.surface))
+            .highlight_style(super::selected_row_style(theme))
             .highlight_symbol("▶ ");
 
         let mut list_state = ListState::default();

@@ -42,7 +42,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Paragraph};
 
 use ytmusic_api::{BrowserAuth, InnerTubeClient};
 use ytmusic_tui::app::{AppCommand, AppEvent, RuntimeHandle, spawn_runtime};
@@ -66,6 +66,7 @@ use ytmusic_tui::views::popup::{
 };
 use ytmusic_tui::views::queue_view::{QueueAction, QueueView};
 use ytmusic_tui::views::search::{SearchAction, SearchView};
+use ytmusic_tui::views::toast::{Severity, ToastManager};
 
 /// How long the input poll waits before the loop falls through to drain events
 /// and redraw. ~60 ms keeps the player bar's 1-second-ish progress feel smooth
@@ -304,6 +305,10 @@ fn run_loop(
         // (a re-fetch may have replaced the view's data this tick).
         model.apply_filter_to_view();
 
+        // Expire timed-out toasts before drawing so they vanish on schedule even
+        // when no key is pressed (the ~60 ms poll drives this).
+        model.prune_toasts();
+
         terminal.draw(|frame| model.render(frame))?;
 
         // Block up to POLL_INTERVAL for input; on timeout, loop to redraw
@@ -518,6 +523,11 @@ struct AppModel {
     /// both replies. Last-issued-wins covers the realistic single-flight case;
     /// a per-request id would be the full fix if this ever bites.
     pending_tracks: PendingTracksFetch,
+    /// Floating bottom-right toasts: every transient notification (action
+    /// confirmations, API/playback errors, the audio-quality change, the
+    /// session/MPRIS warnings) is pushed here and auto-expires, replacing the
+    /// old persistent single status line (Python's `App.notify()` toasts).
+    toasts: ToastManager,
     /// The active content view.
     view: View,
     /// Whether the search input box currently has keyboard focus. While `true`,
@@ -526,12 +536,6 @@ struct AppModel {
     /// meaningful while [`View::Search`] is active.
     input_mode: bool,
     theme: Theme,
-    /// Set once the session canary reports an invalid (logged-out) session;
-    /// renders a one-line warning above the content.
-    session_warning: Option<String>,
-    /// A transient status line (e.g. an API error or a "not yet implemented"
-    /// note for unported actions). Shown under the warning when present.
-    status: Option<String>,
     should_quit: bool,
 }
 
@@ -555,22 +559,22 @@ impl AppModel {
         self.theme_name = name.into();
     }
 
-    /// Surface any dropped/unparseable keymap bindings on the status line, once,
-    /// at startup (directive §6). A non-empty list becomes a single line like
+    /// Surface any dropped/unparseable keymap bindings as a startup warning
+    /// toast (directive §6). A non-empty list becomes a single message like
     /// `2 keymap bindings ignored: quit = "notakey", next = "??"`. An empty list
-    /// is a no-op, so a clean keymap leaves the status line free for the first
-    /// real message. The line is transient: any later status update (an API
-    /// error, a toast) replaces it, matching the "show once" intent.
+    /// is a no-op. The toast auto-expires (warning timeout), matching the "show
+    /// once" intent — Python notified the same way.
     fn set_keymap_warnings(&mut self, warnings: &[String]) {
         if warnings.is_empty() {
             return;
         }
-        self.status = Some(format!(
+        let message = format!(
             "{} keymap binding{} ignored: {}",
             warnings.len(),
             if warnings.len() == 1 { "" } else { "s" },
             warnings.join(", ")
-        ));
+        );
+        self.push_toast(message, Severity::Warning);
     }
 
     /// Build a model with an explicit keymap (the runtime path, fed the merged
@@ -597,13 +601,34 @@ impl AppModel {
             theme_name: "synthwave".to_owned(),
             library_playlists: Vec::new(),
             pending_tracks: PendingTracksFetch::None,
+            toasts: ToastManager::new(),
             view: View::Home,
             input_mode: false,
             theme,
-            session_warning: None,
-            status: None,
             should_quit: false,
         }
+    }
+
+    /// Push a transient toast with its severity's default timeout.
+    ///
+    /// The single choke point for every notification so the audit stays
+    /// reviewable in one place. Uses the real clock (`Instant::now`) as the toast
+    /// "now"; the prune in the main loop reads the same clock.
+    fn push_toast(&mut self, message: impl Into<String>, severity: Severity) {
+        self.toasts
+            .push(message, severity, std::time::Instant::now());
+    }
+
+    /// Push a toast with an explicit timeout (the two call sites that overrode
+    /// Textual's default: the 4 s filter warning and the 10 s session warning).
+    fn push_toast_with_timeout(
+        &mut self,
+        message: impl Into<String>,
+        severity: Severity,
+        timeout: Duration,
+    ) {
+        self.toasts
+            .push_with_timeout(message, severity, timeout, std::time::Instant::now());
     }
 
     /// Fold one runtime event into the model, returning any follow-up command
@@ -620,7 +645,6 @@ impl AppModel {
         match event {
             AppEvent::HomeLoaded(sections) => {
                 self.home.set_sections(sections);
-                self.status = None; // a successful load clears any stale error
             }
             AppEvent::LibraryPlaylistsLoaded(playlists) => {
                 // The library playlist list feeds three consumers: the playlist
@@ -639,7 +663,6 @@ impl AppModel {
                     self.playlist.set_playlists(playlists.clone());
                 }
                 self.library.set_playlists(playlists);
-                self.status = None;
             }
             AppEvent::PlaylistTracksLoaded { title, tracks } => {
                 // The same event serves two drill-in surfaces: the standalone
@@ -656,23 +679,18 @@ impl AppModel {
                     }
                 }
                 self.pending_tracks = PendingTracksFetch::None;
-                self.status = None;
             }
             AppEvent::SearchLoaded(results) => {
                 self.search.set_results(results);
-                self.status = None;
             }
             AppEvent::LibraryAlbumsLoaded(albums) => {
                 self.library.set_albums(albums);
-                self.status = None;
             }
             AppEvent::LibraryArtistsLoaded(artists) => {
                 self.library.set_artists(artists);
-                self.status = None;
             }
             AppEvent::LikedSongsLoaded(tracks) => {
                 self.library.set_liked_songs(tracks);
-                self.status = None;
             }
             AppEvent::ApiError(msg) => self.on_api_error(msg),
             AppEvent::NowPlaying(now) => {
@@ -702,12 +720,17 @@ impl AppModel {
             AppEvent::PlayerVolume(vol) => self.player.on_volume(vol),
             AppEvent::PlayerMute(muted) => self.player.on_mute(muted),
             AppEvent::AudioQualityChanged(quality) => {
-                // Toast the new level; it applies from the next track.
-                self.status = Some(format!("Audio quality: {quality} (from next track)"));
+                // Toast the new level; it applies from the next track. This is
+                // the `b` message that previously stuck forever on the status
+                // line — now it auto-expires like every other notification.
+                self.push_toast(
+                    format!("Audio quality: {quality} (from next track)"),
+                    Severity::Info,
+                );
             }
             AppEvent::ActionResult(message) => {
                 // A like/add-to-queue/add-to-playlist confirmation toast.
-                self.status = Some(message);
+                self.push_toast(message, Severity::Info);
             }
             AppEvent::PlayerStarted => self.player.on_started(),
             AppEvent::TrackEnded => {
@@ -721,41 +744,43 @@ impl AppModel {
             }
             AppEvent::TrackError(detail) => {
                 // NEVER advance on a failed stream — a broken resolver would
-                // machine-gun the queue (the end-file battle lesson).
-                self.status = Some(format!("Playback error: {detail}"));
+                // machine-gun the queue (the end-file battle lesson). Surface the
+                // failure as an error toast (Python's 8 s playback-error toast).
+                self.push_toast(format!("Playback error: {detail}"), Severity::Error);
             }
             AppEvent::ArtistResolved(channel_id) => {
                 // The `a` / "Go to artist" lookup resolved a channel id: navigate
                 // to the artist page (reusing open_artist's view/nav prep) and
                 // chain the fetch as the fold's follow-up command.
-                self.status = None;
                 return Some(self.prepare_open_artist(&channel_id));
             }
             AppEvent::AlbumResolved(browse_id) => {
-                self.status = None;
                 return Some(self.prepare_open_album(&browse_id));
             }
             AppEvent::AlbumLoaded(album) => {
                 self.album.set_album(album);
-                self.status = None;
             }
             AppEvent::ArtistLoaded(artist) => {
                 self.artist.set_artist(artist);
-                self.status = None;
             }
             AppEvent::LyricsLoaded(lyrics) => {
                 self.lyrics.set_lyrics(lyrics);
-                self.status = None;
             }
             AppEvent::HistoryLoaded(tracks) => {
                 self.history.set_tracks(tracks);
-                self.status = None;
             }
             AppEvent::QueueSnapshot(snapshot) => {
                 self.queue_view.set_snapshot(snapshot);
             }
             AppEvent::SessionInvalid => {
-                self.session_warning = Some(SESSION_WARNING.to_owned());
+                // Python surfaced the signed-out canary as a 10 s warning toast
+                // (`_probe_session`, timeout=10). Mirror that here rather than a
+                // persistent header line.
+                self.push_toast_with_timeout(
+                    SESSION_WARNING,
+                    Severity::Warning,
+                    Duration::from_secs(10),
+                );
             }
         }
         None
@@ -789,7 +814,10 @@ impl AppModel {
             View::History => self.history.set_error(msg.clone()),
             View::Home | View::Queue => {}
         }
-        self.status = Some(msg);
+        // Also surface the failure as an error toast so it is visible even when
+        // the active view shows no inline error body (e.g. Queue), matching
+        // Python's `classify_api_error` + `notify(..., severity="error")`.
+        self.push_toast(msg, Severity::Error);
     }
 
     /// Dispatch a raw key press: route to the search input editor while the
@@ -1016,7 +1044,7 @@ impl AppModel {
     /// later "Add to playlist" choice has data.
     fn open_action_popup(&mut self, runtime: &RuntimeHandle) {
         let Some(item) = self.selected_popup_item() else {
-            self.status = Some("Nothing to act on here".to_owned());
+            self.push_toast("Nothing to act on here", Severity::Warning);
             return;
         };
         // Prime the playlist list so a subsequent "Add to playlist" can populate
@@ -1077,7 +1105,7 @@ impl AppModel {
                 // Apply the theme live (Python re-applied via set_css_variables).
                 self.theme = Theme::from_name(&name);
                 self.theme_name = name.clone();
-                self.status = Some(format!("Theme: {name}"));
+                self.push_toast(format!("Theme: {name}"), Severity::Info);
             }
             PopupOutcome::ActionSelected { action, item } => {
                 self.handle_action(action.kind, item, runtime);
@@ -1169,7 +1197,10 @@ impl AppModel {
                 });
             }
             None => {
-                self.status = Some("Remove from playlist: no playlist context".to_owned());
+                self.push_toast(
+                    "Remove from playlist: no playlist context",
+                    Severity::Warning,
+                );
             }
         }
     }
@@ -1199,10 +1230,10 @@ impl AppModel {
             PopupItem::Playlist(_) => String::new(),
         };
         if name.is_empty() {
-            self.status = Some("Go to artist: unavailable from this row".to_owned());
+            self.push_toast("Go to artist: unavailable from this row", Severity::Warning);
             return;
         }
-        self.status = Some(format!("Finding artist: {name}…"));
+        self.push_toast(format!("Finding artist: {name}…"), Severity::Info);
         runtime.send(AppCommand::SearchAndOpenArtist(name));
     }
 
@@ -1216,13 +1247,13 @@ impl AppModel {
                 self.open_album(a.browse_id.clone(), runtime);
             }
             PopupItem::Track(t) if !t.album.is_empty() => {
-                self.status = Some(format!("Finding album: {}…", t.album));
+                self.push_toast(format!("Finding album: {}…", t.album), Severity::Info);
                 runtime.send(AppCommand::SearchAndOpenAlbum {
                     name: t.album.clone(),
                     artist: t.artist.clone(),
                 });
             }
-            _ => self.status = Some("Go to album: unavailable from this row".to_owned()),
+            _ => self.push_toast("Go to album: unavailable from this row", Severity::Warning),
         }
     }
 
@@ -1260,7 +1291,7 @@ impl AppModel {
             return;
         }
         let name = self.player.artist.clone();
-        self.status = Some(format!("Finding artist: {name}…"));
+        self.push_toast(format!("Finding artist: {name}…"), Severity::Info);
         runtime.send(AppCommand::SearchAndOpenArtist(name));
     }
 
@@ -1273,7 +1304,7 @@ impl AppModel {
         }
         let name = self.player.album.clone();
         let artist = self.player.artist.clone();
-        self.status = Some(format!("Finding album: {name}…"));
+        self.push_toast(format!("Finding album: {name}…"), Severity::Info);
         runtime.send(AppCommand::SearchAndOpenAlbum { name, artist });
     }
 
@@ -1285,7 +1316,12 @@ impl AppModel {
     /// has no filterable table). Toggling off clears the view's filter.
     fn toggle_filter(&mut self) {
         if !self.view_is_filterable() {
-            self.status = Some("Nothing to filter here".to_owned());
+            // Python's `filter_bar.py` notified with a 4 s warning timeout.
+            self.push_toast_with_timeout(
+                "Nothing to filter here",
+                Severity::Warning,
+                Duration::from_secs(4),
+            );
             return;
         }
         let now_active = self.filter.toggle();
@@ -1783,10 +1819,21 @@ impl AppModel {
         }
     }
 
-    /// Draw the whole UI: optional warning + status lines, the content, the
-    /// optional in-page filter bar, and the player bar docked at the bottom.
+    /// Draw the whole UI: the theme-filled background, the optional pending-key
+    /// header line, the content, the optional in-page filter bar, the docked
+    /// player bar, any popup overlay, and finally the floating toasts.
     fn render(&self, frame: &mut ratatui::Frame<'_>) {
         let area = frame.area();
+
+        // Paint the entire frame with the theme surface color first so the
+        // terminal's default background never shows through (Python's
+        // `Screen { background: $surface }`). Every view then draws its own
+        // panels on top of this fill.
+        frame.render_widget(
+            Block::default().style(Style::default().bg(self.theme.surface)),
+            area,
+        );
+
         let header_lines = self.header_line_count();
         // The filter bar takes its own fixed-height row just above the player
         // bar when active; otherwise the content extends to the player bar.
@@ -1833,47 +1880,48 @@ impl AppModel {
             };
             self.popups.render(frame, overlay_area, &self.theme);
         }
+
+        // Toasts float on top of even the popups, anchored to the bottom-right
+        // above the player bar (Python's `notify()` toast rack). The content +
+        // header area excludes the docked player and filter bars.
+        let toast_area = Rect {
+            height: chunks[0].height + chunks[1].height,
+            ..area
+        };
+        self.toasts.render(frame, toast_area, &self.theme);
     }
 
-    /// Number of header rows currently needed (warning, status, and/or the
-    /// pending key-sequence prefix hint).
+    /// Number of header rows currently needed.
+    ///
+    /// The header now carries only the pending key-sequence prefix hint (the one
+    /// genuinely persistent indicator Python kept on screen). Every transient
+    /// message — errors, confirmations, warnings — is a floating toast instead.
     fn header_line_count(&self) -> u16 {
-        u16::from(self.session_warning.is_some())
-            + u16::from(self.status.is_some())
-            + u16::from(self.keymap.pending().is_some())
+        u16::from(self.keymap.pending().is_some())
     }
 
-    /// Render the warning, status, and pending-prefix lines into the header.
+    /// Render the pending key-sequence prefix line into the header (if armed).
     fn render_header(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {
         if area.height == 0 {
             return;
         }
-        let mut lines: Vec<Line> = Vec::new();
-        if let Some(warning) = &self.session_warning {
-            lines.push(Line::from(Span::styled(
-                warning.clone(),
-                Style::default()
-                    .fg(self.theme.primary)
-                    .add_modifier(Modifier::BOLD),
-            )));
-        }
-        if let Some(status) = &self.status {
-            lines.push(Line::from(Span::styled(
-                status.clone(),
-                Style::default().fg(self.theme.secondary),
-            )));
-        }
         // The armed key-sequence prefix (e.g. `g…`), mirroring spotify_player's
-        // pending-key hint so the user knows a sequence is in progress.
+        // pending-key hint so the user knows a sequence is in progress. This is
+        // the only persistent header line; transient messages are toasts.
         if let Some(prefix) = self.keymap.pending_label() {
-            lines.push(Line::from(Span::styled(
+            let line = Line::from(Span::styled(
                 format!("{prefix}…"),
                 Style::default()
                     .fg(self.theme.accent)
                     .add_modifier(Modifier::BOLD),
-            )));
+            ));
+            frame.render_widget(Paragraph::new(line), area);
         }
-        frame.render_widget(Paragraph::new(lines), area);
+    }
+
+    /// Expire any toasts whose timeout has elapsed. Called once per UI tick.
+    fn prune_toasts(&mut self) {
+        self.toasts.prune();
     }
 }
 
@@ -1894,6 +1942,23 @@ mod tests {
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    // -- toast assertions (replacing the old single status line) -----------
+
+    /// The message of the most-recently-pushed live toast, if any. Toasts are
+    /// appended, so the newest is last.
+    fn latest_toast(model: &AppModel) -> Option<&str> {
+        model.toasts.toasts().last().map(|t| t.message.as_str())
+    }
+
+    /// Whether any live toast's message contains `needle`.
+    fn has_toast_containing(model: &AppModel, needle: &str) -> bool {
+        model
+            .toasts
+            .toasts()
+            .iter()
+            .any(|t| t.message.contains(needle))
     }
 
     #[test]
@@ -2032,31 +2097,28 @@ mod tests {
         assert!(!model.player.is_muted);
     }
 
-    // -- keymap warnings on the status line (Stage 4) ----------------------
+    // -- keymap warnings as a startup toast (Stage 4) ----------------------
 
     #[test]
-    fn keymap_warnings_surface_on_status_line() {
+    fn keymap_warnings_surface_as_a_toast() {
         let mut model = AppModel::new(Theme::default());
         model.set_keymap_warnings(&["quit = \"notakey\"".to_owned()]);
-        let status = model.status.as_deref().unwrap_or("");
+        let status = latest_toast(&model).unwrap_or("");
         assert!(status.contains("1 keymap binding ignored"), "got: {status}");
         assert!(status.contains("notakey"), "got: {status}");
+        // It is a warning-severity toast.
+        assert_eq!(model.toasts.toasts()[0].severity, Severity::Warning);
     }
 
     #[test]
     fn keymap_warnings_plural_and_empty() {
         let mut model = AppModel::new(Theme::default());
         model.set_keymap_warnings(&["a = \"?\"".to_owned(), "b = \"!\"".to_owned()]);
-        assert!(
-            model
-                .status
-                .as_deref()
-                .is_some_and(|s| s.contains("2 keymap bindings ignored"))
-        );
-        // An empty list leaves the status untouched.
+        assert!(has_toast_containing(&model, "2 keymap bindings ignored"));
+        // An empty list pushes no toast.
         let mut clean = AppModel::new(Theme::default());
         clean.set_keymap_warnings(&[]);
-        assert!(clean.status.is_none());
+        assert!(clean.toasts.is_empty());
     }
 
     // -- like / radio / a / A (Stage 2) ------------------------------------
@@ -2256,7 +2318,7 @@ mod tests {
         let mut model = AppModel::new(Theme::default()); // Home view
         model.dispatch_key(key(KeyCode::Char('/')), &runtime);
         assert!(!model.filter.is_active(), "home is not filterable");
-        assert_eq!(model.status.as_deref(), Some("Nothing to filter here"));
+        assert_eq!(latest_toast(&model), Some("Nothing to filter here"));
     }
 
     #[test]
@@ -2316,7 +2378,7 @@ mod tests {
         model.view = View::Lyrics;
         model.dispatch_key(key(KeyCode::Char('.')), &runtime);
         assert!(!model.popups.is_open(), "lyrics has no selectable item");
-        assert_eq!(model.status.as_deref(), Some("Nothing to act on here"));
+        assert_eq!(latest_toast(&model), Some("Nothing to act on here"));
     }
 
     #[test]
@@ -2650,11 +2712,14 @@ mod tests {
     }
 
     #[test]
-    fn api_error_before_load_sets_error_and_status() {
+    fn api_error_before_load_sets_error_and_toast() {
         let mut model = AppModel::new(Theme::default());
         fold(&mut model, AppEvent::ApiError("network down".to_owned()));
+        // The inline home-view error body is set...
         assert_eq!(model.home.state().status_line(), Some("network down"));
-        assert_eq!(model.status.as_deref(), Some("network down"));
+        // ...and an error toast is raised.
+        assert_eq!(latest_toast(&model), Some("network down"));
+        assert_eq!(model.toasts.toasts()[0].severity, Severity::Error);
     }
 
     #[test]
@@ -2690,12 +2755,7 @@ mod tests {
         let mut model = AppModel::new(Theme::default());
         let follow_up = model.on_event(AppEvent::TrackError("loading failed".to_owned()));
         assert_eq!(follow_up, None, "TrackError must not advance the queue");
-        assert!(
-            model
-                .status
-                .as_deref()
-                .is_some_and(|s| s.contains("loading failed"))
-        );
+        assert!(has_toast_containing(&model, "loading failed"));
     }
 
     #[test]
@@ -2730,14 +2790,20 @@ mod tests {
     }
 
     #[test]
-    fn successful_load_clears_stale_status_error() {
+    fn error_raises_a_toast_that_a_later_load_does_not_clear() {
+        // Toasts auto-expire on their own timer; unlike the old single status
+        // line, a subsequent successful load must NOT yank an in-flight error
+        // toast off screen mid-read.
         let mut model = AppModel::new(Theme::default());
-        // A prior error left a status line behind.
         fold(&mut model, AppEvent::TrackError("boom".to_owned()));
-        assert!(model.status.is_some());
-        // A successful home reload clears it.
+        assert!(has_toast_containing(&model, "boom"));
+        // A successful home reload leaves the live toast in place (it expires by
+        // its own timeout, not on the next event).
         fold(&mut model, AppEvent::HomeLoaded(vec![track_section()]));
-        assert!(model.status.is_none(), "stale status should clear on load");
+        assert!(
+            has_toast_containing(&model, "boom"),
+            "a load should not clear a live error toast"
+        );
     }
 
     #[test]
@@ -2751,11 +2817,12 @@ mod tests {
     }
 
     #[test]
-    fn session_invalid_event_sets_warning() {
+    fn session_invalid_event_raises_warning_toast() {
         let mut model = AppModel::new(Theme::default());
-        assert!(model.session_warning.is_none());
+        assert!(model.toasts.is_empty());
         fold(&mut model, AppEvent::SessionInvalid);
-        assert!(model.session_warning.is_some());
+        assert!(has_toast_containing(&model, "Session invalid"));
+        assert_eq!(model.toasts.toasts()[0].severity, Severity::Warning);
     }
 
     // -- rendering (TestBackend) -------------------------------------------
@@ -2790,9 +2857,76 @@ mod tests {
     }
 
     #[test]
-    fn render_shows_session_warning_line() {
+    fn render_fills_the_frame_with_the_theme_surface_background() {
+        // Fix 2: the whole frame is painted with the theme surface color first,
+        // so the terminal's default background never shows through. Sample the
+        // top-left corner (above any view content) — it must carry surface bg.
+        let model = AppModel::new(Theme::default());
+        let backend = TestBackend::new(60, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| model.render(frame)).unwrap();
+        let theme = Theme::default();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(
+            buffer[(0, 0)].style().bg,
+            Some(theme.surface),
+            "frame top-left is not painted with the theme surface background"
+        );
+    }
+
+    #[test]
+    fn render_draws_a_bordered_section_title_with_accent() {
+        // A loaded home view draws each section in a bordered panel whose title
+        // is the section name in the accent color (the Python panel-title CSS).
+        let mut model = AppModel::new(Theme::default());
+        fold(&mut model, AppEvent::HomeLoaded(vec![track_section()]));
+        let backend = TestBackend::new(70, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| model.render(frame)).unwrap();
+        let theme = Theme::default();
+        let buffer = terminal.backend().buffer();
+        // A border glyph somewhere carries the active section's primary border.
+        let has_border = buffer.content().iter().any(|c| {
+            (c.symbol() == "─" || c.symbol() == "│") && c.style().fg == Some(theme.primary)
+        });
+        assert!(has_border, "no accented/primary section border rendered");
+        // The section title 'Q' (of "Quick picks") is drawn in the accent color.
+        let has_accent_title = buffer
+            .content()
+            .iter()
+            .any(|c| c.symbol() == "Q" && c.style().fg == Some(theme.accent));
+        assert!(
+            has_accent_title,
+            "section title not drawn in the accent color"
+        );
+    }
+
+    #[test]
+    fn render_styles_the_selected_row_with_cursor_colors() {
+        // The active section's selected row uses the cursor colors (primary bg).
+        let mut model = AppModel::new(Theme::default());
+        fold(&mut model, AppEvent::HomeLoaded(vec![track_section()]));
+        let backend = TestBackend::new(70, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| model.render(frame)).unwrap();
+        let theme = Theme::default();
+        let buffer = terminal.backend().buffer();
+        let has_cursor = buffer
+            .content()
+            .iter()
+            .any(|c| c.style().bg == Some(theme.primary) && c.style().fg == Some(theme.background));
+        assert!(
+            has_cursor,
+            "no row rendered with the selected-row cursor colors"
+        );
+    }
+
+    #[test]
+    fn render_shows_session_warning_as_toast() {
         let mut model = AppModel::new(Theme::default());
         fold(&mut model, AppEvent::SessionInvalid);
+        // The session warning now renders as a floating toast rather than a
+        // persistent header line; the text is still on screen.
         let text = render_model(&model, 80, 12);
         assert!(
             text.contains("Session invalid"),
@@ -2815,13 +2949,19 @@ mod tests {
     }
 
     #[test]
-    fn header_line_count_tracks_warning_and_status() {
+    fn header_line_count_tracks_only_the_pending_key_sequence() {
+        // Transient messages are toasts now and never grow the header; only an
+        // armed key-sequence prefix takes a header row.
         let mut model = AppModel::new(Theme::default());
         assert_eq!(model.header_line_count(), 0);
+        // Toasts do not affect the header height.
         fold(&mut model, AppEvent::SessionInvalid);
-        assert_eq!(model.header_line_count(), 1);
         fold(&mut model, AppEvent::TrackError("x".to_owned()));
-        assert_eq!(model.header_line_count(), 2);
+        assert_eq!(model.header_line_count(), 0);
+        // Arming a two-key sequence prefix (g …) takes one header row.
+        let (runtime, _rx) = RuntimeHandle::stub();
+        model.dispatch_key(key(KeyCode::Char('g')), &runtime);
+        assert_eq!(model.header_line_count(), 1);
     }
 
     // -- view switching + navigation (M5b) ---------------------------------
