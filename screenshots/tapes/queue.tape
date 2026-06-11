@@ -1,0 +1,11 @@
+Output screenshots/out/queue.png
+Set FontSize 16
+Set Width 1200
+Set Height 760
+Set Padding 20
+Env YTMUSIC_TUI_DEMO 1
+Env YTMUSIC_TUI_DEMO_SCREEN queue
+Type "./target/release/ytmusic-tui"
+Enter
+Sleep 2s
+Screenshot screenshots/out/queue.png

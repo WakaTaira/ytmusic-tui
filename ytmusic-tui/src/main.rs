@@ -47,6 +47,7 @@ use ratatui::widgets::{Block, Paragraph};
 use ytmusic_api::{BrowserAuth, InnerTubeClient};
 use ytmusic_tui::app::{AppCommand, AppEvent, RuntimeHandle, spawn_runtime};
 use ytmusic_tui::config::{self, AppConfig};
+use ytmusic_tui::demo::{self, DemoScreen};
 use ytmusic_tui::keymap::{Action, Keymap, Resolution};
 use ytmusic_tui::navigation::{NavigationManager, PageState as NavPage};
 use ytmusic_tui::player::Player;
@@ -94,6 +95,11 @@ fn run() -> i32 {
             return 1;
         }
     };
+
+    // Demo mode: skip all real I/O, inject fake data, draw once, wait for a key.
+    if demo::is_demo() {
+        return run_demo(&config);
+    }
 
     // Auth is optional-at-runtime: a missing/!invalid browser.json must not
     // abort startup (the UI degrades to a "sign in" prompt via the session
@@ -1993,6 +1999,138 @@ impl AppModel {
     fn prune_toasts(&mut self) {
         self.toasts.prune();
     }
+}
+
+// ---------------------------------------------------------------------------
+// Demo mode entry point
+// ---------------------------------------------------------------------------
+
+/// Draw one frozen frame populated with fake data, then block waiting for any
+/// key press (or a 60 s timeout so automated screenshot tools can Screenshot
+/// and move on). Returns a process exit code.
+///
+/// The demo path never constructs `InnerTubeClient`, `Player`, a tokio runtime,
+/// or MPRIS — it only builds an `AppModel`, folds scripted `AppEvent`s into it,
+/// and runs a single-shot terminal loop.
+fn run_demo(config: &AppConfig) -> i32 {
+    // Honour the theme override env var before building the model.
+    let theme_name = std::env::var("YTMUSIC_TUI_DEMO_THEME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| config.ui.theme.clone());
+
+    let screen = DemoScreen::from_env();
+
+    // Build the keymap exactly as the real path does (best-effort; fall back to
+    // defaults on any error so the demo never fails to launch).
+    let (keymap, _) = match config::load_keymap(None, None) {
+        Ok(mut map) => {
+            map.entry("search_page".to_owned())
+                .or_insert_with(|| "g s".to_owned());
+            Keymap::from_map_with_warnings(&map)
+        }
+        Err(_) => (Keymap::defaults(), Vec::new()),
+    };
+
+    let mut model = AppModel::with_keymap(Theme::from_name(&theme_name), keymap);
+    model.set_theme_name(&theme_name);
+
+    // Switch to the requested view BEFORE folding data so the view-level
+    // loading state is bypassed and the data lands in the right slot.
+    let (stub_runtime, _stub_rx) = RuntimeHandle::stub();
+    match screen {
+        DemoScreen::Search => {
+            model.view = View::Search;
+            // Pre-populate the search input with a visible query string.
+            "neon cascade"
+                .chars()
+                .for_each(|c| model.search.push_input_char(c));
+        }
+        DemoScreen::Library => {
+            model.view = View::Library;
+        }
+        DemoScreen::Queue => {
+            model.view = View::Queue;
+        }
+        DemoScreen::Player | DemoScreen::Home => {
+            // Home is the default; no view switch needed.
+        }
+        DemoScreen::ActionPopup => {
+            // Home view with the action popup open. Data must land first (the
+            // popup reads the selected item), so the popup is opened after
+            // the fold below via `open_action_popup`.
+        }
+    }
+
+    // Fold every scripted event into the model.
+    for event in ytmusic_tui::demo::scripted_events(screen) {
+        let _ = model.on_event(event);
+    }
+
+    // For the ActionPopup screen, open the popup after data has been folded
+    // so the first home-section item is the popup context.
+    if screen == DemoScreen::ActionPopup {
+        model.open_action_popup(&stub_runtime);
+    }
+
+    // Prepare filter/toast state — mirrors the run_loop preamble.
+    model.apply_filter_to_view();
+    model.prune_toasts();
+
+    // Terminal setup — mirrors run_with_terminal / run_in_alternate_screen.
+    install_panic_hook();
+    if let Err(e) = enable_raw_mode() {
+        eprintln!("ytmusic-tui demo: failed to enable raw mode: {e}");
+        return 1;
+    }
+
+    let result = run_demo_in_alternate_screen(&mut model);
+    restore_terminal();
+
+    match result {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("ytmusic-tui demo: terminal error: {e}");
+            1
+        }
+    }
+}
+
+/// The fallible part of the demo terminal session.
+///
+/// Enters the alternate screen, draws one frame, then blocks up to 60 seconds
+/// for any key press. Returns `Ok(())` on a normal exit (key pressed or
+/// timeout) and `Err` on I/O failure.
+fn run_demo_in_alternate_screen(model: &mut AppModel) -> io::Result<()> {
+    let mut stdout = io::stdout();
+    stdout.execute(EnterAlternateScreen)?;
+    stdout.execute(cursor::Hide)?;
+
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    terminal.draw(|frame| model.render(frame))?;
+
+    // Block for up to 60 seconds waiting for any key. This window is large
+    // enough for `vhs Sleep 2s; Screenshot` and still exits promptly when a
+    // human presses a key during interactive testing.
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        // Poll in short bursts so we do not block longer than one tick past
+        // the deadline.
+        let poll_for = remaining.min(POLL_INTERVAL);
+        if event::poll(poll_for)?
+            && let Event::Key(_) = event::read()?
+        {
+            break;
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
