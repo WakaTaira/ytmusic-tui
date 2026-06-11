@@ -419,8 +419,6 @@ fn search_events() -> Vec<AppEvent> {
 }
 
 fn library_events() -> Vec<AppEvent> {
-    let tracks = all_tracks();
-
     let playlists = vec![
         PlaylistInfo::new("demo-pl-001", "Late Night Coding", "Focus sessions", 28, ""),
         PlaylistInfo::new(
@@ -486,7 +484,6 @@ fn library_events() -> Vec<AppEvent> {
         AppEvent::LibraryPlaylistsLoaded(playlists),
         AppEvent::LibraryAlbumsLoaded(albums),
         AppEvent::LibraryArtistsLoaded(artists),
-        AppEvent::LikedSongsLoaded(tracks[0..10].to_vec()),
     ]
 }
 
