@@ -46,9 +46,19 @@ COUNT=0
 
 for tape in "${TAPES[@]}"; do
     name="$(basename "${tape}" .tape)"
+    out="${SCRIPT_DIR}/out/${name}.png"
     COUNT=$((COUNT + 1))
     echo "==> [${COUNT}/${TOTAL}] Rendering ${name}..."
     vhs "${tape}"
+    # vhs occasionally exits 0 without writing the PNG; retry once.
+    if [[ ! -f "${out}" ]]; then
+        echo "    output missing, retrying ${name}..."
+        vhs "${tape}"
+    fi
+    if [[ ! -f "${out}" ]]; then
+        echo "error: ${out} was not produced after retry" >&2
+        exit 1
+    fi
 done
 
 echo ""
