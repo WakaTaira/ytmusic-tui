@@ -1,5 +1,6 @@
 pub mod app;
 pub mod config;
+pub mod demo;
 pub mod formatting;
 pub mod keymap;
 pub mod layout;
