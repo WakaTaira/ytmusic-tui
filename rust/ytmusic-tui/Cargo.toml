@@ -69,7 +69,32 @@ tokio = { version = "1", default-features = false, features = [
     "rt-multi-thread",
     "macros",
     "sync",
+    # "time" is used by the ignored live MPRIS test; declared explicitly
+    # rather than relying on zbus/mpris-server pulling it transitively.
+    "time",
 ] }
+
+# Server-side MPRIS2 implementation (M6), built on zbus. 0.10.0 depends on zbus
+# 5.14+ (resolves to 5.16.x). The `tokio` feature switches zbus's reactor onto
+# the runtime thread's tokio runtime so the MPRIS server shares it (no extra
+# reactor thread). Crate + version chosen and proven live in spikes/mpris_spike
+# (FINDINGS.md): the async zbus write path makes EAGAIN/WouldBlock structurally
+# non-fatal — the exact failure class that hung the Python (dbus-fast) build.
+# `unstable` exposes `Server::connection()` so the connection-death watcher can
+# observe the SAME bus link the server serves on (MessageStream over it), rather
+# than a parallel session connection. This is the death-observability path the
+# M0 spike proved (FINDINGS.md §"Connection-death detection recipe").
+mpris-server = { version = "0.10", features = ["tokio", "unstable"] }
+
+# Direct zbus dep only for the low-level connection-death observability APIs
+# (MessageStream / Connection::monitor_activity) the MPRIS task arms; must match
+# the version mpris-server resolves and enable the same tokio reactor.
+zbus = { version = "5.16", default-features = false, features = ["tokio"] }
+
+# Stream adapter (StreamExt::next) for draining the connection-death
+# MessageStream. zbus already pulls futures-util transitively; declared directly
+# so the `StreamExt` import is stable.
+futures-util = { version = "0.3", default-features = false }
 
 [dev-dependencies]
 # Temporary directory support for config-loading tests.

@@ -86,6 +86,7 @@ use ytmusic_api::{
 
 use crate::views::queue_view::QueueSnapshot;
 
+use crate::mpris::{self, MprisHandle, MprisState, control_to_command};
 use crate::player::{Player, PlayerEvent};
 use crate::queue::{QueueManager, RepeatMode};
 
@@ -528,7 +529,33 @@ fn run_runtime(
     let mut queue = QueueManager::new();
 
     runtime.block_on(async move {
-        while let Some(command) = commands.recv().await {
+        // Spawn the MPRIS server on THIS runtime (the single-executor rule from
+        // the spike). The inbound-control channel relays D-Bus method calls
+        // (PlayPause/Next/Previous/Stop) back here; the select loop below maps
+        // them to commands. A `None` handle means MPRIS init failed (no session
+        // bus, name taken) — already toasted once, the app runs without it.
+        let (control_tx, mut control_rx) = mpsc::unbounded_channel::<mpris::MprisControl>();
+        let mpris = mpris::spawn_mpris(control_tx, events.clone()).await;
+        // Publish the initial (idle) state so probes have something to read.
+        push_mpris_state(mpris.as_ref(), &queue, &player);
+
+        loop {
+            // Concurrently await a UI command or an inbound MPRIS control. The
+            // control is mapped to the same AppCommand the keymap would produce,
+            // so both paths converge on one match.
+            let command = tokio::select! {
+                cmd = commands.recv() => match cmd {
+                    Some(cmd) => cmd,
+                    // The UI command sender is gone — the app is exiting.
+                    None => break,
+                },
+                control = control_rx.recv() => match control {
+                    Some(control) => control_to_command(control),
+                    // The control channel only closes when the MPRIS interface
+                    // (and its server) is dropped; keep serving UI commands.
+                    None => continue,
+                },
+            };
             match command {
                 AppCommand::Quit => break,
                 AppCommand::FetchHome => handle_fetch_home(client.as_ref(), events).await,
@@ -648,10 +675,65 @@ fn run_runtime(
                         .await;
                 }
             }
+            // After every command, push a fresh MPRIS snapshot built from the
+            // queue + the live player state. The MPRIS task diffs it against the
+            // last and emits ONLY changed properties, so pushing unconditionally
+            // here is cheap (a no-op when nothing playback-relevant changed) and
+            // keeps the wiring to a single call site instead of one per arm.
+            push_mpris_state(mpris.as_ref(), &queue, &player);
         }
-        // `player` is dropped here, stopping its event thread and ending the
-        // forwarder.
+        // The MPRIS tasks die via RAII when this block_on returns and the
+        // runtime drops (task abort closes the zbus connection, releasing the
+        // bus name before `player` drops below). The Shutdown message is a
+        // best-effort nudge; the abort usually wins the race — both are clean.
+        if let Some(handle) = mpris.as_ref() {
+            handle.shutdown();
+        }
     });
+}
+
+/// Build an [`MprisState`] from the queue + live player state and push it to the
+/// MPRIS task (a no-op when MPRIS is unavailable).
+///
+/// The queue supplies the static-per-track metadata (title/artist/album/art/
+/// duration) and the modes (shuffle/repeat); the player supplies the live flags
+/// (is_playing, volume, position). This is the Rust analogue of Python's
+/// `MprisService.update(state, track, shuffle, repeat_mode)` — called from the
+/// runtime side with full state, never from the raw mpv event feed.
+fn push_mpris_state(mpris: Option<&MprisHandle>, queue: &QueueManager, player: &Player) {
+    let Some(handle) = mpris else {
+        return;
+    };
+    let player_state = player.get_state();
+    let snapshot = match queue.current_track() {
+        Some(track) => MprisState::from_now_playing(
+            player_state.is_playing,
+            track.video_id.clone(),
+            track.title.clone(),
+            track.artist.clone(),
+            track.album.clone(),
+            track.thumbnail_url.clone(),
+            track.duration_seconds,
+            player_state.volume,
+            queue.repeat_mode(),
+            queue.shuffle(),
+            player_state.position,
+        ),
+        None => MprisState::from_now_playing(
+            false,
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            0.0,
+            player_state.volume,
+            queue.repeat_mode(),
+            queue.shuffle(),
+            0.0,
+        ),
+    };
+    handle.send(snapshot);
 }
 
 // ---------------------------------------------------------------------------
@@ -1427,6 +1509,45 @@ mod tests {
             }
         }
         assert!(saw_snapshot && saw_toast);
+    }
+
+    #[test]
+    fn remove_from_queue_with_duplicate_id_removes_the_first_instance() {
+        // M5d review leftover: when the same video_id appears twice in the
+        // queue, removal must drop the FIRST occurrence (Python's
+        // `_remove_from_queue` finds the index by id, then removes that index;
+        // `position` returns the first match). After removing, exactly one copy
+        // of "dup" remains and it is the one that was originally second — proven
+        // by the surrounding distinct tracks keeping their relative order.
+        let (tx, _rx) = std::sync::mpsc::channel::<AppEvent>();
+        let mut queue = QueueManager::new();
+        queue.set_playlist(
+            vec![
+                track("dup", "First Copy", "A", "", 10.0),
+                track("mid", "Middle", "B", "", 20.0),
+                track("dup", "Second Copy", "C", "", 30.0),
+            ],
+            0,
+        );
+        remove_from_queue(&mut queue, "dup", &tx);
+        let remaining = queue.tracks();
+        // One "dup" left, and the FIRST instance (title "First Copy") is gone.
+        assert_eq!(remaining.len(), 2);
+        let dup_titles: Vec<&str> = remaining
+            .iter()
+            .filter(|t| t.video_id == "dup")
+            .map(|t| t.title.as_str())
+            .collect();
+        assert_eq!(
+            dup_titles,
+            vec!["Second Copy"],
+            "the FIRST 'dup' instance must be the one removed"
+        );
+        // The middle distinct track is untouched and still ordered before the
+        // surviving duplicate.
+        assert_eq!(remaining[0].video_id, "mid");
+        assert_eq!(remaining[1].video_id, "dup");
+        assert_eq!(remaining[1].title, "Second Copy");
     }
 
     #[test]
