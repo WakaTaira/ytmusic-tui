@@ -752,6 +752,7 @@ impl AppModel {
             AppEvent::PlayerDuration(secs) => self.player.on_duration(secs),
             AppEvent::PlayerVolume(vol) => self.player.on_volume(vol),
             AppEvent::PlayerMute(muted) => self.player.on_mute(muted),
+            AppEvent::PlayerPaused(paused) => self.player.on_pause(paused),
             AppEvent::AudioQualityChanged(quality) => {
                 // Toast the new level; it applies from the next track. This is
                 // the `b` message that previously stuck forever on the status
@@ -2156,6 +2157,36 @@ mod tests {
         assert!(model.player.is_muted);
         fold(&mut model, AppEvent::PlayerMute(false));
         assert!(!model.player.is_muted);
+    }
+
+    #[test]
+    fn player_paused_event_folds_into_bar_is_playing() {
+        // PlayerPaused(true) with a track active → is_playing = false (▶ icon).
+        // PlayerPaused(false) with a track active → is_playing = true (⏸ icon).
+        let mut model = AppModel::new(Theme::default());
+        // Activate a track first so has_track is set.
+        fold(&mut model, AppEvent::PlayerStarted);
+        assert!(model.player.has_track);
+        assert!(model.player.is_playing);
+        // Space was pressed → mpv reports pause=true.
+        fold(&mut model, AppEvent::PlayerPaused(true));
+        assert!(!model.player.is_playing, "bar must show ▶ while paused");
+        // Space again → mpv reports pause=false.
+        fold(&mut model, AppEvent::PlayerPaused(false));
+        assert!(model.player.is_playing, "bar must show ⏸ while playing");
+    }
+
+    #[test]
+    fn player_paused_event_idle_does_not_set_is_playing() {
+        // mpv fires pause=false at observer registration even when nothing is
+        // loaded. Without a track, is_playing must stay false.
+        let mut model = AppModel::new(Theme::default());
+        assert!(!model.player.has_track);
+        fold(&mut model, AppEvent::PlayerPaused(false));
+        assert!(
+            !model.player.is_playing,
+            "idle pause=false must not flip the bar to playing"
+        );
     }
 
     // -- keymap warnings as a startup toast (Stage 4) ----------------------
