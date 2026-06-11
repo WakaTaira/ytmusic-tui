@@ -224,6 +224,20 @@ impl PlayerBarState {
         self.is_muted = muted;
     }
 
+    /// Fold a pause observation in (`AppEvent::PlayerPaused`).
+    ///
+    /// Drives the ▶ / ⏸ icon. The `pause` property is observed so every path
+    /// that toggles it — the space key, MPRIS PlayPause, and auto-advance —
+    /// produces this event without any explicit reply. Mirrors Python's icon
+    /// decision: `is_playing = not idle and not paused` (views/player.py
+    /// `update_state`: `"⏸" if state.is_playing else "▶"`). Only meaningful
+    /// while a track is active (`has_track`); a paused idle mpv must not show ⏸.
+    pub fn on_pause(&mut self, paused: bool) {
+        // `is_playing = track is active AND not paused` — exactly Python's
+        // `not idle and not paused` (here `has_track` plays the role of `not idle`).
+        self.is_playing = self.has_track && !paused;
+    }
+
     /// Clear the now-playing state when the track ends (`AppEvent::TrackEnded`).
     ///
     /// Returns the bar to idle. The runtime's auto-advance (M5b) may then send a
@@ -396,8 +410,13 @@ impl PlayerBar {
         // cluster stays flush-right like the Textual fixed-width columns.
         let cols = Layout::horizontal([Constraint::Min(10), Constraint::Length(24)]).split(area);
 
+        // Two-space gap between the icon and the title mirrors Python's
+        // `#player-play-icon { width: 4; padding-right: 1; content-align: center middle; }`:
+        // the icon glyph is centred in 3 columns (width 4 minus padding-right 1) giving
+        // ` ▶ ` plus the 1-column right-padding → effectively `▶` followed by ~2 spaces
+        // before the track-info widget begins. The bar docstring also shows `▶  Track`.
         let left = Line::from(vec![
-            Span::styled(format!("{icon} "), Style::default().fg(theme.primary)),
+            Span::styled(format!("{icon}  "), Style::default().fg(theme.primary)),
             Span::styled(track_info_text(state), Style::default().fg(theme.text)),
         ]);
         frame.render_widget(Paragraph::new(left), cols[0]);
@@ -703,6 +722,64 @@ mod tests {
         assert!(!state.is_muted);
     }
 
+    // -- on_pause fold (Fix 1) ------------------------------------------------
+
+    #[test]
+    fn on_pause_true_clears_is_playing_while_track_active() {
+        // Pausing while a track is loaded: is_playing must become false.
+        let mut state = PlayerBarState {
+            has_track: true,
+            is_playing: true,
+            ..Default::default()
+        };
+        state.on_pause(true);
+        assert!(!state.is_playing);
+    }
+
+    #[test]
+    fn on_pause_false_sets_is_playing_while_track_active() {
+        // Unpausing while a track is loaded: is_playing must become true.
+        let mut state = PlayerBarState {
+            has_track: true,
+            is_playing: false,
+            ..Default::default()
+        };
+        state.on_pause(false);
+        assert!(state.is_playing);
+    }
+
+    #[test]
+    fn on_pause_false_while_no_track_does_not_set_is_playing() {
+        // mpv fires `pause=false` at observer registration even when idle.
+        // Without a loaded track, is_playing must stay false regardless.
+        let mut state = PlayerBarState::default();
+        assert!(!state.has_track);
+        state.on_pause(false);
+        assert!(!state.is_playing, "idle mpv must not show as playing");
+    }
+
+    #[test]
+    fn icon_flips_after_pause_fold() {
+        // After on_pause(true) the bar must show the play (▶) icon, not the
+        // pause (⏸) icon (Python: `"⏸" if is_playing else "▶"`).
+        let mut state = PlayerBarState {
+            has_track: true,
+            is_playing: true,
+            ..Default::default()
+        };
+        state.on_pause(true);
+        assert!(!state.is_playing);
+        // is_playing false → ▶ icon
+        assert_eq!(
+            if state.is_playing {
+                ICON_PLAYING
+            } else {
+                ICON_PAUSED
+            },
+            ICON_PAUSED
+        );
+    }
+
     #[test]
     fn effective_duration_prefers_mpv_then_api_fallback() {
         let mut state = PlayerBarState {
@@ -767,6 +844,68 @@ mod tests {
             }
         }
         out
+    }
+
+    // -- render: icon gap (Fix 2) and icon switching (Fix 1) -----------------
+
+    #[test]
+    fn render_playing_shows_pause_icon_with_two_space_gap() {
+        // While playing the bar shows ⏸ followed by two spaces before the title.
+        // Python's icon widget is 4 cols wide (width:4; padding-right:1; centered),
+        // which produces ~2 spaces between the glyph and the track info.
+        let state = PlayerBarState {
+            is_playing: true,
+            has_track: true,
+            title: "Song".to_owned(),
+            artist: "Band".to_owned(),
+            ..Default::default()
+        };
+        let text = render_bar(&state, 60);
+        // The rendered line must contain the pause glyph followed by two spaces.
+        assert!(
+            text.contains("⏸  Song"),
+            "expected '⏸  Song' (two spaces) in:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_paused_shows_play_icon_with_two_space_gap() {
+        // Paused (is_playing=false, has_track=true) shows ▶ with two spaces.
+        let state = PlayerBarState {
+            is_playing: false,
+            has_track: true,
+            title: "Song".to_owned(),
+            artist: "Band".to_owned(),
+            ..Default::default()
+        };
+        let text = render_bar(&state, 60);
+        assert!(
+            text.contains("▶  Song"),
+            "expected '▶  Song' (two spaces) in:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_icon_flips_after_pause_event_fold() {
+        // Simulate receiving PlayerPaused(true): on_pause(true) must flip the icon.
+        let mut state = PlayerBarState {
+            is_playing: true,
+            has_track: true,
+            title: "Song".to_owned(),
+            ..Default::default()
+        };
+        // Before pause: ⏸
+        let before = render_bar(&state, 60);
+        assert!(before.contains('⏸'), "expected ⏸ before pause:\n{before}");
+        // Fold the pause observation.
+        state.on_pause(true);
+        // After pause: ▶
+        let after = render_bar(&state, 60);
+        assert!(after.contains('▶'), "expected ▶ after pause:\n{after}");
+        assert!(
+            !after.contains('⏸'),
+            "must not show ⏸ after pause:\n{after}"
+        );
     }
 
     #[test]

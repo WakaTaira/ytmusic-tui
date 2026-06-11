@@ -75,12 +75,18 @@ const PROP_ID_TIME_POS: u64 = 1;
 const PROP_ID_DURATION: u64 = 2;
 const PROP_ID_VOLUME: u64 = 3;
 const PROP_ID_MUTE: u64 = 4;
+/// Observed id for the `pause` flag. Drives the ▶ / ⏸ icon in the player
+/// bar via [`PlayerEvent::Pause`]. Covers every path that changes the pause
+/// state: the space key, MPRIS PlayPause, and auto-advance — they all go
+/// through mpv, so the single property observation is sufficient.
+const PROP_ID_PAUSE: u64 = 5;
 
 /// Property names observed for the player bar feed.
 const PROP_TIME_POS: &str = "time-pos";
 const PROP_DURATION: &str = "duration";
 const PROP_VOLUME: &str = "volume";
 const PROP_MUTE: &str = "mute";
+const PROP_PAUSE: &str = "pause";
 
 /// Default audio-quality level (mirrors `player.py`'s `audio_quality="high"`).
 pub const DEFAULT_AUDIO_QUALITY: &str = "high";
@@ -233,6 +239,12 @@ pub enum PlayerEvent {
     /// registration (the current state) and on every subsequent toggle, so the
     /// bar's mute indicator stays correct without a poll.
     Mute(bool),
+    /// A `pause` observation (`true` = paused, `false` = playing). mpv reports
+    /// `pause` as a flag; the player bar shows ▶ when paused and ⏸ when
+    /// playing. Fires once at registration and on every toggle — covering the
+    /// space key, MPRIS PlayPause, and any other path that touches the mpv
+    /// `pause` property — so the bar icon is always correct without polling.
+    Pause(bool),
     /// Playback of a new file started (mpv start-file). Optional now-playing
     /// transition for the UI.
     Started,
@@ -280,6 +292,14 @@ fn translate_event(raw: Option<Result<Event<'_>, libmpv2::Error>>) -> Option<Pla
             change: PropertyData::Flag(muted),
             ..
         })) => Some(PlayerEvent::Mute(muted)),
+        // mpv reports `pause` as a flag. Surface it so the bar's ▶ / ⏸ icon
+        // updates on every toggle — space key, MPRIS PlayPause, or any other
+        // path. Same shape as the mute observation above.
+        Some(Ok(Event::PropertyChange {
+            name: PROP_PAUSE,
+            change: PropertyData::Flag(paused),
+            ..
+        })) => Some(PlayerEvent::Pause(paused)),
         // Other events (Seek, AudioReconfig, other PropertyChange formats,
         // replies, ...) are not surfaced.
         Some(Ok(_)) => None,
@@ -437,6 +457,12 @@ impl Player {
         // (and any external change) without polling. Fires once at registration
         // (the current state) and on every toggle.
         mpv.observe_property(PROP_MUTE, Format::Flag, PROP_ID_MUTE)?;
+        // Observe pause so the bar's ▶ / ⏸ icon tracks every toggle: the space
+        // key, MPRIS PlayPause, and auto-advance all go through mpv, so this
+        // single observer covers all paths without any explicit reply event.
+        // Fires once at registration (current state = false while idle) and on
+        // every subsequent change.
+        mpv.observe_property(PROP_PAUSE, Format::Flag, PROP_ID_PAUSE)?;
 
         // Unbounded by design: ~8 events/sec at steady state (two 4 Hz-ish
         // property feeds); a stalled consumer drains quickly on resume, so a
@@ -979,11 +1005,29 @@ mod tests {
         }
 
         #[test]
-        fn test_other_property_is_ignored() {
+        fn test_pause_translates_to_pause_event() {
+            // mpv reports `pause` as a flag; surface it for the bar's ▶ / ⏸ icon.
             let raw = Some(Ok(Event::PropertyChange {
-                name: "pause",
+                name: PROP_PAUSE,
                 change: PropertyData::Flag(true),
-                reply_userdata: 7,
+                reply_userdata: PROP_ID_PAUSE,
+            }));
+            assert_eq!(translate_event(raw), Some(PlayerEvent::Pause(true)));
+            let raw = Some(Ok(Event::PropertyChange {
+                name: PROP_PAUSE,
+                change: PropertyData::Flag(false),
+                reply_userdata: PROP_ID_PAUSE,
+            }));
+            assert_eq!(translate_event(raw), Some(PlayerEvent::Pause(false)));
+        }
+
+        #[test]
+        fn test_other_property_is_ignored() {
+            // An unobserved flag property must yield no event.
+            let raw = Some(Ok(Event::PropertyChange {
+                name: "loop-playlist",
+                change: PropertyData::Flag(true),
+                reply_userdata: 99,
             }));
             assert_eq!(translate_event(raw), None);
         }
@@ -1046,6 +1090,8 @@ mod tests {
                 .expect("observe volume");
             mpv.observe_property(PROP_MUTE, Format::Flag, PROP_ID_MUTE)
                 .expect("observe mute");
+            mpv.observe_property(PROP_PAUSE, Format::Flag, PROP_ID_PAUSE)
+                .expect("observe pause");
 
             let (tx, rx) = mpsc::channel();
             let stop = Arc::new(AtomicBool::new(false));
@@ -1360,6 +1406,22 @@ mod tests {
             let mut player = headless_player();
             player.shutdown();
             player.shutdown(); // second call must not panic or hang.
+        }
+
+        #[test]
+        fn test_pause_observation_feeds_pause_event() {
+            // Toggling pause must produce a Pause observation so the bar's
+            // ▶ / ⏸ icon tracks the space key (and any other toggle path)
+            // without polling. mpv fires the observer once at registration
+            // (false, since idle starts unpaused) and again on each toggle.
+            let player = headless_player();
+            load(&player, SINE_LONG);
+            // Wait for playback to actually start before pausing, so the toggle
+            // is meaningful (mpv reports the initial `pause=false` at registration).
+            wait_for(&player, |e| matches!(e, PlayerEvent::Progress(_)));
+            player.toggle_pause().expect("toggle pause");
+            let ev = wait_for(&player, |e| matches!(e, PlayerEvent::Pause(true)));
+            assert_eq!(ev, Some(PlayerEvent::Pause(true)));
         }
     }
 }

@@ -313,6 +313,11 @@ pub enum AppEvent {
     /// A `mute` observation from the player. Folds into the bar so it shows
     /// `Vol: MUTE` while muted (the `_` key).
     PlayerMute(bool),
+    /// A `pause` observation from the player (`true` = paused, `false` =
+    /// playing). Folds into the bar so the ▶ / ⏸ icon tracks every pause
+    /// toggle: the space key, MPRIS PlayPause, and auto-advance all go through
+    /// mpv, so this single event covers all paths.
+    PlayerPaused(bool),
     /// The audio quality was cycled; the string is the new level (`"low"` /
     /// `"normal"` / `"high"`). The UI toasts it on the status line. Applies from
     /// the next track.
@@ -496,6 +501,7 @@ fn translate_player_event(event: PlayerEvent) -> AppEvent {
         PlayerEvent::Duration(secs) => AppEvent::PlayerDuration(secs),
         PlayerEvent::Volume(vol) => AppEvent::PlayerVolume(vol),
         PlayerEvent::Mute(muted) => AppEvent::PlayerMute(muted),
+        PlayerEvent::Pause(paused) => AppEvent::PlayerPaused(paused),
         PlayerEvent::TrackEnded => AppEvent::TrackEnded,
         PlayerEvent::TrackError(detail) => AppEvent::TrackError(detail),
         PlayerEvent::Started => AppEvent::PlayerStarted,
@@ -1672,6 +1678,18 @@ mod tests {
         assert_eq!(
             translate_player_event(PlayerEvent::Loaded),
             AppEvent::PlayerStarted
+        );
+    }
+
+    #[test]
+    fn pause_maps_to_player_paused() {
+        assert_eq!(
+            translate_player_event(PlayerEvent::Pause(true)),
+            AppEvent::PlayerPaused(true)
+        );
+        assert_eq!(
+            translate_player_event(PlayerEvent::Pause(false)),
+            AppEvent::PlayerPaused(false)
         );
     }
 
