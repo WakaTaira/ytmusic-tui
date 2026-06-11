@@ -682,12 +682,7 @@ fn render_list_popup(
     let list = List::new(rows)
         .block(block)
         .style(Style::default().fg(theme.text).bg(theme.surface))
-        .highlight_style(
-            Style::default()
-                .fg(theme.background)
-                .bg(theme.primary)
-                .add_modifier(Modifier::BOLD),
-        )
+        .highlight_style(super::selected_row_style(theme))
         .highlight_symbol("▶ ");
 
     let mut list_state = ListState::default();

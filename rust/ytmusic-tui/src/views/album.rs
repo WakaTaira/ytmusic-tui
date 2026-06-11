@@ -16,7 +16,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 use ytmusic_api::{AlbumInfo, Track};
 
 use super::{PageState, Theme};
@@ -144,13 +144,19 @@ impl AlbumView {
 
     /// Render the album view into `area`.
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+        // Wrap in a bordered, surface-filled "Album" panel. The album-name
+        // header, status, and track list draw inside the border.
+        let block = super::panel_block(theme, "Album");
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
         // Header (2 rows: title + meta) + status (1 row) + track list.
         let chunks = Layout::vertical([
             Constraint::Length(2), // title + meta
             Constraint::Length(1), // status / track count
             Constraint::Min(1),    // track list
         ])
-        .split(area);
+        .split(inner);
 
         self.render_header(frame, chunks[0], theme);
         self.render_status(frame, chunks[1], theme);
@@ -247,14 +253,8 @@ impl AlbumView {
             .collect();
 
         let list = List::new(items)
-            .block(Block::default().borders(Borders::NONE))
-            .style(Style::default().fg(theme.text))
-            .highlight_style(
-                Style::default()
-                    .fg(theme.background)
-                    .bg(theme.primary)
-                    .add_modifier(Modifier::BOLD),
-            )
+            .style(Style::default().fg(theme.text).bg(theme.surface))
+            .highlight_style(super::selected_row_style(theme))
             .highlight_symbol("▶ ");
 
         let mut list_state = ListState::default();

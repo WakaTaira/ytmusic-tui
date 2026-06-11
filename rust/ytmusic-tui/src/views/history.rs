@@ -17,7 +17,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 use ytmusic_api::Track;
 
 use super::filter_bar::matches_filter;
@@ -196,27 +196,20 @@ impl HistoryView {
 
     /// Render the history view into `area`.
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        // Title (1 row) + status (1 row) + track list.
+        // Wrap in a bordered, surface-filled panel titled "Recently played"
+        // (Python's Label moved into the panel title). Status + list inside.
+        let block = super::panel_block(theme, "Recently played");
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
         let chunks = Layout::vertical([
-            Constraint::Length(1), // "Recently played" title
             Constraint::Length(1), // status
             Constraint::Min(1),    // list
         ])
-        .split(area);
+        .split(inner);
 
-        // Static title label (mirrors Python's Label("Recently played")).
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                "Recently played",
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            ))),
-            chunks[0],
-        );
-
-        self.render_status(frame, chunks[1], theme);
-        self.render_tracks(frame, chunks[2], theme);
+        self.render_status(frame, chunks[0], theme);
+        self.render_tracks(frame, chunks[1], theme);
     }
 
     fn render_status(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
@@ -268,14 +261,8 @@ impl HistoryView {
             .collect();
 
         let list = List::new(items)
-            .block(Block::default().borders(Borders::NONE))
-            .style(Style::default().fg(theme.text))
-            .highlight_style(
-                Style::default()
-                    .fg(theme.background)
-                    .bg(theme.primary)
-                    .add_modifier(Modifier::BOLD),
-            )
+            .style(Style::default().fg(theme.text).bg(theme.surface))
+            .highlight_style(super::selected_row_style(theme))
             .highlight_symbol("▶ ");
 
         let mut list_state = ListState::default();

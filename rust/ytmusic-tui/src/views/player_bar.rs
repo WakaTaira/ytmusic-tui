@@ -21,7 +21,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::Theme;
 use crate::formatting::format_duration;
@@ -343,9 +343,9 @@ fn progress_bar_text(progress: f64, available_width: u16) -> String {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PlayerBar;
 
-/// Fixed bar height in terminal rows (three content rows; Python used
-/// `height: 4` to include its border, the content is three lines).
-pub const PLAYER_BAR_HEIGHT: u16 = 3;
+/// Fixed bar height in terminal rows: a top-border divider plus the three
+/// content rows (Python's `PlayerBar { height: 4; border-top: solid }`).
+pub const PLAYER_BAR_HEIGHT: u16 = 4;
 
 /// Width reserved on row 3 for the ` pos / dur ` time display, subtracted from
 /// the bar area to size the progress glyphs (Python subtracted 18 from the
@@ -353,14 +353,25 @@ pub const PLAYER_BAR_HEIGHT: u16 = 3;
 const TIME_COLUMN_WIDTH: u16 = 18;
 
 impl PlayerBar {
-    /// Render the three-row bar into `area` using `state` and `theme`.
+    /// Render the bar into `area`: a top-border divider (Python's
+    /// `border-top: solid $primary-background`) over a surface-filled
+    /// three-row body (track info, album, progress).
     pub fn render(self, frame: &mut Frame<'_>, area: Rect, state: &PlayerBarState, theme: &Theme) {
+        // The bordered, surface-filled container. Only a top border so the bar
+        // reads as a divider above the content (matching the Textual CSS).
+        let block = Block::default()
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(theme.primary_background))
+            .style(Style::default().bg(theme.surface));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
         let rows = Layout::vertical([
             Constraint::Length(1), // track info + modes + volume
             Constraint::Length(1), // album
             Constraint::Length(1), // progress + time
         ])
-        .split(area);
+        .split(inner);
 
         self.render_top_row(frame, rows[0], state, theme);
         self.render_album_row(frame, rows[1], state, theme);

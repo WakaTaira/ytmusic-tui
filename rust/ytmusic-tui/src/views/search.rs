@@ -414,6 +414,7 @@ impl SearchView {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(border)
+            .style(Style::default().bg(theme.surface))
             .title(Span::styled("Search", Style::default().fg(theme.accent)));
         frame.render_widget(Paragraph::new(Line::from(text)).block(block), area);
     }
@@ -518,17 +519,13 @@ impl SearchView {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(border_style)
+            .style(Style::default().bg(theme.surface))
             .title(Span::styled(pane.title(), title_style));
 
         let list = List::new(items)
             .block(block)
-            .style(Style::default().fg(theme.text))
-            .highlight_style(
-                Style::default()
-                    .fg(theme.background)
-                    .bg(theme.primary)
-                    .add_modifier(Modifier::BOLD),
-            )
+            .style(Style::default().fg(theme.text).bg(theme.surface))
+            .highlight_style(super::selected_row_style(theme))
             .highlight_symbol("▶ ");
 
         let mut list_state = ListState::default();

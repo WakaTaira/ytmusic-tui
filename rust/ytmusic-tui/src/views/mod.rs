@@ -22,6 +22,7 @@
 //! * [`history`] — recently-played track list.
 //! * [`queue_view`] — the current playback queue with position highlight.
 //! * [`player_bar`] — the bottom now-playing bar.
+//! * [`toast`] — floating bottom-right notifications (the `notify()` port).
 
 pub mod album;
 pub mod artist;
@@ -35,10 +36,58 @@ pub mod playlist;
 pub mod popup;
 pub mod queue_view;
 pub mod search;
+pub mod toast;
 
-use ratatui::style::Color;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::Span;
+use ratatui::widgets::{Block, Borders};
 
 use crate::config::{ThemePalette, get_theme_palette};
+
+// ---------------------------------------------------------------------------
+// Shared panel styling — the Python CSS → palette mapping, in one place
+// ---------------------------------------------------------------------------
+//
+// The Textual stylesheet (`app.tcss` + each view's `DEFAULT_CSS`) painted every
+// view on the `$surface` screen background, with bordered panes in
+// `$primary-background` (focused: `$accent`) and panel titles in `$accent`. The
+// ratatui views reproduce that here: each top-level view wraps its content in a
+// [`panel_block`] (bordered, surface-filled, accent title), and lists highlight
+// the selected row with the cursor colors via [`selected_row_style`].
+
+/// A bordered, surface-filled panel block titled with `title`.
+///
+/// This is the ratatui equivalent of a Textual view container: an all-sides
+/// border in `primary-background` (the un-focused pane border color from the
+/// search/library CSS), a `surface` background fill, and an accent-colored bold
+/// title (Python's `.pane-title` / `.section-title { color: $accent }`).
+#[must_use]
+pub fn panel_block(theme: &Theme, title: &str) -> Block<'static> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.primary_background))
+        .style(Style::default().bg(theme.surface))
+        .title(Span::styled(
+            title.to_owned(),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ))
+}
+
+/// The highlight style for a selected list/table row.
+///
+/// Mirrors Textual's `DataTable` cursor (a `$primary-background`/`$text` block);
+/// here the brighter `primary` background with the dark `background` foreground
+/// reads as the active cursor, matching the popup and search/library cursors
+/// already in use across the views.
+#[must_use]
+pub fn selected_row_style(theme: &Theme) -> Style {
+    Style::default()
+        .fg(theme.background)
+        .bg(theme.primary)
+        .add_modifier(Modifier::BOLD)
+}
 
 // ---------------------------------------------------------------------------
 // PageState — the FetchView equivalent
