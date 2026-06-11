@@ -38,7 +38,7 @@
 | Session canary (logged-out HTTP 200) | works | `CheckSession` → `is_session_valid` → `SessionInvalid` warning line |
 | Audio quality cycle (`b`) | works | `CycleAudioQuality`; applies from next track |
 | MPRIS2 | works | M6: mpris-server 0.10 on the runtime tokio; only-changed emit, Position structurally un-emittable, live playerctl/busctl verified |
-| CI | partial | Rust `cargo fmt/clippy/test/build` gate runs locally; no dedicated GH Actions Rust job confirmed in-tree yet |
+| CI | works | `.github/workflows/ci.yml`: fmt + clippy (`-D warnings`) + test on every push/PR, with libmpv-dev installed |
 
 ## HANDOFF §5.5 spotify_player comparison (remaining gaps)
 
@@ -97,13 +97,17 @@ resolves its album by name (an album row still uses its `browse_id` directly).
   "first hit with an id" behavior, not a regression. A disambiguating picker is
   a post-parity refinement.
 
-## Summary counts (as of M5d)
+## Summary counts (as of M7 — Python removed, `rust/` promoted to repo root)
 
-- **§2 Feature Inventory (24 rows):** works 22 · partial 1 (CI) · missing 1 (MPRIS2 → M6).
+- **§2 Feature Inventory (24 rows):** works 24 · partial 0 · missing 0. MPRIS2
+  (M6) and CI both landed; every row in the original Python feature set is now
+  fully ported.
 - **§5.5 remaining gaps (11 rows):** missing 9 (all pre-existing Backlog/Skip;
   several blocked on absent ytmusic-api helpers) · n/a 2.
-- **Net for M7:** the only parity gap inside the original Python feature set is
-  **MPRIS2** (M6). Everything else missing was already Backlog/Skip in Python,
-  not a regression. Several Backlog items are **API-blocked**: `get_mood_categories`,
-  `get_charts`, `subscribe_artists`, `rate_playlist`, `edit_playlist` are not yet
-  in `ytmusic-api`.
+- **Net for M7:** there is **no remaining parity gap** inside the original Python
+  feature set. Everything still listed as missing was already Backlog/Skip in
+  Python, not a regression. Several Backlog items are **API-blocked**:
+  `get_mood_categories`, `get_charts`, `subscribe_artists`, `rate_playlist`,
+  `edit_playlist` are not yet in `ytmusic-api`.
+- **Test suite:** 785 passing + 18 ignored (live, network-gated) across the
+  `ytmusic-api` and `ytmusic-tui` crates.

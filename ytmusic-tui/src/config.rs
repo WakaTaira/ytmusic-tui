@@ -29,10 +29,10 @@ use serde::Deserialize;
 
 /// Bundled `config/default.toml` content — embedded at compile time so the
 /// binary works without locating the source tree at runtime.
-const BUNDLED_DEFAULT_TOML: &str = include_str!("../../../config/default.toml");
+const BUNDLED_DEFAULT_TOML: &str = include_str!("../../config/default.toml");
 
 /// Bundled `config/default_keymap.toml` content — same rationale.
-const BUNDLED_DEFAULT_KEYMAP_TOML: &str = include_str!("../../../config/default_keymap.toml");
+const BUNDLED_DEFAULT_KEYMAP_TOML: &str = include_str!("../../config/default_keymap.toml");
 
 // ---------------------------------------------------------------------------
 // Errors

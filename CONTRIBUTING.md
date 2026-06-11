@@ -7,51 +7,61 @@ Thanks for your interest in contributing! Here's how to get started.
 ```bash
 git clone https://github.com/WakaTaira/ytmusic-tui.git
 cd ytmusic-tui
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+cargo build
 ```
+
+A stable Rust toolchain is pinned via `rust-toolchain.toml`; `rustup` will pick
+it up automatically.
 
 ### System Dependencies
 
-- **mpv** — audio playback backend
-- **yt-dlp** — YouTube stream resolution
+- **libmpv** — audio playback backend (the linker needs the dev package's
+  unversioned `libmpv.so`)
+- **mpv** / **yt-dlp** — runtime: mpv's ytdl-hook uses yt-dlp to resolve
+  YouTube stream URLs
 
 On Arch Linux:
 
 ```bash
-sudo pacman -S mpv yt-dlp python
+sudo pacman -S mpv yt-dlp
+```
+
+On Debian/Ubuntu:
+
+```bash
+sudo apt install libmpv-dev mpv yt-dlp
 ```
 
 ## Code Style
 
-- Format with **ruff format**, lint with **ruff check**
-- Type hints are required on all public functions
-- Comments and docstrings in English
+- Format with **rustfmt** (`cargo fmt`)
+- Lint with **clippy**, warnings treated as errors (`cargo clippy --all-targets -- -D warnings`)
+- Comments and doc comments in English
 
 ```bash
-ruff format src/ tests/
-ruff check src/ tests/
-mypy src/ytmusic_tui/
+cargo fmt --all
+cargo clippy --all-targets -- -D warnings
 ```
 
 ## Testing
 
 ```bash
-# Unit tests only
-pytest tests/ -m "not integration"
+# Unit + integration tests (no network required)
+cargo test
 
-# All tests (requires browser credentials + network)
-pytest tests/
+# Live tests that hit the real YouTube Music API
+cargo test -p ytmusic-api -- --ignored
 ```
 
-Integration tests that hit the YouTube Music API are marked with `@pytest.mark.integration`. These require valid browser credentials at `~/.config/ytmusic-tui/browser.json` (set up via `ytmusic-tui auth`) and network access.
+The `--ignored` tests hit the YouTube Music API. These require valid browser
+credentials at `~/.config/ytmusic-tui/browser.json` (see the README for setup)
+and network access.
 
 ## Pull Request Process
 
 1. Fork the repo and create a feature branch
 2. Write tests for new functionality
-3. Ensure all checks pass (`ruff`, `mypy`, `pytest`)
+3. Ensure all checks pass (`cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`)
 4. Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages
 5. Open a PR with a clear description of the change
 
@@ -66,7 +76,7 @@ refactor: extract mpv IPC into separate module
 ## Reporting Issues
 
 Please include:
-- Your Python version (`python --version`)
+- Your `cargo --version` / `rustc --version`
 - Your OS and terminal emulator
 - Steps to reproduce
 - Expected vs actual behavior
