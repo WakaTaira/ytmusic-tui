@@ -728,9 +728,6 @@ impl AppModel {
             AppEvent::LibraryArtistsLoaded(artists) => {
                 self.library.set_artists(artists);
             }
-            AppEvent::LikedSongsLoaded(tracks) => {
-                self.library.set_liked_songs(tracks);
-            }
             AppEvent::ApiError(msg) => self.on_api_error(msg),
             AppEvent::NowPlaying(now) => {
                 // Keep the video_id available for the lyrics fetch trigger.
@@ -1495,16 +1492,13 @@ impl AppModel {
         }
     }
 
-    /// Kick off the three library fetches (playlists / albums / artists) plus
-    /// liked songs. Mirrors Python's `LibraryView.refresh_library` →
-    /// `_fetch_all_data`, which fires the three workers; liked songs is the
-    /// extra pseudo-playlist row this port adds to the playlists pane.
+    /// Kick off the three library fetches (playlists / albums / artists).
+    /// Mirrors Python's `LibraryView.refresh_library` → `_fetch_all_data`.
     fn refresh_library(&mut self, runtime: &RuntimeHandle) {
         self.library.set_loading();
         runtime.send(AppCommand::FetchLibraryPlaylists);
         runtime.send(AppCommand::FetchLibraryAlbums);
         runtime.send(AppCommand::FetchLibraryArtists);
-        runtime.send(AppCommand::FetchLikedSongs);
     }
 
     /// Re-fetch history and reset its view to loading. Called on every
@@ -1622,9 +1616,9 @@ impl AppModel {
     /// Enter on the library view: route by the focused pane. A playlist drills
     /// into its tracks *within* the library's Playlists pane (Python
     /// `_show_track_list`, which stays in `LibraryView` rather than switching to
-    /// the standalone playlist view); a track row (drill-down or liked songs)
-    /// plays from the cursor, queueing the rest; albums and artists navigate to
-    /// their detail views.
+    /// the standalone playlist view); a track row in the drill-down plays from
+    /// the cursor, queueing the rest; albums and artists navigate to their
+    /// detail views.
     fn activate_library(&mut self, runtime: &RuntimeHandle) {
         match self.library.activate_selected() {
             Some(LibraryAction::OpenPlaylist(info)) => {

@@ -11,21 +11,11 @@
 //! rows into three `DataTable`s; here the view is a pure value and the *runtime*
 //! owns the API client (see [`crate::app`]). The main loop fires
 //! [`crate::app::AppCommand::FetchLibraryPlaylists`] /
-//! `FetchLibraryAlbums` / `FetchLibraryArtists` / `FetchLikedSongs` and folds
-//! the replies into this view via [`LibraryView::set_playlists`] etc.; Enter
-//! resolves to a [`LibraryAction`] the main loop turns into a command. The
-//! three [`PageState`]-backed panes, the focused-pane state machine, and the
+//! `FetchLibraryAlbums` / `FetchLibraryArtists` and folds the replies into this
+//! view via [`LibraryView::set_playlists`] etc.; Enter resolves to a
+//! [`LibraryAction`] the main loop turns into a command. The three
+//! [`PageState`]-backed panes, the focused-pane state machine, and the
 //! playlists-pane two-level drill-down live here.
-//!
-//! # Liked songs (a documented enhancement over Python)
-//!
-//! The Python `LibraryView` showed only Playlists / Albums / Artists — its
-//! `get_liked_songs` API method was never wired into a view. This port surfaces
-//! liked songs as a synthetic **"★ Liked Songs"** pseudo-playlist row at the top
-//! of the Playlists pane (the spotify_player / YouTube Music convention).
-//! Selecting it drills into the liked-songs track list using the same track-list
-//! mode as a real playlist, reusing the tracks already in hand (no extra fetch).
-//! See [`LibraryView::set_liked_songs`].
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -108,8 +98,7 @@ pub enum LibraryAction {
     OpenPlaylist(PlaylistInfo),
     /// Play the playlists-pane track list from `start_index`, queueing the rest
     /// (spotify_player). Returned when Enter lands on a track row in the
-    /// drill-down or on the liked-songs list. Python `_handle_playlist_selection`
-    /// track branch.
+    /// drill-down. Python `_handle_playlist_selection` track branch.
     PlayTracks {
         tracks: Vec<Track>,
         start_index: usize,
@@ -127,16 +116,14 @@ pub enum LibraryAction {
 // ---------------------------------------------------------------------------
 
 /// The playlists pane is two-level, like the standalone playlist view: the
-/// playlist *list* (with the synthetic liked-songs row) or one playlist's
-/// *tracks* after a drill-in.
+/// playlist *list* or one playlist's *tracks* after a drill-in.
 #[derive(Debug, Clone)]
 enum PlaylistsLevel {
-    /// Level 1: the playlist list (loaded playlists, plus the liked-songs row).
+    /// Level 1: the playlist list (loaded playlists).
     List(PageState<Vec<PlaylistInfo>>),
-    /// Level 2: the tracks of one drilled-in playlist (or liked songs).
-    /// `title` labels the list; `state` is `Loading` while a real playlist's
-    /// tracks are being fetched, then `Loaded`. Liked songs (already in hand)
-    /// go straight to `Loaded`.
+    /// Level 2: the tracks of one drilled-in playlist.
+    /// `title` labels the list; `state` is `Loading` while the tracks are
+    /// being fetched, then `Loaded`.
     Tracks {
         title: String,
         state: PageState<Vec<Track>>,
@@ -157,17 +144,11 @@ pub struct LibraryView {
     albums: PageState<Vec<AlbumInfo>>,
     /// The Artists pane data.
     artists: PageState<Vec<ArtistInfo>>,
-    /// The user's liked songs, surfaced as the synthetic top row of the
-    /// Playlists pane (empty until [`set_liked_songs`](Self::set_liked_songs)).
-    liked_songs: Vec<Track>,
     /// The pane that currently has the cursor.
     active_pane: LibraryPane,
     /// Per-pane row cursors, indexed by [`LibraryPane::index`].
     cursors: [usize; 3],
 }
-
-/// The label of the synthetic liked-songs row at the top of the Playlists pane.
-const LIKED_SONGS_LABEL: &str = "★ Liked Songs";
 
 impl Default for LibraryView {
     fn default() -> Self {
@@ -183,20 +164,18 @@ impl LibraryView {
             playlists_level: PlaylistsLevel::List(PageState::Loading),
             albums: PageState::Loading,
             artists: PageState::Loading,
-            liked_songs: Vec::new(),
             active_pane: LibraryPane::Playlists,
             cursors: [0; 3],
         }
     }
 
     /// Reset all three panes to the loading state (the moment the user switches
-    /// to the library and the four fetches are fired). Mirrors Python's
+    /// to the library and the three fetches are fired). Mirrors Python's
     /// `_fetch_all_data` showing "Loading library...".
     pub fn set_loading(&mut self) {
         self.playlists_level = PlaylistsLevel::List(PageState::Loading);
         self.albums = PageState::Loading;
         self.artists = PageState::Loading;
-        self.liked_songs.clear();
         self.cursors = [0; 3];
     }
 
@@ -233,12 +212,6 @@ impl LibraryView {
         self.cursors[LibraryPane::Artists.index()] = 0;
     }
 
-    /// Store the liked songs (`LikedSongsLoaded`), surfaced as the synthetic
-    /// "★ Liked Songs" row at the top of the Playlists pane.
-    pub fn set_liked_songs(&mut self, tracks: Vec<Track>) {
-        self.liked_songs = tracks;
-    }
-
     /// Put every pane into the error state with a classified message.
     ///
     /// `AppEvent::ApiError` is flat (no source tag), so a library fetch failure
@@ -273,22 +246,12 @@ impl LibraryView {
         self.active_pane = self.active_pane.previous();
     }
 
-    /// The number of rows in the Playlists pane at its current level (including
-    /// the synthetic liked-songs row at the list level when present).
+    /// The number of rows in the Playlists pane at its current level.
     fn playlists_len(&self) -> usize {
         match &self.playlists_level {
-            PlaylistsLevel::List(state) => {
-                let real = state.loaded().map_or(0, Vec::len);
-                real + usize::from(self.has_liked_row())
-            }
+            PlaylistsLevel::List(state) => state.loaded().map_or(0, Vec::len),
             PlaylistsLevel::Tracks { state, .. } => state.loaded().map_or(0, Vec::len),
         }
-    }
-
-    /// Whether the synthetic liked-songs row is shown (only at the list level,
-    /// and only when there are liked songs to show).
-    fn has_liked_row(&self) -> bool {
-        matches!(self.playlists_level, PlaylistsLevel::List(_)) && !self.liked_songs.is_empty()
     }
 
     /// The number of selectable rows in a pane (0 when not loaded).
@@ -319,9 +282,8 @@ impl LibraryView {
     /// [`LibraryAction`], or `None` when nothing is selected.
     ///
     /// Mirrors Python's `on_data_table_row_selected` dispatch. In the Playlists
-    /// pane: at the list level a real playlist opens and the liked-songs row
-    /// drills into the liked tracks; at the track level Enter plays from the
-    /// cursor, queueing the rest.
+    /// pane: at the list level a real playlist opens; at the track level Enter
+    /// plays from the cursor, queueing the rest.
     #[must_use]
     pub fn activate_selected(&self) -> Option<LibraryAction> {
         match self.active_pane {
@@ -344,30 +306,17 @@ impl LibraryView {
     }
 
     /// The item under the cursor in the focused pane as a [`PopupItem`] for the
-    /// action popup. The Artists pane and the synthetic "Liked songs" row have
-    /// no [`PopupItem`] variant, so they yield `None`.
+    /// action popup. The Artists pane yields `None`.
     #[must_use]
     pub fn selected_popup_item(&self) -> Option<super::popup::PopupItem> {
         match self.active_pane {
             LibraryPane::Playlists => {
                 let cursor = self.cursors[LibraryPane::Playlists.index()];
                 match &self.playlists_level {
-                    PlaylistsLevel::List(state) => {
-                        if self.has_liked_row() {
-                            if cursor == 0 {
-                                return None; // the synthetic liked-songs row
-                            }
-                            state
-                                .loaded()?
-                                .get(cursor - 1)
-                                .map(|p| super::popup::PopupItem::Playlist(p.clone()))
-                        } else {
-                            state
-                                .loaded()?
-                                .get(cursor)
-                                .map(|p| super::popup::PopupItem::Playlist(p.clone()))
-                        }
-                    }
+                    PlaylistsLevel::List(state) => state
+                        .loaded()?
+                        .get(cursor)
+                        .map(|p| super::popup::PopupItem::Playlist(p.clone())),
                     PlaylistsLevel::Tracks { state, .. } => state
                         .loaded()?
                         .get(cursor)
@@ -385,28 +334,14 @@ impl LibraryView {
         }
     }
 
-    /// Resolve Enter on the Playlists pane, handling the liked-songs row, real
-    /// playlists, and the track drill-down.
+    /// Resolve Enter on the Playlists pane: at the list level a real playlist
+    /// opens; at the track level Enter plays from the cursor, queueing the rest.
     fn activate_playlists(&self) -> Option<LibraryAction> {
         let cursor = self.cursors[LibraryPane::Playlists.index()];
         match &self.playlists_level {
             PlaylistsLevel::List(state) => {
-                if self.has_liked_row() {
-                    if cursor == 0 {
-                        // The synthetic liked-songs row: play the whole liked
-                        // list from the top (the main loop opens the track list).
-                        return Some(LibraryAction::PlayTracks {
-                            tracks: self.liked_songs.clone(),
-                            start_index: 0,
-                        });
-                    }
-                    // Real playlists are offset by one for the liked row.
-                    let playlist = state.loaded()?.get(cursor - 1)?;
-                    Some(LibraryAction::OpenPlaylist(playlist.clone()))
-                } else {
-                    let playlist = state.loaded()?.get(cursor)?;
-                    Some(LibraryAction::OpenPlaylist(playlist.clone()))
-                }
+                let playlist = state.loaded()?.get(cursor)?;
+                Some(LibraryAction::OpenPlaylist(playlist.clone()))
             }
             PlaylistsLevel::Tracks { state, .. } => {
                 let tracks = state.loaded()?;
@@ -447,9 +382,11 @@ impl LibraryView {
         self.cursors[LibraryPane::Playlists.index()] = 0;
     }
 
-    /// Drill the Playlists pane directly into an already-loaded track list (the
-    /// liked-songs row, whose tracks are in hand — no fetch). Resets the cursor.
-    pub fn show_tracks(&mut self, title: impl Into<String>, tracks: Vec<Track>) {
+    /// Test helper that drills the Playlists pane directly into an already-loaded
+    /// track list (bypassing the fetch round-trip used in production: `show_track_list_loading` +
+    /// `set_tracks`). Resets the cursor.
+    #[cfg(test)]
+    pub(crate) fn show_tracks(&mut self, title: impl Into<String>, tracks: Vec<Track>) {
         self.playlists_level = PlaylistsLevel::Tracks {
             title: title.into(),
             state: PageState::Loaded(tracks),
@@ -543,8 +480,7 @@ impl LibraryView {
         let playlist_count = self
             .playlists_list_state()
             .and_then(PageState::loaded)
-            .map_or(0, Vec::len)
-            + usize::from(self.has_liked_row());
+            .map_or(0, Vec::len);
         if playlist_count > 0 {
             parts.push(format!("{playlist_count} playlist(s)"));
         }
@@ -698,20 +634,14 @@ impl LibraryView {
         }
     }
 
-    /// Build the Playlists pane column rows (the liked-songs row + playlists, or
-    /// the drilled-in track rows).
+    /// Build the Playlists pane column rows (playlists at list level, or the
+    /// drilled-in track rows at the track level).
     fn playlists_rows(&self) -> Vec<Vec<String>> {
         match &self.playlists_level {
-            PlaylistsLevel::List(state) => {
-                let mut rows: Vec<Vec<String>> = Vec::new();
-                if self.has_liked_row() {
-                    rows.push(liked_songs_columns(self.liked_songs.len()));
-                }
-                if let Some(playlists) = state.loaded() {
-                    rows.extend(playlists.iter().map(playlist_columns));
-                }
-                rows
-            }
+            PlaylistsLevel::List(state) => state
+                .loaded()
+                .map(|playlists| playlists.iter().map(playlist_columns).collect())
+                .unwrap_or_default(),
             PlaylistsLevel::Tracks { state, .. } => state
                 .loaded()
                 .map(|tracks| tracks.iter().map(track_columns).collect())
@@ -734,13 +664,6 @@ fn error_message<T>(state: &PageState<Vec<T>>) -> Option<&str> {
 // ---------------------------------------------------------------------------
 // Row formatters
 // ---------------------------------------------------------------------------
-
-/// The synthetic "★ Liked Songs (N)" pseudo-playlist row, as `Title`/`Tracks`
-/// columns. The label keeps its star so it reads as the special row even though
-/// the table styles every cell uniformly.
-fn liked_songs_columns(count: usize) -> Vec<String> {
-    vec![LIKED_SONGS_LABEL.to_owned(), format!("{count}")]
-}
 
 /// Format a playlist row into `Title`/`Tracks` columns.
 fn playlist_columns(playlist: &PlaylistInfo) -> Vec<String> {
@@ -807,7 +730,7 @@ mod tests {
         Track::new(id, title, artist, "Album", 100.0, "")
     }
 
-    /// A library with all three panes loaded (no liked songs).
+    /// A library with all three panes loaded.
     fn loaded_view() -> LibraryView {
         let mut view = LibraryView::new();
         view.set_playlists(vec![
@@ -966,61 +889,6 @@ mod tests {
         assert!(!view.is_viewing_tracks());
     }
 
-    // -- liked songs synthetic row -----------------------------------------
-
-    #[test]
-    fn liked_songs_row_prepends_playlists() {
-        let mut view = loaded_view();
-        view.set_liked_songs(vec![
-            track("l1", "Liked One", "A"),
-            track("l2", "Liked Two", "B"),
-        ]);
-        // Liked row + 2 playlists = 3 rows.
-        assert_eq!(view.pane_len(LibraryPane::Playlists), 3);
-    }
-
-    #[test]
-    fn enter_on_liked_row_plays_liked_songs() {
-        let mut view = loaded_view();
-        view.set_liked_songs(vec![
-            track("l1", "Liked One", "A"),
-            track("l2", "Liked Two", "B"),
-        ]);
-        // Cursor at 0 is the liked-songs row.
-        match view.activate_selected() {
-            Some(LibraryAction::PlayTracks {
-                tracks,
-                start_index,
-            }) => {
-                assert_eq!(start_index, 0);
-                assert_eq!(tracks.len(), 2);
-                assert_eq!(tracks[0].video_id, "l1");
-            }
-            other => panic!("expected PlayTracks(liked), got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn real_playlist_offset_by_liked_row() {
-        let mut view = loaded_view();
-        view.set_liked_songs(vec![track("l1", "Liked", "A")]);
-        view.select_next(); // cursor 1 -> first real playlist (PL1)
-        match view.activate_selected() {
-            Some(LibraryAction::OpenPlaylist(info)) => assert_eq!(info.playlist_id, "PL1"),
-            other => panic!("expected OpenPlaylist(PL1), got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn no_liked_row_when_liked_empty() {
-        let view = loaded_view(); // no liked songs set
-        assert_eq!(view.pane_len(LibraryPane::Playlists), 2);
-        match view.activate_selected() {
-            Some(LibraryAction::OpenPlaylist(info)) => assert_eq!(info.playlist_id, "PL1"),
-            other => panic!("expected OpenPlaylist(PL1), got {other:?}"),
-        }
-    }
-
     // -- navigation clamps --------------------------------------------------
 
     #[test]
@@ -1070,12 +938,11 @@ mod tests {
 
     #[test]
     fn combined_status_counts_all_panes() {
-        let mut view = loaded_view();
-        view.set_liked_songs(vec![track("l1", "L", "A")]);
+        let view = loaded_view();
         let (text, is_error) = view.status_text();
         assert!(!is_error);
-        // 2 real playlists + 1 liked row = 3.
-        assert!(text.contains("3 playlist(s)"), "status: {text}");
+        // 2 playlists, 1 album, 1 artist.
+        assert!(text.contains("2 playlist(s)"), "status: {text}");
         assert!(text.contains("1 album(s)"), "status: {text}");
         assert!(text.contains("1 artist(s)"), "status: {text}");
     }
@@ -1098,14 +965,6 @@ mod tests {
         assert!(text.contains("My Mix"), "missing playlist:\n{text}");
         assert!(text.contains("Discovery"), "missing album:\n{text}");
         assert!(text.contains("Radiohead"), "missing artist:\n{text}");
-    }
-
-    #[test]
-    fn render_shows_liked_songs_row() {
-        let mut view = loaded_view();
-        view.set_liked_songs(vec![track("l1", "L", "A")]);
-        let text = render_to_string(&view, 90, 16);
-        assert!(text.contains("Liked Songs"), "missing liked row:\n{text}");
     }
 
     #[test]
