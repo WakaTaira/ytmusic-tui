@@ -48,8 +48,10 @@ use ytmusic_tui::navigation::{NavigationManager, PageState as NavPage};
 use ytmusic_tui::player::Player;
 use ytmusic_tui::views::Theme;
 use ytmusic_tui::views::home::{HomeAction, HomeView};
+use ytmusic_tui::views::library::{LibraryAction, LibraryView};
 use ytmusic_tui::views::player_bar::{PLAYER_BAR_HEIGHT, PlayerBar, PlayerBarState};
 use ytmusic_tui::views::playlist::{PlaylistAction, PlaylistView};
+use ytmusic_tui::views::search::{SearchAction, SearchView};
 
 /// How long the input poll waits before the loop falls through to drain events
 /// and redraw. ~60 ms keeps the player bar's 1-second-ish progress feel smooth
@@ -273,10 +275,8 @@ fn run_loop(
             && let Event::Key(key) = event::read()?
         {
             // Only react to presses (Windows also emits Release/Repeat).
-            if key.kind == KeyEventKind::Press
-                && let Some(action) = map_key(key)
-            {
-                model.apply(action, runtime);
+            if key.kind == KeyEventKind::Press {
+                model.dispatch_key(key, runtime);
             }
         }
     }
@@ -339,6 +339,22 @@ enum Action {
     CycleRepeat,
     /// Go back / pop the navigation stack (DEFAULT_KEYMAP `go_back = "escape"`).
     GoBack,
+    /// Switch to the home view (DEFAULT_KEYMAP `switch_home = "g"`; also `1`).
+    SwitchHome,
+    /// Switch to the search view and focus its input (`/` and `2`).
+    ///
+    /// Simplification vs Python (documented for M5c): Python binds `slash` to
+    /// `toggle_filter` (the in-page filter bar) and exposes the search *view*
+    /// via the hidden `2` binding and the opt-in `search_page` action. The
+    /// filter bar is an M5c feature; until it lands, `/` is the most ergonomic
+    /// way to reach search, so this milestone binds `/` (and `2`) to "switch to
+    /// the search view + focus the input". When the filter bar arrives in M5c,
+    /// `/` reverts to the filter toggle and `search_page` (e.g. `g s`) becomes
+    /// the view switch, matching Python exactly.
+    SwitchSearch,
+    /// Switch to the library view (DEFAULT_KEYMAP `switch_library = "l"`; also
+    /// `3`).
+    SwitchLibrary,
 }
 
 /// Per-press volume step, matching the Python `volume_up` / `volume_down`
@@ -362,6 +378,11 @@ fn map_key(key: KeyEvent) -> Option<Action> {
         KeyCode::Char('p') => Some(Action::PreviousTrack),
         KeyCode::Char('s') => Some(Action::ToggleShuffle),
         KeyCode::Char('r') => Some(Action::CycleRepeat),
+        // View switches (DEFAULT_KEYMAP: g/l; digits mirror Python's hidden
+        // 1/2/3 bindings; `/` is the search-view shortcut — see SwitchSearch).
+        KeyCode::Char('g' | '1') => Some(Action::SwitchHome),
+        KeyCode::Char('/' | '2') => Some(Action::SwitchSearch),
+        KeyCode::Char('l' | '3') => Some(Action::SwitchLibrary),
         KeyCode::Esc => Some(Action::GoBack),
         KeyCode::Char('j') => Some(Action::SelectNext),
         KeyCode::Char('k') => Some(Action::SelectPrevious),
@@ -391,6 +412,10 @@ enum View {
     Home,
     /// The two-level playlist browser.
     Playlist,
+    /// The 4-pane search view (Tracks/Albums/Artists/Playlists).
+    Search,
+    /// The 3-pane library view (Playlists/Albums/Artists).
+    Library,
 }
 
 /// Map a navigation page type (the `page_type` of a [`NavPage`]) to its content
@@ -399,7 +424,21 @@ enum View {
 fn view_for_page(page_type: &str) -> View {
     match page_type {
         "playlist" => View::Playlist,
+        "search" => View::Search,
+        "library" => View::Library,
         _ => View::Home,
+    }
+}
+
+/// The navigation `page_type` string for a [`View`] — the inverse of
+/// [`view_for_page`] for the top-level views pushed by [`AppModel::switch_view`].
+/// Kept pure so the round-trip is unit-testable.
+fn page_type_for_view(view: View) -> &'static str {
+    match view {
+        View::Home => "home",
+        View::Playlist => "playlist",
+        View::Search => "search",
+        View::Library => "library",
     }
 }
 
@@ -413,11 +452,18 @@ fn view_for_page(page_type: &str) -> View {
 struct AppModel {
     home: HomeView,
     playlist: PlaylistView,
+    search: SearchView,
+    library: LibraryView,
     player: PlayerBarState,
-    /// The page history stack (home ↔ playlist); Esc pops back.
+    /// The page history stack (home ↔ playlist ↔ search ↔ library); Esc pops back.
     nav: NavigationManager,
     /// The active content view.
     view: View,
+    /// Whether the search input box currently has keyboard focus. While `true`,
+    /// printable keys append to the query, Backspace deletes, Enter submits, and
+    /// Esc leaves input focus (mirrors Textual's `Input` swallowing keys). Only
+    /// meaningful while [`View::Search`] is active.
+    input_mode: bool,
     theme: Theme,
     /// Set once the session canary reports an invalid (logged-out) session;
     /// renders a one-line warning above the content.
@@ -436,9 +482,12 @@ impl AppModel {
         Self {
             home: HomeView::new(),
             playlist: PlaylistView::new(),
+            search: SearchView::new(),
+            library: LibraryView::new(),
             player: PlayerBarState::default(),
             nav: NavigationManager::new(NavPage::new("home")),
             view: View::Home,
+            input_mode: false,
             theme,
             session_warning: None,
             status: None,
@@ -463,11 +512,43 @@ impl AppModel {
                 self.status = None; // a successful load clears any stale error
             }
             AppEvent::LibraryPlaylistsLoaded(playlists) => {
-                self.playlist.set_playlists(playlists);
+                // The library playlist list feeds two consumers: the playlist
+                // view's level-1 list and the library view's playlists pane.
+                // Both are idempotent setters, so feed both regardless of the
+                // active view (the fetch is fired from either surface).
+                self.playlist.set_playlists(playlists.clone());
+                self.library.set_playlists(playlists);
                 self.status = None;
             }
             AppEvent::PlaylistTracksLoaded { title, tracks } => {
-                self.playlist.set_tracks(title, tracks);
+                // The same event serves two drill-in surfaces: the standalone
+                // playlist view and the library view's Playlists pane. Route to
+                // whichever one is actively waiting on a track fetch; default to
+                // the playlist view (its drill-in is the common case).
+                // TODO(M5c): this view-state discriminator mis-routes if Library
+                // and Playlist fetches are ever in flight concurrently — replace
+                // with a typed pending-fetch token when the keymap rework lands.
+                if self.view == View::Library && self.library.is_viewing_tracks() {
+                    self.library.set_tracks(title, tracks);
+                } else {
+                    self.playlist.set_tracks(title, tracks);
+                }
+                self.status = None;
+            }
+            AppEvent::SearchLoaded(results) => {
+                self.search.set_results(results);
+                self.status = None;
+            }
+            AppEvent::LibraryAlbumsLoaded(albums) => {
+                self.library.set_albums(albums);
+                self.status = None;
+            }
+            AppEvent::LibraryArtistsLoaded(artists) => {
+                self.library.set_artists(artists);
+                self.status = None;
+            }
+            AppEvent::LikedSongsLoaded(tracks) => {
+                self.library.set_liked_songs(tracks);
                 self.status = None;
             }
             AppEvent::ApiError(msg) => self.on_api_error(msg),
@@ -521,10 +602,69 @@ impl AppModel {
         if self.home.state().loaded().is_none() {
             self.home.set_error(msg.clone());
         }
-        if self.view == View::Playlist {
-            self.playlist.set_error(msg.clone());
+        // The remaining views are updated only while active, since their
+        // respective fetches are only ever in flight from their own view.
+        match self.view {
+            View::Playlist => self.playlist.set_error(msg.clone()),
+            View::Search => self.search.set_error(msg.clone()),
+            View::Library => self.library.set_error(msg.clone()),
+            View::Home => {}
         }
         self.status = Some(msg);
+    }
+
+    /// Dispatch a raw key press: route to the search input editor while the
+    /// input is focused, otherwise decode it into an [`Action`] and apply it.
+    ///
+    /// This is the single key entry point so the input-mode-vs-action-mode
+    /// decision lives in one tested place (Textual achieved the same by letting
+    /// the focused `Input` widget swallow keys before the app bindings ran).
+    fn dispatch_key(&mut self, key: KeyEvent, runtime: &RuntimeHandle) {
+        if self.is_input_active() {
+            self.handle_input_key(key, runtime);
+            return;
+        }
+        if let Some(action) = map_key(key) {
+            self.apply(action, runtime);
+        }
+    }
+
+    /// Whether the search input is currently capturing keystrokes.
+    fn is_input_active(&self) -> bool {
+        self.input_mode && self.view == View::Search
+    }
+
+    /// Handle a key while the search input is focused: printable chars append,
+    /// Backspace deletes, Enter submits the search, Esc leaves input focus, and
+    /// any other key is ignored (kept in the input box, matching Textual's
+    /// `Input` which ignores unhandled keys).
+    ///
+    /// Submitting fires the runtime [`AppCommand::Search`] (with the parsed
+    /// `#category:` filter) and shows the loading state; the input box keeps its
+    /// text and focus so a refined re-search is one edit away.
+    fn handle_input_key(&mut self, key: KeyEvent, runtime: &RuntimeHandle) {
+        match key.code {
+            KeyCode::Enter => {
+                if let Some((query, filter)) = self.search.submit_query() {
+                    self.search.set_loading();
+                    runtime.send(AppCommand::Search { query, filter });
+                }
+            }
+            KeyCode::Backspace => self.search.backspace_input(),
+            KeyCode::Esc => self.input_mode = false,
+            // Ctrl+C quits even while typing: raw mode disables ISIG so no
+            // SIGINT arrives — without this arm the only exit is Esc-then-q.
+            // Plain q/Q stay typeable (a search for "queen" must work).
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.should_quit = true;
+            }
+            // Accept printable characters only; control chars (Tab, arrows, F-keys
+            // come through as non-Char codes) are ignored while typing.
+            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.search.push_input_char(ch);
+            }
+            _ => {}
+        }
     }
 
     /// Apply a decoded action, issuing runtime commands for playback/navigation
@@ -557,23 +697,80 @@ impl AppModel {
             Action::CycleRepeat => {
                 runtime.send(AppCommand::CycleRepeat);
             }
-            // Section moves only apply to the home view (the playlist view is a
-            // single flat list, so Tab/Shift-Tab are inert there).
-            Action::NextSection => {
-                if self.view == View::Home {
-                    self.home.focus_next_section();
-                }
-            }
-            Action::PreviousSection => {
-                if self.view == View::Home {
-                    self.home.focus_previous_section();
-                }
-            }
+            // Tab / Shift-Tab move between "sections": home sections, search
+            // panes, and library panes. The playlist view is a single flat list,
+            // so they are inert there (Python's PlaylistView ignored Tab too).
+            Action::NextSection => match self.view {
+                View::Home => self.home.focus_next_section(),
+                View::Search => self.search.focus_next_pane(),
+                View::Library => self.library.focus_next_pane(),
+                View::Playlist => {}
+            },
+            Action::PreviousSection => match self.view {
+                View::Home => self.home.focus_previous_section(),
+                View::Search => self.search.focus_previous_pane(),
+                View::Library => self.library.focus_previous_pane(),
+                View::Playlist => {}
+            },
             Action::SelectNext => self.select_next(),
             Action::SelectPrevious => self.select_previous(),
             Action::Activate => self.activate(runtime),
             Action::GoBack => self.go_back(runtime),
+            Action::SwitchHome => self.switch_view(View::Home, runtime),
+            Action::SwitchSearch => self.switch_view(View::Search, runtime),
+            Action::SwitchLibrary => self.switch_view(View::Library, runtime),
         }
+    }
+
+    /// Switch to one of the top-level views (`g`/`/`/`l`), pushing the nav stack
+    /// so Esc can pop back. Mirrors Python's `action_switch_view`, which calls
+    /// `nav.push(PageState(view_id))` then applies the page (refreshing the
+    /// library / focusing the search input as needed).
+    ///
+    /// Switching to the view that is already active is a no-op (the nav stack's
+    /// duplicate-push guard already prevents a wasted history entry; this also
+    /// avoids re-fetching). Switching to search focuses its input
+    /// (`input_mode = true`), matching Python's `action_search_page` /
+    /// auto-focus; switching to library kicks off the three library fetches
+    /// (Python's `refresh_library` on apply).
+    fn switch_view(&mut self, target: View, runtime: &RuntimeHandle) {
+        if self.view == target {
+            // Already here. Search still (re)focuses the input so `/` is a
+            // reliable "start typing" shortcut even when search is showing.
+            if target == View::Search {
+                self.input_mode = true;
+            }
+            return;
+        }
+        self.view = target;
+        self.nav.push(NavPage::new(page_type_for_view(target)));
+        match target {
+            View::Search => {
+                // Focus the input so the user can type immediately (Python
+                // deferred-focus of the search input).
+                self.input_mode = true;
+            }
+            View::Library => {
+                // Leaving any input focus, and (re)load the library panes.
+                self.input_mode = false;
+                self.refresh_library(runtime);
+            }
+            View::Home | View::Playlist => {
+                self.input_mode = false;
+            }
+        }
+    }
+
+    /// Kick off the three library fetches (playlists / albums / artists) plus
+    /// liked songs. Mirrors Python's `LibraryView.refresh_library` →
+    /// `_fetch_all_data`, which fires the three workers; liked songs is the
+    /// extra pseudo-playlist row this port adds to the playlists pane.
+    fn refresh_library(&mut self, runtime: &RuntimeHandle) {
+        self.library.set_loading();
+        runtime.send(AppCommand::FetchLibraryPlaylists);
+        runtime.send(AppCommand::FetchLibraryAlbums);
+        runtime.send(AppCommand::FetchLibraryArtists);
+        runtime.send(AppCommand::FetchLikedSongs);
     }
 
     /// Move the cursor down in the active view.
@@ -581,6 +778,8 @@ impl AppModel {
         match self.view {
             View::Home => self.home.select_next_item(),
             View::Playlist => self.playlist.select_next(),
+            View::Search => self.search.select_next(),
+            View::Library => self.library.select_next(),
         }
     }
 
@@ -589,6 +788,8 @@ impl AppModel {
         match self.view {
             View::Home => self.home.select_previous_item(),
             View::Playlist => self.playlist.select_previous(),
+            View::Search => self.search.select_previous(),
+            View::Library => self.library.select_previous(),
         }
     }
 
@@ -597,6 +798,8 @@ impl AppModel {
         match self.view {
             View::Home => self.activate_home(runtime),
             View::Playlist => self.activate_playlist(runtime),
+            View::Search => self.activate_search(runtime),
+            View::Library => self.activate_library(runtime),
         }
     }
 
@@ -638,10 +841,72 @@ impl AppModel {
         }
     }
 
+    /// Enter on the search view: route by the focused pane. Tracks play;
+    /// playlists open in the playlist view (reusing its drill-in flow); albums
+    /// and artists defer to the M5b-2b album/artist views.
+    fn activate_search(&mut self, runtime: &RuntimeHandle) {
+        match self.search.activate_selected() {
+            Some(SearchAction::PlayTrack(track)) => {
+                self.player.on_started();
+                runtime.send(AppCommand::Play(track));
+            }
+            Some(SearchAction::OpenPlaylist(info)) => self.open_playlist(info, runtime),
+            Some(SearchAction::OpenAlbum(album)) => self.defer_album(&album.title),
+            Some(SearchAction::OpenArtist(artist)) => self.defer_artist(&artist.name),
+            None => {}
+        }
+    }
+
+    /// Enter on the library view: route by the focused pane. A playlist drills
+    /// into its tracks *within* the library's Playlists pane (Python
+    /// `_show_track_list`, which stays in `LibraryView` rather than switching to
+    /// the standalone playlist view); a track row (drill-down or liked songs)
+    /// plays from the cursor, queueing the rest; albums and artists defer to
+    /// M5b-2b.
+    fn activate_library(&mut self, runtime: &RuntimeHandle) {
+        match self.library.activate_selected() {
+            Some(LibraryAction::OpenPlaylist(info)) => {
+                self.library.show_track_list_loading(&info.title);
+                runtime.send(AppCommand::FetchPlaylistTracks {
+                    playlist_id: info.playlist_id,
+                    title: info.title,
+                });
+            }
+            Some(LibraryAction::PlayTracks {
+                tracks,
+                start_index,
+            }) => {
+                self.player.on_started();
+                runtime.send(AppCommand::PlayPlaylist {
+                    tracks,
+                    start_index,
+                });
+            }
+            Some(LibraryAction::OpenAlbum(album)) => self.defer_album(&album.title),
+            Some(LibraryAction::OpenArtist(artist)) => self.defer_artist(&artist.name),
+            None => {}
+        }
+    }
+
+    /// Stub for the album view (M5b-2b): surface a one-line status instead of
+    /// opening. Python routed to `action_open_album`; the album view is the next
+    /// milestone, so this records intent without a half-built navigation.
+    fn defer_album(&mut self, title: &str) {
+        self.status = Some(format!("Album view arrives in M5b-2b: {title}"));
+    }
+
+    /// Stub for the artist view (M5b-2b), mirroring [`AppModel::defer_album`].
+    fn defer_artist(&mut self, name: &str) {
+        self.status = Some(format!("Artist view arrives in M5b-2b: {name}"));
+    }
+
     /// Switch to the playlist view, drilling into `info` and pushing the nav
     /// stack (home → playlist) so Esc can pop back. The level-1 library list is
     /// fetched eagerly too, so a subsequent Esc-to-level-1 has data to show.
     fn open_playlist(&mut self, info: ytmusic_api::PlaylistInfo, runtime: &RuntimeHandle) {
+        // Leaving the search view via a result: drop input focus so the flag
+        // isn't left stale (inert behind is_input_active, but keep it honest).
+        self.input_mode = false;
         self.view = View::Playlist;
         self.nav.push(NavPage::with_context(
             "playlist",
@@ -657,17 +922,33 @@ impl AppModel {
         });
     }
 
-    /// Handle Esc / go-back. Inside the playlist view's track list it pops back
-    /// to the playlist list (consumed by the view); otherwise it pops the
-    /// navigation stack to the previous page (playlist → home).
+    /// Handle Esc / go-back, in priority order:
+    ///
+    /// 1. While the search input is focused, Esc just leaves input focus (the
+    ///    grid keeps its results) — mirrors Textual's `Input` releasing focus on
+    ///    Escape without navigating away.
+    /// 2. Inside the playlist view's track list, Esc pops to the playlist list
+    ///    (consumed by the view).
+    /// 3. Inside the library view's track drill-down, Esc restores the playlists
+    ///    pane (consumed by the view; Python `_restore_playlists_pane`).
+    /// 4. Otherwise pop the navigation stack to the previous page.
     fn go_back(&mut self, runtime: &RuntimeHandle) {
-        // Level 2 → level 1 is the view's own concern (Python `on_key` Escape).
+        // 1. Leave search input focus without navigating.
+        if self.view == View::Search && self.input_mode {
+            self.input_mode = false;
+            return;
+        }
+        // 2. Playlist level 2 → level 1 is the view's own concern.
         if self.view == View::Playlist && self.playlist.go_back() {
             // The view reset its level-1 list to Loading; re-fetch it.
             runtime.send(AppCommand::FetchLibraryPlaylists);
             return;
         }
-        // Otherwise pop the page stack (playlist → home).
+        // 3. Library track drill-down → playlists pane (view-consumed).
+        if self.view == View::Library && self.library.go_back() {
+            return;
+        }
+        // 4. Otherwise pop the page stack (e.g. search/library → home).
         if let Some(page) = self.nav.pop() {
             self.switch_to_page(&page.page_type, runtime);
         }
@@ -675,12 +956,17 @@ impl AppModel {
 
     /// Switch the active view to match a popped navigation page.
     ///
-    /// `runtime` is reserved for pages whose data must be re-fetched on return;
-    /// the M5b pages (home/playlist) keep their loaded state, so it is currently
-    /// unused beyond documenting the seam for M5b-2's pages.
+    /// Home / playlist / search keep their loaded state on return, so no
+    /// re-fetch is needed. The library view re-fetches on return, matching
+    /// Python's `_apply_page` calling `refresh_library` whenever the library
+    /// page becomes current (its panes are cheap to repopulate and may be stale).
     fn switch_to_page(&mut self, page_type: &str, runtime: &RuntimeHandle) {
         self.view = view_for_page(page_type);
-        let _ = runtime;
+        // Leaving search input focus when navigating away from search.
+        self.input_mode = false;
+        if self.view == View::Library {
+            self.refresh_library(runtime);
+        }
     }
 
     /// Draw the whole UI: optional warning + status lines, the home content,
@@ -699,6 +985,10 @@ impl AppModel {
         match self.view {
             View::Home => self.home.render(frame, chunks[1], &self.theme),
             View::Playlist => self.playlist.render(frame, chunks[1], &self.theme),
+            View::Search => self
+                .search
+                .render(frame, chunks[1], &self.theme, self.input_mode),
+            View::Library => self.library.render(frame, chunks[1], &self.theme),
         }
         PlayerBar.render(frame, chunks[2], &self.player, &self.theme);
     }
