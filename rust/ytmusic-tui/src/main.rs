@@ -44,10 +44,12 @@ use ratatui::widgets::Paragraph;
 use ytmusic_api::{BrowserAuth, InnerTubeClient};
 use ytmusic_tui::app::{AppCommand, AppEvent, RuntimeHandle, spawn_runtime};
 use ytmusic_tui::config::{self, AppConfig};
+use ytmusic_tui::navigation::{NavigationManager, PageState as NavPage};
 use ytmusic_tui::player::Player;
 use ytmusic_tui::views::Theme;
 use ytmusic_tui::views::home::{HomeAction, HomeView};
 use ytmusic_tui::views::player_bar::{PLAYER_BAR_HEIGHT, PlayerBar, PlayerBarState};
+use ytmusic_tui::views::playlist::{PlaylistAction, PlaylistView};
 
 /// How long the input poll waits before the loop falls through to drain events
 /// and redraw. ~60 ms keeps the player bar's 1-second-ish progress feel smooth
@@ -261,7 +263,7 @@ fn run_loop(
     while !model.should_quit {
         // Drain events that arrived since the last tick before drawing, so the
         // frame reflects the latest player position / loaded data.
-        drain_events(events, &mut model);
+        drain_events(events, &mut model, runtime);
 
         terminal.draw(|frame| model.render(frame))?;
 
@@ -281,10 +283,18 @@ fn run_loop(
     Ok(())
 }
 
-/// Drain all currently-available events into the model (non-blocking).
-fn drain_events(events: &std::sync::mpsc::Receiver<AppEvent>, model: &mut AppModel) {
+/// Drain all currently-available events into the model (non-blocking),
+/// dispatching any follow-up command the fold returns (today: the auto-advance
+/// `NextTrack` after a natural `TrackEnded`).
+fn drain_events(
+    events: &std::sync::mpsc::Receiver<AppEvent>,
+    model: &mut AppModel,
+    runtime: &RuntimeHandle,
+) {
     while let Ok(event) = events.try_recv() {
-        model.on_event(event);
+        if let Some(command) = model.on_event(event) {
+            runtime.send(command);
+        }
     }
 }
 
@@ -319,6 +329,16 @@ enum Action {
     SelectPrevious,
     /// Activate the current selection (`Enter`).
     Activate,
+    /// Skip to the next queued track (DEFAULT_KEYMAP `next_track = "n"`).
+    NextTrack,
+    /// Go back to the previous track (DEFAULT_KEYMAP `previous_track = "p"`).
+    PreviousTrack,
+    /// Toggle shuffle on the queue (DEFAULT_KEYMAP `toggle_shuffle = "s"`).
+    ToggleShuffle,
+    /// Cycle the repeat mode (DEFAULT_KEYMAP `cycle_repeat = "r"`).
+    CycleRepeat,
+    /// Go back / pop the navigation stack (DEFAULT_KEYMAP `go_back = "escape"`).
+    GoBack,
 }
 
 /// Per-press volume step, matching the Python `volume_up` / `volume_down`
@@ -336,6 +356,13 @@ fn map_key(key: KeyEvent) -> Option<Action> {
         KeyCode::Char(' ') => Some(Action::TogglePause),
         KeyCode::Char('+' | '=') => Some(Action::VolumeUp),
         KeyCode::Char('-') => Some(Action::VolumeDown),
+        // Transport keys (DEFAULT_KEYMAP: n/p/s/r). Hardcoded until M5c wires
+        // the merged keymap.toml.
+        KeyCode::Char('n') => Some(Action::NextTrack),
+        KeyCode::Char('p') => Some(Action::PreviousTrack),
+        KeyCode::Char('s') => Some(Action::ToggleShuffle),
+        KeyCode::Char('r') => Some(Action::CycleRepeat),
+        KeyCode::Esc => Some(Action::GoBack),
         KeyCode::Char('j') => Some(Action::SelectNext),
         KeyCode::Char('k') => Some(Action::SelectPrevious),
         KeyCode::Down => Some(Action::SelectNext),
@@ -355,16 +382,42 @@ fn map_key(key: KeyEvent) -> Option<Action> {
 // AppModel — view state + event folding + action application (pure-ish)
 // ---------------------------------------------------------------------------
 
-/// The full UI state for the M5a home + player-bar surface.
+/// Which content view is active (the M5b minimal view switch; M5c/M5b-2 add the
+/// rest). The home and playlist views each keep their own state; this enum just
+/// records which one renders and receives navigation keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum View {
+    /// The home recommendations view (the startup view).
+    Home,
+    /// The two-level playlist browser.
+    Playlist,
+}
+
+/// Map a navigation page type (the `page_type` of a [`NavPage`]) to its content
+/// [`View`]. Kept pure so the page→view mapping is unit-testable without a
+/// `RuntimeHandle`. Unknown / not-yet-ported pages fall back to [`View::Home`].
+fn view_for_page(page_type: &str) -> View {
+    match page_type {
+        "playlist" => View::Playlist,
+        _ => View::Home,
+    }
+}
+
+/// The full UI state for the M5b home + playlist + player-bar surface.
 ///
-/// Owns the view widgets' state and the quit flag. Methods are split so the
-/// pure parts (event folding, key application driving only the home cursor) are
-/// unit-testable; only [`AppModel::apply`] for playback actions needs a
-/// `RuntimeHandle`, which is trivially constructible-free in tests by exercising
-/// the cursor actions instead.
+/// Owns the view widgets' state, the navigation stack, and the quit flag.
+/// Methods are split so the pure parts (event folding, navigation/key
+/// application) are unit-testable; only [`AppModel::apply`] for playback actions
+/// needs a `RuntimeHandle`, which tests exercise via a `None` runtime path where
+/// it only mutates view state.
 struct AppModel {
     home: HomeView,
+    playlist: PlaylistView,
     player: PlayerBarState,
+    /// The page history stack (home ↔ playlist); Esc pops back.
+    nav: NavigationManager,
+    /// The active content view.
+    view: View,
     theme: Theme,
     /// Set once the session canary reports an invalid (logged-out) session;
     /// renders a one-line warning above the content.
@@ -382,7 +435,10 @@ impl AppModel {
     fn new(theme: Theme) -> Self {
         Self {
             home: HomeView::new(),
+            playlist: PlaylistView::new(),
             player: PlayerBarState::default(),
+            nav: NavigationManager::new(NavPage::new("home")),
+            view: View::Home,
             theme,
             session_warning: None,
             status: None,
@@ -390,31 +446,89 @@ impl AppModel {
         }
     }
 
-    /// Fold one runtime event into the model.
-    fn on_event(&mut self, event: AppEvent) {
+    /// Fold one runtime event into the model, returning any follow-up command
+    /// the loop should send back to the runtime.
+    ///
+    /// The only follow-up today is the auto-advance: a [`AppEvent::TrackEnded`]
+    /// (a *natural* EOF) returns [`AppCommand::NextTrack`], which drives the
+    /// runtime-side queue forward. A [`AppEvent::TrackError`] returns `None` —
+    /// the queue must NEVER advance on a failed stream (the end-file battle
+    /// lesson; asserted in the tests). Returning the command (rather than
+    /// sending it here) keeps the fold pure and unit-testable without a runtime.
+    #[must_use]
+    fn on_event(&mut self, event: AppEvent) -> Option<AppCommand> {
         match event {
-            AppEvent::HomeLoaded(sections) => self.home.set_sections(sections),
-            AppEvent::ApiError(msg) => {
-                // If the home view never loaded, show the error in its body;
-                // either way surface it on the status line too.
-                if self.home.state().loaded().is_none() {
-                    self.home.set_error(msg.clone());
-                }
-                self.status = Some(msg);
+            AppEvent::HomeLoaded(sections) => {
+                self.home.set_sections(sections);
+                self.status = None; // a successful load clears any stale error
+            }
+            AppEvent::LibraryPlaylistsLoaded(playlists) => {
+                self.playlist.set_playlists(playlists);
+                self.status = None;
+            }
+            AppEvent::PlaylistTracksLoaded { title, tracks } => {
+                self.playlist.set_tracks(title, tracks);
+                self.status = None;
+            }
+            AppEvent::ApiError(msg) => self.on_api_error(msg),
+            AppEvent::NowPlaying(now) => {
+                self.player.on_now_playing(
+                    now.title,
+                    now.artist,
+                    now.album,
+                    now.duration_seconds,
+                    now.shuffle,
+                    now.repeat.into(),
+                );
             }
             AppEvent::PlayerProgress(secs) => self.player.on_progress(secs),
             AppEvent::PlayerDuration(secs) => self.player.on_duration(secs),
+            AppEvent::PlayerVolume(vol) => self.player.on_volume(vol),
             AppEvent::PlayerStarted => self.player.on_started(),
-            AppEvent::TrackEnded => self.player.on_track_ended(),
-            AppEvent::TrackError(detail) => self.status = Some(format!("Playback error: {detail}")),
+            AppEvent::TrackEnded => {
+                // Natural EOF: clear the bar to idle now, and ask the runtime to
+                // advance the queue. The runtime replies with NowPlaying +
+                // PlayerStarted for the next track (or an idle NowPlaying at the
+                // end of the queue) on the following ticks.
+                self.player.on_track_ended();
+                return Some(AppCommand::NextTrack);
+            }
+            AppEvent::TrackError(detail) => {
+                // NEVER advance on a failed stream — a broken resolver would
+                // machine-gun the queue (the end-file battle lesson).
+                self.status = Some(format!("Playback error: {detail}"));
+            }
             AppEvent::SessionInvalid => {
                 self.session_warning = Some(SESSION_WARNING.to_owned());
             }
         }
+        None
     }
 
-    /// Apply a decoded action, issuing runtime commands for playback actions and
-    /// mutating the home cursor for navigation actions.
+    /// Surface an API error: always show it on the status line, and replace a
+    /// stuck "Loading…" body so a failed fetch never leaves a view spinning
+    /// forever.
+    ///
+    /// `AppEvent::ApiError` carries no source tag (M5b keeps the event flat), so
+    /// the error is applied defensively: the home view is updated whenever it is
+    /// still unloaded — this covers a `FetchHome` error that lands *after* the
+    /// user has already navigated to the playlist view, which would otherwise
+    /// leave home stuck on "Loading…" with no retry. The playlist view is
+    /// updated only while it is the active view, since a playlist fetch is only
+    /// ever in flight from there. (M5b-2 may add a source tag if a second
+    /// background fetch surface makes this ambiguous.)
+    fn on_api_error(&mut self, msg: String) {
+        if self.home.state().loaded().is_none() {
+            self.home.set_error(msg.clone());
+        }
+        if self.view == View::Playlist {
+            self.playlist.set_error(msg.clone());
+        }
+        self.status = Some(msg);
+    }
+
+    /// Apply a decoded action, issuing runtime commands for playback/navigation
+    /// actions and mutating the active view's cursor for selection actions.
     fn apply(&mut self, action: Action, runtime: &RuntimeHandle) {
         match action {
             Action::Quit => self.should_quit = true,
@@ -422,6 +536,8 @@ impl AppModel {
                 runtime.send(AppCommand::TogglePause);
             }
             Action::VolumeUp => {
+                // Optimistic update for responsiveness; the player's volume
+                // observation (PlayerVolume) corrects any clamp drift.
                 self.player.volume = (self.player.volume + VOLUME_STEP).clamp(0, 100);
                 runtime.send(AppCommand::AdjustVolume(VOLUME_STEP));
             }
@@ -429,28 +545,142 @@ impl AppModel {
                 self.player.volume = (self.player.volume - VOLUME_STEP).clamp(0, 100);
                 runtime.send(AppCommand::AdjustVolume(-VOLUME_STEP));
             }
-            Action::NextSection => self.home.focus_next_section(),
-            Action::PreviousSection => self.home.focus_previous_section(),
-            Action::SelectNext => self.home.select_next_item(),
-            Action::SelectPrevious => self.home.select_previous_item(),
+            Action::NextTrack => {
+                runtime.send(AppCommand::NextTrack);
+            }
+            Action::PreviousTrack => {
+                runtime.send(AppCommand::PreviousTrack);
+            }
+            Action::ToggleShuffle => {
+                runtime.send(AppCommand::ToggleShuffle);
+            }
+            Action::CycleRepeat => {
+                runtime.send(AppCommand::CycleRepeat);
+            }
+            // Section moves only apply to the home view (the playlist view is a
+            // single flat list, so Tab/Shift-Tab are inert there).
+            Action::NextSection => {
+                if self.view == View::Home {
+                    self.home.focus_next_section();
+                }
+            }
+            Action::PreviousSection => {
+                if self.view == View::Home {
+                    self.home.focus_previous_section();
+                }
+            }
+            Action::SelectNext => self.select_next(),
+            Action::SelectPrevious => self.select_previous(),
             Action::Activate => self.activate(runtime),
+            Action::GoBack => self.go_back(runtime),
         }
     }
 
-    /// Handle Enter: play a track, or note that playlist navigation is pending.
+    /// Move the cursor down in the active view.
+    fn select_next(&mut self) {
+        match self.view {
+            View::Home => self.home.select_next_item(),
+            View::Playlist => self.playlist.select_next(),
+        }
+    }
+
+    /// Move the cursor up in the active view.
+    fn select_previous(&mut self) {
+        match self.view {
+            View::Home => self.home.select_previous_item(),
+            View::Playlist => self.playlist.select_previous(),
+        }
+    }
+
+    /// Handle Enter, dispatched to the active view.
     fn activate(&mut self, runtime: &RuntimeHandle) {
+        match self.view {
+            View::Home => self.activate_home(runtime),
+            View::Playlist => self.activate_playlist(runtime),
+        }
+    }
+
+    /// Enter on the home view: play a track, or open a playlist (switch to the
+    /// playlist view and drill in).
+    fn activate_home(&mut self, runtime: &RuntimeHandle) {
         match self.home.activate_selected() {
-            Some(HomeAction::Play(video_id)) => {
+            Some(HomeAction::Play(track)) => {
                 self.player.on_started();
-                runtime.send(AppCommand::Play(video_id));
+                runtime.send(AppCommand::Play(track));
             }
-            Some(HomeAction::OpenPlaylist(_)) => {
-                // Playlist view is an M5b target; acknowledge instead of a
-                // silent no-op so the keypress is not perceived as broken.
-                self.status = Some("Playlist view is not available yet".to_owned());
+            Some(HomeAction::OpenPlaylist(info)) => self.open_playlist(info, runtime),
+            None => {}
+        }
+    }
+
+    /// Enter on the playlist view: drill into a playlist, or play from a track.
+    fn activate_playlist(&mut self, runtime: &RuntimeHandle) {
+        match self.playlist.activate_selected() {
+            Some(PlaylistAction::OpenPlaylist(info)) => {
+                // Drill into the selected playlist's tracks (level 2).
+                self.playlist.show_track_list_loading(&info.title);
+                runtime.send(AppCommand::FetchPlaylistTracks {
+                    playlist_id: info.playlist_id,
+                    title: info.title,
+                });
+            }
+            Some(PlaylistAction::PlayTracks {
+                tracks,
+                start_index,
+            }) => {
+                self.player.on_started();
+                runtime.send(AppCommand::PlayPlaylist {
+                    tracks,
+                    start_index,
+                });
             }
             None => {}
         }
+    }
+
+    /// Switch to the playlist view, drilling into `info` and pushing the nav
+    /// stack (home → playlist) so Esc can pop back. The level-1 library list is
+    /// fetched eagerly too, so a subsequent Esc-to-level-1 has data to show.
+    fn open_playlist(&mut self, info: ytmusic_api::PlaylistInfo, runtime: &RuntimeHandle) {
+        self.view = View::Playlist;
+        self.nav.push(NavPage::with_context(
+            "playlist",
+            "playlist_id",
+            &info.playlist_id,
+        ));
+        // Prime the level-1 list (for a later Esc) and drill into level 2.
+        runtime.send(AppCommand::FetchLibraryPlaylists);
+        self.playlist.show_track_list_loading(&info.title);
+        runtime.send(AppCommand::FetchPlaylistTracks {
+            playlist_id: info.playlist_id,
+            title: info.title,
+        });
+    }
+
+    /// Handle Esc / go-back. Inside the playlist view's track list it pops back
+    /// to the playlist list (consumed by the view); otherwise it pops the
+    /// navigation stack to the previous page (playlist → home).
+    fn go_back(&mut self, runtime: &RuntimeHandle) {
+        // Level 2 → level 1 is the view's own concern (Python `on_key` Escape).
+        if self.view == View::Playlist && self.playlist.go_back() {
+            // The view reset its level-1 list to Loading; re-fetch it.
+            runtime.send(AppCommand::FetchLibraryPlaylists);
+            return;
+        }
+        // Otherwise pop the page stack (playlist → home).
+        if let Some(page) = self.nav.pop() {
+            self.switch_to_page(&page.page_type, runtime);
+        }
+    }
+
+    /// Switch the active view to match a popped navigation page.
+    ///
+    /// `runtime` is reserved for pages whose data must be re-fetched on return;
+    /// the M5b pages (home/playlist) keep their loaded state, so it is currently
+    /// unused beyond documenting the seam for M5b-2's pages.
+    fn switch_to_page(&mut self, page_type: &str, runtime: &RuntimeHandle) {
+        self.view = view_for_page(page_type);
+        let _ = runtime;
     }
 
     /// Draw the whole UI: optional warning + status lines, the home content,
@@ -466,7 +696,10 @@ impl AppModel {
         .split(area);
 
         self.render_header(frame, chunks[0]);
-        self.home.render(frame, chunks[1], &self.theme);
+        match self.view {
+            View::Home => self.home.render(frame, chunks[1], &self.theme),
+            View::Playlist => self.playlist.render(frame, chunks[1], &self.theme),
+        }
         PlayerBar.render(frame, chunks[2], &self.player, &self.theme);
     }
 
@@ -504,7 +737,7 @@ mod tests {
     use super::*;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
-    use ytmusic_api::{HomeSection, HomeSectionItem, Track};
+    use ytmusic_api::{HomeSection, HomeSectionItem, PlaylistInfo, Track};
 
     // -- key mapping -------------------------------------------------------
 
@@ -554,12 +787,32 @@ mod tests {
     }
 
     #[test]
+    fn transport_keys_map() {
+        assert_eq!(map_key(key(KeyCode::Char('n'))), Some(Action::NextTrack));
+        assert_eq!(
+            map_key(key(KeyCode::Char('p'))),
+            Some(Action::PreviousTrack)
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('s'))),
+            Some(Action::ToggleShuffle)
+        );
+        assert_eq!(map_key(key(KeyCode::Char('r'))), Some(Action::CycleRepeat));
+        assert_eq!(map_key(key(KeyCode::Esc)), Some(Action::GoBack));
+    }
+
+    #[test]
     fn unbound_key_maps_to_none() {
         assert_eq!(map_key(key(KeyCode::Char('z'))), None);
-        assert_eq!(map_key(key(KeyCode::Esc)), None);
+        assert_eq!(map_key(key(KeyCode::Char('x'))), None);
     }
 
     // -- event folding -----------------------------------------------------
+
+    /// Fold an event, discarding the (here-irrelevant) follow-up command.
+    fn fold(model: &mut AppModel, event: AppEvent) {
+        let _ = model.on_event(event);
+    }
 
     fn track_section() -> HomeSection {
         HomeSection {
@@ -570,21 +823,29 @@ mod tests {
         }
     }
 
+    /// The `video_id` of an [`HomeAction::Play`], for terse id assertions.
+    fn home_played_id(action: Option<HomeAction>) -> Option<String> {
+        match action {
+            Some(HomeAction::Play(track)) => Some(track.video_id),
+            _ => None,
+        }
+    }
+
     #[test]
     fn home_loaded_event_populates_view() {
         let mut model = AppModel::new(Theme::default());
-        model.on_event(AppEvent::HomeLoaded(vec![track_section()]));
+        fold(&mut model, AppEvent::HomeLoaded(vec![track_section()]));
         assert!(model.home.state().loaded().is_some());
         assert_eq!(
-            model.home.activate_selected(),
-            Some(HomeAction::Play("vid1".to_owned()))
+            home_played_id(model.home.activate_selected()),
+            Some("vid1".to_owned())
         );
     }
 
     #[test]
     fn api_error_before_load_sets_error_and_status() {
         let mut model = AppModel::new(Theme::default());
-        model.on_event(AppEvent::ApiError("network down".to_owned()));
+        fold(&mut model, AppEvent::ApiError("network down".to_owned()));
         assert_eq!(model.home.state().status_line(), Some("network down"));
         assert_eq!(model.status.as_deref(), Some("network down"));
     }
@@ -592,28 +853,36 @@ mod tests {
     #[test]
     fn player_events_fold_into_bar_state() {
         let mut model = AppModel::new(Theme::default());
-        model.on_event(AppEvent::PlayerStarted);
-        model.on_event(AppEvent::PlayerDuration(200.0));
-        model.on_event(AppEvent::PlayerProgress(50.0));
+        fold(&mut model, AppEvent::PlayerStarted);
+        fold(&mut model, AppEvent::PlayerDuration(200.0));
+        fold(&mut model, AppEvent::PlayerProgress(50.0));
         assert!(model.player.has_track);
         assert!(model.player.is_playing);
         assert_eq!(model.player.duration, 200.0);
         assert_eq!(model.player.position, 50.0);
     }
 
+    // -- auto-advance flow (the end-file battle lesson, at the UI layer) ----
+
     #[test]
-    fn track_ended_event_clears_bar() {
+    fn track_ended_clears_bar_and_requests_next_track() {
+        // A natural EOF must (a) return the bar to idle and (b) ask the runtime
+        // to advance the queue.
         let mut model = AppModel::new(Theme::default());
-        model.on_event(AppEvent::PlayerStarted);
-        model.on_event(AppEvent::TrackEnded);
+        fold(&mut model, AppEvent::PlayerStarted);
+        let follow_up = model.on_event(AppEvent::TrackEnded);
         assert!(!model.player.has_track);
         assert!(!model.player.is_playing);
+        assert_eq!(follow_up, Some(AppCommand::NextTrack));
     }
 
     #[test]
-    fn track_error_event_sets_status() {
+    fn track_error_never_requests_next_track() {
+        // A failed stream must NOT advance the queue (a broken resolver would
+        // machine-gun it). The fold returns no follow-up command.
         let mut model = AppModel::new(Theme::default());
-        model.on_event(AppEvent::TrackError("loading failed".to_owned()));
+        let follow_up = model.on_event(AppEvent::TrackError("loading failed".to_owned()));
+        assert_eq!(follow_up, None, "TrackError must not advance the queue");
         assert!(
             model
                 .status
@@ -623,10 +892,62 @@ mod tests {
     }
 
     #[test]
+    fn now_playing_event_fills_bar_metadata() {
+        use ytmusic_tui::app::NowPlaying;
+        use ytmusic_tui::queue::RepeatMode;
+        let mut model = AppModel::new(Theme::default());
+        fold(
+            &mut model,
+            AppEvent::NowPlaying(NowPlaying {
+                title: "Around the World".to_owned(),
+                artist: "Daft Punk".to_owned(),
+                album: "Homework".to_owned(),
+                video_id: "v1".to_owned(),
+                duration_seconds: 425.0,
+                shuffle: true,
+                repeat: RepeatMode::All,
+            }),
+        );
+        assert_eq!(model.player.title, "Around the World");
+        assert_eq!(model.player.artist, "Daft Punk");
+        assert_eq!(model.player.album, "Homework");
+        assert_eq!(model.player.api_duration, 425.0);
+        assert!(model.player.shuffle);
+    }
+
+    #[test]
+    fn player_volume_event_corrects_bar_volume() {
+        let mut model = AppModel::new(Theme::default());
+        fold(&mut model, AppEvent::PlayerVolume(55));
+        assert_eq!(model.player.volume, 55);
+    }
+
+    #[test]
+    fn successful_load_clears_stale_status_error() {
+        let mut model = AppModel::new(Theme::default());
+        // A prior error left a status line behind.
+        fold(&mut model, AppEvent::TrackError("boom".to_owned()));
+        assert!(model.status.is_some());
+        // A successful home reload clears it.
+        fold(&mut model, AppEvent::HomeLoaded(vec![track_section()]));
+        assert!(model.status.is_none(), "stale status should clear on load");
+    }
+
+    #[test]
+    fn home_fetch_error_marks_home_even_when_on_playlist_view() {
+        // A FetchHome error landing after navigating to the playlist view must
+        // still mark home as errored (not leave it stuck on Loading forever).
+        let mut model = AppModel::new(Theme::default());
+        model.view = View::Playlist;
+        fold(&mut model, AppEvent::ApiError("network down".to_owned()));
+        assert_eq!(model.home.state().status_line(), Some("network down"));
+    }
+
+    #[test]
     fn session_invalid_event_sets_warning() {
         let mut model = AppModel::new(Theme::default());
         assert!(model.session_warning.is_none());
-        model.on_event(AppEvent::SessionInvalid);
+        fold(&mut model, AppEvent::SessionInvalid);
         assert!(model.session_warning.is_some());
     }
 
@@ -652,7 +973,7 @@ mod tests {
     #[test]
     fn render_shows_home_content_and_player_bar() {
         let mut model = AppModel::new(Theme::default());
-        model.on_event(AppEvent::HomeLoaded(vec![track_section()]));
+        fold(&mut model, AppEvent::HomeLoaded(vec![track_section()]));
         let text = render_model(&model, 70, 20);
         // Home section title + item.
         assert!(text.contains("Quick picks"), "missing section:\n{text}");
@@ -664,7 +985,7 @@ mod tests {
     #[test]
     fn render_shows_session_warning_line() {
         let mut model = AppModel::new(Theme::default());
-        model.on_event(AppEvent::SessionInvalid);
+        fold(&mut model, AppEvent::SessionInvalid);
         let text = render_model(&model, 80, 12);
         assert!(
             text.contains("Session invalid"),
@@ -690,9 +1011,96 @@ mod tests {
     fn header_line_count_tracks_warning_and_status() {
         let mut model = AppModel::new(Theme::default());
         assert_eq!(model.header_line_count(), 0);
-        model.on_event(AppEvent::SessionInvalid);
+        fold(&mut model, AppEvent::SessionInvalid);
         assert_eq!(model.header_line_count(), 1);
-        model.on_event(AppEvent::TrackError("x".to_owned()));
+        fold(&mut model, AppEvent::TrackError("x".to_owned()));
         assert_eq!(model.header_line_count(), 2);
+    }
+
+    // -- view switching + navigation (M5b) ---------------------------------
+
+    /// Build a model on the playlist view at the track-list level, with a
+    /// playlist on the nav stack — the state after opening a home playlist.
+    fn model_on_playlist_tracks() -> AppModel {
+        let mut model = AppModel::new(Theme::default());
+        model.view = View::Playlist;
+        model
+            .nav
+            .push(NavPage::with_context("playlist", "playlist_id", "PL1"));
+        model.playlist.show_track_list_loading("My Mix");
+        model
+    }
+
+    #[test]
+    fn playlist_tracks_loaded_event_fills_the_view() {
+        let mut model = model_on_playlist_tracks();
+        fold(
+            &mut model,
+            AppEvent::PlaylistTracksLoaded {
+                title: "My Mix".to_owned(),
+                tracks: vec![Track::new("v1", "First", "A", "Al", 100.0, "")],
+            },
+        );
+        assert!(model.playlist.is_viewing_tracks());
+        let text = render_model(&model, 60, 12);
+        assert!(text.contains("First"), "missing track:\n{text}");
+    }
+
+    #[test]
+    fn library_playlists_loaded_event_fills_the_view() {
+        let mut model = AppModel::new(Theme::default());
+        model.view = View::Playlist;
+        fold(
+            &mut model,
+            AppEvent::LibraryPlaylistsLoaded(vec![PlaylistInfo::new("PL1", "My Mix", "", 25, "")]),
+        );
+        let text = render_model(&model, 60, 12);
+        assert!(text.contains("My Mix"), "missing playlist:\n{text}");
+        assert!(text.contains("playlist(s)"), "missing count:\n{text}");
+    }
+
+    #[test]
+    fn esc_in_track_list_returns_to_playlist_list() {
+        // Esc at level 2 of the playlist view pops back to level 1 (handled by
+        // the view), staying on the Playlist view — it does NOT pop nav to home.
+        let mut model = model_on_playlist_tracks();
+        fold(
+            &mut model,
+            AppEvent::PlaylistTracksLoaded {
+                title: "My Mix".to_owned(),
+                tracks: vec![Track::new("v1", "First", "A", "Al", 100.0, "")],
+            },
+        );
+        assert!(model.playlist.is_viewing_tracks());
+        // The view consumes the Esc: still on Playlist, but at level 1.
+        let handled = model.playlist.go_back();
+        assert!(handled);
+        assert_eq!(model.view, View::Playlist);
+        assert!(!model.playlist.is_viewing_tracks());
+    }
+
+    #[test]
+    fn esc_at_playlist_list_pops_nav_back_to_home() {
+        // With the playlist at level 1, Esc pops the nav stack (playlist → home).
+        let mut model = model_on_playlist_tracks();
+        // Drop to level 1 first (view consumes the first Esc).
+        assert!(model.playlist.go_back());
+        // Now the next Esc pops nav: the previous page is home.
+        let popped = model.nav.pop();
+        assert_eq!(popped.map(|p| p.page_type), Some("home".to_owned()));
+        // The page→view map (what switch_to_page applies) routes "home" → Home.
+        assert_eq!(view_for_page("home"), View::Home);
+        assert_eq!(view_for_page("playlist"), View::Playlist);
+    }
+
+    #[test]
+    fn playlist_view_renders_when_active() {
+        let model = model_on_playlist_tracks();
+        // Loading state renders the per-level loading line.
+        let text = render_model(&model, 60, 12);
+        assert!(
+            text.contains("Loading tracks for My Mix"),
+            "missing playlist loading line:\n{text}"
+        );
     }
 }

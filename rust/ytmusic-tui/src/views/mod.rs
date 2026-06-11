@@ -13,10 +13,12 @@
 //! * [`Theme`] — the palette parsed once at startup from
 //!   [`crate::config::get_theme_palette`] hex strings into [`ratatui::Color`]s.
 //! * [`home`] — the home recommendations view.
+//! * [`playlist`] — the two-level playlist browser.
 //! * [`player_bar`] — the bottom now-playing bar.
 
 pub mod home;
 pub mod player_bar;
+pub mod playlist;
 
 use ratatui::style::Color;
 

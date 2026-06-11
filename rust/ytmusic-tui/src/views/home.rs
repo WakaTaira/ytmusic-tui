@@ -22,7 +22,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
-use ytmusic_api::{HomeSection, HomeSectionItem};
+use ytmusic_api::{HomeSection, HomeSectionItem, Track};
 
 use super::{PageState, Theme};
 use crate::formatting::format_duration;
@@ -35,14 +35,16 @@ use crate::formatting::format_duration;
 /// to the playlist view (not yet ported — see [`HomeAction::OpenPlaylist`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HomeAction {
-    /// Play the track with this `video_id` (Python `_play_track`).
-    Play(String),
-    /// Open the playlist with this `playlist_id` (Python `_open_playlist`).
+    /// Play this track (Python `_play_track`). Carries the full [`Track`] (not
+    /// just the `video_id`) so the runtime can seed the queue and the player
+    /// bar with the title/artist/album/duration without a second lookup.
+    Play(Track),
+    /// Open the playlist with this `PlaylistInfo` (Python `_open_playlist`).
     ///
-    /// The playlist view is an M5b target; for now the caller may ignore this
-    /// or surface a "not yet implemented" status. Kept in the enum so the
-    /// dispatch shape matches Python and the M5b wiring is additive.
-    OpenPlaylist(String),
+    /// Carries the full info so the playlist view can label its track list and
+    /// fetch by `playlist_id` (Python passed the whole `PlaylistInfo` to
+    /// `show_track_list`).
+    OpenPlaylist(ytmusic_api::PlaylistInfo),
 }
 
 /// The home recommendations view: a fetch state plus a `(section, item)`
@@ -171,10 +173,8 @@ impl HomeView {
     #[must_use]
     pub fn activate_selected(&self) -> Option<HomeAction> {
         match self.selected_item()? {
-            HomeSectionItem::Track(track) => Some(HomeAction::Play(track.video_id.clone())),
-            HomeSectionItem::Playlist(playlist) => {
-                Some(HomeAction::OpenPlaylist(playlist.playlist_id.clone()))
-            }
+            HomeSectionItem::Track(track) => Some(HomeAction::Play(track.clone())),
+            HomeSectionItem::Playlist(playlist) => Some(HomeAction::OpenPlaylist(playlist.clone())),
         }
     }
 
@@ -499,33 +499,35 @@ mod tests {
 
     // -- activation (Enter) ------------------------------------------------
 
+    /// The `video_id` of an [`HomeAction::Play`], for terse id assertions.
+    fn played_id(action: Option<HomeAction>) -> Option<String> {
+        match action {
+            Some(HomeAction::Play(track)) => Some(track.video_id),
+            _ => None,
+        }
+    }
+
     #[test]
     fn enter_on_track_yields_play_with_video_id() {
         let view = two_section_view();
-        assert_eq!(
-            view.activate_selected(),
-            Some(HomeAction::Play("aaa".to_owned()))
-        );
+        assert_eq!(played_id(view.activate_selected()), Some("aaa".to_owned()));
     }
 
     #[test]
     fn enter_on_playlist_yields_open_playlist() {
         let mut view = two_section_view();
         view.focus_next_section(); // section 1 is the playlist section
-        assert_eq!(
-            view.activate_selected(),
-            Some(HomeAction::OpenPlaylist("PL1".to_owned()))
-        );
+        match view.activate_selected() {
+            Some(HomeAction::OpenPlaylist(info)) => assert_eq!(info.playlist_id, "PL1"),
+            other => panic!("expected OpenPlaylist(PL1), got {other:?}"),
+        }
     }
 
     #[test]
     fn enter_after_moving_selects_the_right_track() {
         let mut view = two_section_view();
         view.select_next_item(); // second track in section 0
-        assert_eq!(
-            view.activate_selected(),
-            Some(HomeAction::Play("bbb".to_owned()))
-        );
+        assert_eq!(played_id(view.activate_selected()), Some("bbb".to_owned()));
     }
 
     // -- rendering (TestBackend) -------------------------------------------

@@ -73,10 +73,12 @@ const EVENT_POLL_TIMEOUT: f64 = 0.25;
 /// Observed-property ids. The values are arbitrary but must be distinct.
 const PROP_ID_TIME_POS: u64 = 1;
 const PROP_ID_DURATION: u64 = 2;
+const PROP_ID_VOLUME: u64 = 3;
 
 /// Property names observed for the player bar feed.
 const PROP_TIME_POS: &str = "time-pos";
 const PROP_DURATION: &str = "duration";
+const PROP_VOLUME: &str = "volume";
 
 /// Default audio-quality level (mirrors `player.py`'s `audio_quality="high"`).
 pub const DEFAULT_AUDIO_QUALITY: &str = "high";
@@ -219,6 +221,11 @@ pub enum PlayerEvent {
     Progress(f64),
     /// A `duration` observation (seconds). Feeds the player bar.
     Duration(f64),
+    /// A `volume` observation (0–100). mpv reports `volume` as a double; the
+    /// player bar carries an integer volume, so the event is rounded to
+    /// `i64`. Corrects the bar's optimistic volume after mpv applies a change
+    /// (resolving the M5a "optimistic-only" volume drift).
+    Volume(i64),
     /// Playback of a new file started (mpv start-file). Optional now-playing
     /// transition for the UI.
     Started,
@@ -254,6 +261,9 @@ fn translate_event(raw: Option<Result<Event<'_>, libmpv2::Error>>) -> Option<Pla
         })) => match name {
             PROP_TIME_POS => Some(PlayerEvent::Progress(v)),
             PROP_DURATION => Some(PlayerEvent::Duration(v)),
+            // mpv reports `volume` as a double; the bar carries an integer, so
+            // round to the nearest whole percent.
+            PROP_VOLUME => Some(PlayerEvent::Volume(v.round() as i64)),
             _ => None,
         },
         // Other events (Seek, AudioReconfig, other PropertyChange formats,
@@ -405,6 +415,10 @@ impl Player {
         // the spike's warm-up register up front).
         mpv.observe_property(PROP_TIME_POS, Format::Double, PROP_ID_TIME_POS)?;
         mpv.observe_property(PROP_DURATION, Format::Double, PROP_ID_DURATION)?;
+        // Observe volume too, so the bar's optimistic update is corrected by
+        // mpv's actual (possibly clamped) value. Fires once at registration
+        // (the current volume) and on every subsequent set.
+        mpv.observe_property(PROP_VOLUME, Format::Double, PROP_ID_VOLUME)?;
 
         // Unbounded by design: ~8 events/sec at steady state (two 4 Hz-ish
         // property feeds); a stalled consumer drains quickly on resume, so a
@@ -919,6 +933,17 @@ mod tests {
         }
 
         #[test]
+        fn test_volume_translates_to_volume_rounded() {
+            // mpv reports volume as a double; the bar carries an integer.
+            let raw = Some(Ok(Event::PropertyChange {
+                name: PROP_VOLUME,
+                change: PropertyData::Double(79.6),
+                reply_userdata: PROP_ID_VOLUME,
+            }));
+            assert_eq!(translate_event(raw), Some(PlayerEvent::Volume(80)));
+        }
+
+        #[test]
         fn test_other_property_is_ignored() {
             let raw = Some(Ok(Event::PropertyChange {
                 name: "pause",
@@ -982,6 +1007,8 @@ mod tests {
                 .expect("observe time-pos");
             mpv.observe_property(PROP_DURATION, Format::Double, PROP_ID_DURATION)
                 .expect("observe duration");
+            mpv.observe_property(PROP_VOLUME, Format::Double, PROP_ID_VOLUME)
+                .expect("observe volume");
 
             let (tx, rx) = mpsc::channel();
             let stop = Arc::new(AtomicBool::new(false));
@@ -1246,6 +1273,17 @@ mod tests {
                 matches!(ev, Some(PlayerEvent::Duration(_))),
                 "expected a positive Duration observation, got {ev:?}"
             );
+        }
+
+        #[test]
+        fn test_volume_observation_feeds_volume_event() {
+            // Setting volume must produce a Volume observation (the M5b sync
+            // path that corrects the bar's optimistic update). mpv fires the
+            // observer once at registration and again on each set.
+            let player = headless_player();
+            player.set_volume(42).expect("set volume");
+            let ev = wait_for(&player, |e| matches!(e, PlayerEvent::Volume(42)));
+            assert_eq!(ev, Some(PlayerEvent::Volume(42)));
         }
 
         #[test]
