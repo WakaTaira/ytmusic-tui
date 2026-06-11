@@ -1,0 +1,9 @@
+{
+  "playlistId": "VLPL_abc123",
+  "title": "My Favourites",
+  "description": "Best songs ever",
+  "count": 42,
+  "thumbnails": [
+    {"url": "https://lh3.google.com/pl_thumb.jpg", "width": 226, "height": 226}
+  ]
+}

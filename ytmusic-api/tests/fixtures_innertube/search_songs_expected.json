@@ -1,0 +1,53 @@
+{
+  "_note": "ytmusicapi-shaped STAGE-1 output of search(filter='songs'). FAITHFUL: matches ytmusicapi 1.12.1 against search_songs.json (ignored 'id' sub-fields dropped).",
+  "items": [
+    {
+      "videoId": "BVDkTrlWPT0",
+      "title": "Suzume (Lo-Fi)",
+      "artists": [
+        {
+          "name": "Kei"
+        }
+      ],
+      "duration": "2:04",
+      "duration_seconds": 124,
+      "album": {
+        "name": "Suzume (Lo-Fi)"
+      }
+    },
+    {
+      "videoId": "1MS2LCzrEdE",
+      "title": "You Know How We Do It",
+      "artists": [
+        {
+          "name": "Lofi Fruits Music"
+        },
+        {
+          "name": "Chill Fruits Music"
+        }
+      ],
+      "duration": "2:11",
+      "duration_seconds": 131,
+      "album": {
+        "name": "90s Oldschool Lofi Hip Hop"
+      }
+    },
+    {
+      "videoId": "iEKesTODIRY",
+      "title": "Japanese Lofi HipHop Mix",
+      "artists": [
+        {
+          "name": "Lofi Fruits Music"
+        },
+        {
+          "name": "Chill Fruits Music"
+        }
+      ],
+      "duration": "1:47",
+      "duration_seconds": 107,
+      "album": {
+        "name": "Tokyo Early Morning Cafe"
+      }
+    }
+  ]
+}

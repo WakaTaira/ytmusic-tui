@@ -1,0 +1,711 @@
+//! Playlist view with two-level navigation (playlist list → track list).
+//!
+//! Port of `src/ytmusic_tui/views/playlist.py`. The view has two levels:
+//!
+//! * **Level 1 — playlist list:** the user's library playlists (title, track
+//!   count). Enter drills into the selected playlist's tracks.
+//! * **Level 2 — track list:** the tracks of one playlist. Enter plays from the
+//!   selected index, queueing the rest (spotify_player style); Escape returns to
+//!   the playlist list.
+//!
+//! # Fetch flow vs Python
+//!
+//! Textual's `PlaylistView` fetched inside the view via `_run_fetch`; here the
+//! view is a pure value and the *runtime* owns the API client (see
+//! [`crate::app`]). So the view exposes the two levels as
+//! [`PageState`]-backed lists that the main loop fills from
+//! [`crate::app::AppEvent::LibraryPlaylistsLoaded`] /
+//! [`crate::app::AppEvent::PlaylistTracksLoaded`], and Enter/Escape resolve to a
+//! [`PlaylistAction`] the main loop turns into commands. The two-level state
+//! machine (which list is showing, the per-level cursor) lives here.
+
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Paragraph, TableState};
+use ytmusic_api::{PlaylistInfo, Track};
+
+use super::filter_bar::matches_filter;
+use super::{PageState, Theme, borderless_table, table_header, table_row};
+use crate::formatting::format_duration;
+
+/// What an Enter / Escape keypress on the playlist view resolves to.
+///
+/// Returned by [`PlaylistView::activate_selected`] (Enter) and
+/// [`PlaylistView::go_back`] (Escape) so the main loop can translate it into an
+/// [`crate::app::AppCommand`]. Mirrors Python's `on_data_table_row_selected`
+/// dispatch.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlaylistAction {
+    /// Drill into a playlist: fetch and show its tracks. The caller issues a
+    /// [`crate::app::AppCommand::FetchPlaylistTracks`]. Python:
+    /// `show_track_list(playlist)`.
+    OpenPlaylist(PlaylistInfo),
+    /// Play the loaded tracks from `start_index`, queueing the rest
+    /// (spotify_player). Python: `set_playlist(tracks, start_index); play(...)`.
+    PlayTracks {
+        tracks: Vec<Track>,
+        start_index: usize,
+    },
+}
+
+/// Which of the two levels the view is currently showing.
+///
+/// The fetch state of each level is held inline so the illegal "showing tracks
+/// but the playlist list errored" combination cannot arise — the view is in
+/// exactly one level at a time.
+#[derive(Debug, Clone)]
+enum Level {
+    /// Level 1: the library playlist list.
+    Playlists(PageState<Vec<PlaylistInfo>>),
+    /// Level 2: the tracks of one playlist. `title` labels the list.
+    Tracks {
+        title: String,
+        state: PageState<Vec<Track>>,
+    },
+}
+
+/// The two-level playlist browser: the active level plus a per-level cursor.
+///
+/// The cursor is kept on the struct (not inside [`Level`]) so it survives a
+/// re-render, and is reset deliberately when a level's data is (re)loaded or the
+/// level switches — matching a freshly focused Textual table.
+#[derive(Debug, Clone)]
+pub struct PlaylistView {
+    level: Level,
+    /// Cursor into the active level's items.
+    cursor: usize,
+    /// The active in-page filter query (`None` = no filter), set by the main
+    /// loop from the filter bar. Applies to whichever level's list is showing.
+    filter: Option<String>,
+}
+
+impl Default for PlaylistView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PlaylistView {
+    /// A fresh playlist view at level 1 in the loading state.
+    ///
+    /// The main loop issues [`crate::app::AppCommand::FetchLibraryPlaylists`]
+    /// when it first switches to this view; until the reply lands the level-1
+    /// list shows "Loading…" (Python `on_mount` → `_show_playlist_list`).
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            level: Level::Playlists(PageState::Loading),
+            cursor: 0,
+            filter: None,
+        }
+    }
+
+    /// Whether the view is showing the track list (level 2) rather than the
+    /// playlist list (level 1). Python `is_viewing_tracks`.
+    #[must_use]
+    pub fn is_viewing_tracks(&self) -> bool {
+        matches!(self.level, Level::Tracks { .. })
+    }
+
+    // -- Data loading (driven by the main loop from AppEvents) -------------
+
+    /// Load the level-1 playlist list and reset to level 1
+    /// (`LibraryPlaylistsLoaded`).
+    pub fn set_playlists(&mut self, playlists: Vec<PlaylistInfo>) {
+        self.level = Level::Playlists(PageState::Loaded(playlists));
+        self.cursor = 0;
+        self.filter = None;
+    }
+
+    /// Switch to level 2 in the loading state for `title`
+    /// (the moment the user drills in, before the tracks arrive).
+    pub fn show_track_list_loading(&mut self, title: impl Into<String>) {
+        self.level = Level::Tracks {
+            title: title.into(),
+            state: PageState::Loading,
+        };
+        self.cursor = 0;
+        self.filter = None;
+    }
+
+    /// Fill the level-2 track list (`PlaylistTracksLoaded`).
+    ///
+    /// Keeps the current `title` if already at level 2; otherwise adopts the
+    /// supplied `title` (covers a tracks-arrive-before-show race, which cannot
+    /// happen with the current single-threaded fold but keeps the method total).
+    pub fn set_tracks(&mut self, title: impl Into<String>, tracks: Vec<Track>) {
+        let title = match &self.level {
+            Level::Tracks { title, .. } => title.clone(),
+            Level::Playlists(_) => title.into(),
+        };
+        self.level = Level::Tracks {
+            title,
+            state: PageState::Loaded(tracks),
+        };
+        self.cursor = 0;
+        self.filter = None;
+    }
+
+    /// Put the active level into the error state with a classified message.
+    pub fn set_error(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        match &mut self.level {
+            Level::Playlists(state) => *state = PageState::Error(message),
+            Level::Tracks { state, .. } => *state = PageState::Error(message),
+        }
+        self.cursor = 0;
+    }
+
+    // -- Navigation --------------------------------------------------------
+
+    /// The number of selectable *visible* (post-filter) rows in the active level
+    /// (0 unless loaded).
+    fn item_count(&self) -> usize {
+        self.visible_indices().len()
+    }
+
+    /// Move the cursor down one row, clamping at the last item (Textual tables
+    /// clamp at their ends; no wrap).
+    pub fn select_next(&mut self) {
+        let last = self.item_count().saturating_sub(1);
+        if self.cursor < last {
+            self.cursor += 1;
+        }
+    }
+
+    /// Move the cursor up one row, clamping at the first item.
+    pub fn select_previous(&mut self) {
+        self.cursor = self.cursor.saturating_sub(1);
+    }
+
+    /// Resolve an Enter keypress into a [`PlaylistAction`].
+    ///
+    /// At level 1: drill into the selected playlist
+    /// ([`PlaylistAction::OpenPlaylist`]). At level 2: play from the cursor,
+    /// queueing the rest ([`PlaylistAction::PlayTracks`]). Returns `None` when
+    /// nothing is selected (not loaded, or an empty list).
+    #[must_use]
+    pub fn activate_selected(&self) -> Option<PlaylistAction> {
+        // The cursor indexes the *visible* (filtered) rows; map it back to the
+        // original item via the visible-index list.
+        let visible = self.visible_indices();
+        let original = *visible.get(self.cursor)?;
+        match &self.level {
+            Level::Playlists(state) => {
+                let playlist = state.loaded()?.get(original)?;
+                Some(PlaylistAction::OpenPlaylist(playlist.clone()))
+            }
+            Level::Tracks { state, .. } => {
+                let tracks = state.loaded()?;
+                // Queue the visible subset, playing from the selected visible
+                // row, so a filtered track list plays only what the user sees.
+                let visible_tracks: Vec<Track> = visible
+                    .iter()
+                    .filter_map(|&i| tracks.get(i).cloned())
+                    .collect();
+                if self.cursor >= visible_tracks.len() {
+                    return None;
+                }
+                Some(PlaylistAction::PlayTracks {
+                    tracks: visible_tracks,
+                    start_index: self.cursor,
+                })
+            }
+        }
+    }
+
+    /// Resolve an Escape keypress: at level 2, return to the level-1 list.
+    ///
+    /// Returns `true` when the view handled the Escape (was at level 2 and
+    /// popped back to level 1), so the caller knows it was consumed and need not
+    /// pop the navigation stack itself. Returns `false` at level 1 (Escape there
+    /// is the app's "go back" / no-op). Mirrors Python's `on_key` Escape branch
+    /// which calls `_show_playlist_list()` only while viewing tracks.
+    ///
+    /// The level-1 list is set back to [`PageState::Loading`]: the caller
+    /// re-issues [`crate::app::AppCommand::FetchLibraryPlaylists`] (Python
+    /// re-fetched in `_show_playlist_list`). Until those tracks arrive the list
+    /// shows "Loading…".
+    pub fn go_back(&mut self) -> bool {
+        if self.is_viewing_tracks() {
+            self.level = Level::Playlists(PageState::Loading);
+            self.cursor = 0;
+            self.filter = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    // -- In-page filter ------------------------------------------------------
+
+    /// Set (or clear) the in-page filter query, resetting the cursor on change.
+    /// Applies to whichever level's list is currently showing.
+    pub fn set_filter(&mut self, query: Option<&str>) {
+        let new = query.map(str::to_owned);
+        if new != self.filter {
+            self.filter = new;
+            self.cursor = 0;
+        }
+    }
+
+    /// The indices into the active level's list that pass the active filter, in
+    /// order. With no filter, every index is returned; empty unless loaded.
+    fn visible_indices(&self) -> Vec<usize> {
+        match &self.level {
+            Level::Playlists(PageState::Loaded(playlists)) => match &self.filter {
+                None => (0..playlists.len()).collect(),
+                Some(q) => playlists
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| matches_filter(q, &[&p.title]))
+                    .map(|(i, _)| i)
+                    .collect(),
+            },
+            Level::Tracks {
+                state: PageState::Loaded(tracks),
+                ..
+            } => match &self.filter {
+                None => (0..tracks.len()).collect(),
+                Some(q) => tracks
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, t)| matches_filter(q, &[&t.title, &t.artist, &t.album]))
+                    .map(|(i, _)| i)
+                    .collect(),
+            },
+            _ => Vec::new(),
+        }
+    }
+
+    /// The `(visible, total)` row counts for the filter bar's label, over the
+    /// active level's list.
+    #[must_use]
+    pub fn filter_counts(&self) -> (usize, usize) {
+        let total = match &self.level {
+            Level::Playlists(state) => state.loaded().map_or(0, Vec::len),
+            Level::Tracks { state, .. } => state.loaded().map_or(0, Vec::len),
+        };
+        (self.visible_indices().len(), total)
+    }
+
+    /// The item under the cursor as a [`PopupItem`] for the action popup: a
+    /// playlist at level 1, a track at level 2. `None` when the list is empty /
+    /// not loaded. Respects the active filter.
+    #[must_use]
+    pub fn selected_popup_item(&self) -> Option<super::popup::PopupItem> {
+        let visible = self.visible_indices();
+        let original = *visible.get(self.cursor)?;
+        match &self.level {
+            Level::Playlists(state) => state
+                .loaded()?
+                .get(original)
+                .map(|p| super::popup::PopupItem::Playlist(p.clone())),
+            Level::Tracks { state, .. } => state
+                .loaded()?
+                .get(original)
+                .map(|t| super::popup::PopupItem::Track(t.clone())),
+        }
+    }
+
+    // -- Rendering ---------------------------------------------------------
+
+    /// Render the active level into `area`.
+    ///
+    /// A muted status line over a borderless DataTable, matching the contract
+    /// (no "Playlists" panel border — the screen is flat `surface`). Level-1
+    /// shows `Title`/`Tracks`; the drilled-in track list shows
+    /// `Title`/`Artist`/`Album`/`Duration`.
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+        let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
+        self.render_status(frame, chunks[0], theme);
+        self.render_list(frame, chunks[1], theme);
+    }
+
+    /// Draw the status line (the playlist count, the track-list header with the
+    /// "[Esc to go back]" hint, or the Loading/Error line).
+    fn render_status(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+        let (text, is_error) = self.status_text();
+        let style = if is_error {
+            Style::default().fg(theme.primary)
+        } else {
+            Style::default()
+                .fg(theme.text_muted)
+                .add_modifier(Modifier::ITALIC)
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(text, style)))
+                .style(Style::default().bg(theme.surface)),
+            area,
+        );
+    }
+
+    /// Compute the status text and whether it is an error (for styling).
+    fn status_text(&self) -> (String, bool) {
+        match &self.level {
+            Level::Playlists(PageState::Loaded(playlists)) => {
+                if playlists.is_empty() {
+                    ("No playlists found".to_owned(), false)
+                } else {
+                    (format!("{} playlist(s)", playlists.len()), false)
+                }
+            }
+            Level::Playlists(PageState::Loading) => ("Loading playlists...".to_owned(), false),
+            Level::Playlists(PageState::Error(msg)) => (msg.clone(), true),
+            Level::Tracks {
+                title,
+                state: PageState::Loaded(tracks),
+            } => {
+                if tracks.is_empty() {
+                    (format!("{title} - empty playlist [Esc to go back]"), false)
+                } else {
+                    (
+                        format!("{title} - {} track(s) [Esc to go back]", tracks.len()),
+                        false,
+                    )
+                }
+            }
+            Level::Tracks {
+                title,
+                state: PageState::Loading,
+            } => (format!("Loading tracks for {title}..."), false),
+            Level::Tracks {
+                state: PageState::Error(msg),
+                ..
+            } => (msg.clone(), true),
+        }
+    }
+
+    /// Draw the active level's borderless DataTable (or nothing while
+    /// loading/errored — the status line carries that message).
+    fn render_list(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+        let visible = self.visible_indices();
+        let (labels, widths, rows): (Vec<&str>, Vec<Constraint>, Vec<Vec<String>>) =
+            match &self.level {
+                Level::Playlists(PageState::Loaded(playlists)) => (
+                    vec!["Title", "Tracks"],
+                    vec![Constraint::Min(10), Constraint::Length(9)],
+                    visible
+                        .iter()
+                        .filter_map(|&i| playlists.get(i))
+                        .map(playlist_columns)
+                        .collect(),
+                ),
+                Level::Tracks {
+                    state: PageState::Loaded(tracks),
+                    ..
+                } => (
+                    vec!["Title", "Artist", "Album", "Duration"],
+                    vec![
+                        Constraint::Min(10),
+                        Constraint::Length(20),
+                        Constraint::Length(20),
+                        Constraint::Length(10),
+                    ],
+                    visible
+                        .iter()
+                        .filter_map(|&i| tracks.get(i))
+                        .map(track_columns)
+                        .collect(),
+                ),
+                // Loading / Error: the status line already shows the message.
+                _ => return,
+            };
+
+        let header = table_header(theme, &labels, true);
+        let table_rows = rows
+            .into_iter()
+            .map(|cols| table_row(theme, &cols, true))
+            .collect();
+        let table = borderless_table(theme, header, table_rows, widths, true);
+
+        let mut state = TableState::default();
+        if self.item_count() > 0 {
+            state.select(Some(self.cursor.min(self.item_count() - 1)));
+        }
+        frame.render_stateful_widget(table, area, &mut state);
+    }
+}
+
+/// Format a playlist as level-1 `Title`/`Tracks` columns.
+fn playlist_columns(playlist: &PlaylistInfo) -> Vec<String> {
+    let count = if playlist.track_count > 0 {
+        playlist.track_count.to_string()
+    } else {
+        String::new()
+    };
+    vec![playlist.title.clone(), count]
+}
+
+/// Format a track as level-2 `Title`/`Artist`/`Album`/`Duration` columns.
+fn track_columns(track: &Track) -> Vec<String> {
+    let duration = format_duration(track.duration_seconds);
+    let duration = if duration == "—" {
+        String::new()
+    } else {
+        duration
+    };
+    vec![
+        track.title.clone(),
+        track.artist.clone(),
+        track.album.clone(),
+        duration,
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    // -- fixtures ----------------------------------------------------------
+
+    fn playlist(id: &str, title: &str, count: u32) -> PlaylistInfo {
+        PlaylistInfo::new(id, title, "", count, "")
+    }
+
+    fn track(id: &str, title: &str, artist: &str) -> Track {
+        Track::new(id, title, artist, "Album", 100.0, "")
+    }
+
+    fn loaded_list_view() -> PlaylistView {
+        let mut view = PlaylistView::new();
+        view.set_playlists(vec![
+            playlist("PL1", "My Mix", 25),
+            playlist("PL2", "Chill", 10),
+        ]);
+        view
+    }
+
+    fn loaded_track_view() -> PlaylistView {
+        let mut view = PlaylistView::new();
+        view.show_track_list_loading("My Mix");
+        view.set_tracks(
+            "My Mix",
+            vec![
+                track("v1", "First", "Artist A"),
+                track("v2", "Second", "Artist B"),
+            ],
+        );
+        view
+    }
+
+    fn render_to_string(view: &PlaylistView, w: u16, h: u16) -> String {
+        let backend = TestBackend::new(w, h);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        terminal
+            .draw(|frame| view.render(frame, frame.area(), &theme))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let width = buffer.area().width as usize;
+        let mut out = String::new();
+        for (i, cell) in buffer.content().iter().enumerate() {
+            out.push_str(cell.symbol());
+            if (i + 1) % width == 0 {
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    // -- initial state -----------------------------------------------------
+
+    #[test]
+    fn new_view_is_level_one_loading() {
+        let view = PlaylistView::new();
+        assert!(!view.is_viewing_tracks());
+        // Loading status renders before data lands.
+        let text = render_to_string(&view, 40, 6);
+        assert!(text.contains("Loading playlists..."), "text:\n{text}");
+    }
+
+    // -- level 1: playlist list --------------------------------------------
+
+    #[test]
+    fn set_playlists_loads_level_one() {
+        let view = loaded_list_view();
+        assert!(!view.is_viewing_tracks());
+        assert_eq!(view.item_count(), 2);
+    }
+
+    #[test]
+    fn enter_on_playlist_opens_it() {
+        let view = loaded_list_view();
+        match view.activate_selected() {
+            Some(PlaylistAction::OpenPlaylist(info)) => assert_eq!(info.playlist_id, "PL1"),
+            other => panic!("expected OpenPlaylist(PL1), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn enter_after_moving_opens_the_right_playlist() {
+        let mut view = loaded_list_view();
+        view.select_next();
+        match view.activate_selected() {
+            Some(PlaylistAction::OpenPlaylist(info)) => assert_eq!(info.playlist_id, "PL2"),
+            other => panic!("expected OpenPlaylist(PL2), got {other:?}"),
+        }
+    }
+
+    // -- level 2: track list -----------------------------------------------
+
+    #[test]
+    fn show_track_list_loading_switches_level() {
+        let mut view = loaded_list_view();
+        view.show_track_list_loading("My Mix");
+        assert!(view.is_viewing_tracks());
+        let text = render_to_string(&view, 50, 6);
+        assert!(text.contains("Loading tracks for My Mix"), "text:\n{text}");
+    }
+
+    #[test]
+    fn set_tracks_loads_level_two() {
+        let view = loaded_track_view();
+        assert!(view.is_viewing_tracks());
+        assert_eq!(view.item_count(), 2);
+    }
+
+    #[test]
+    fn enter_on_track_plays_from_index_queueing_rest() {
+        let mut view = loaded_track_view();
+        view.select_next(); // cursor on the second track
+        match view.activate_selected() {
+            Some(PlaylistAction::PlayTracks {
+                tracks,
+                start_index,
+            }) => {
+                // spotify_player: the WHOLE list is queued, starting at index 1.
+                assert_eq!(start_index, 1);
+                assert_eq!(tracks.len(), 2);
+                assert_eq!(tracks[start_index].video_id, "v2");
+            }
+            other => panic!("expected PlayTracks, got {other:?}"),
+        }
+    }
+
+    // -- navigation: cursor clamps -----------------------------------------
+
+    #[test]
+    fn select_next_clamps_at_end() {
+        let mut view = loaded_list_view(); // 2 items
+        view.select_next();
+        view.select_next(); // would be index 2 -> clamps at 1
+        assert_eq!(view.cursor, 1);
+    }
+
+    #[test]
+    fn select_previous_clamps_at_top() {
+        let mut view = loaded_list_view();
+        view.select_previous();
+        assert_eq!(view.cursor, 0);
+    }
+
+    #[test]
+    fn navigation_is_noop_when_not_loaded() {
+        let mut view = PlaylistView::new(); // level 1 loading
+        view.select_next();
+        assert_eq!(view.cursor, 0);
+        assert!(view.activate_selected().is_none());
+    }
+
+    // -- Escape / go_back --------------------------------------------------
+
+    #[test]
+    fn go_back_from_tracks_returns_to_list_and_is_handled() {
+        let mut view = loaded_track_view();
+        assert!(view.is_viewing_tracks());
+        let handled = view.go_back();
+        assert!(handled, "Escape at level 2 must be consumed by the view");
+        assert!(!view.is_viewing_tracks());
+        assert_eq!(view.cursor, 0);
+    }
+
+    #[test]
+    fn go_back_from_list_is_not_handled() {
+        let mut view = loaded_list_view();
+        let handled = view.go_back();
+        assert!(
+            !handled,
+            "Escape at level 1 is the app's go-back, not the view's"
+        );
+        assert!(!view.is_viewing_tracks());
+    }
+
+    #[test]
+    fn drilling_in_then_back_resets_cursor() {
+        let mut view = loaded_list_view();
+        view.select_next(); // cursor 1 on the list
+        view.show_track_list_loading("Chill");
+        assert_eq!(view.cursor, 0); // reset on level switch
+        view.go_back();
+        assert_eq!(view.cursor, 0); // reset on go-back
+    }
+
+    // -- error state -------------------------------------------------------
+
+    #[test]
+    fn set_error_renders_on_active_level() {
+        let mut view = loaded_list_view();
+        view.set_error("Session expired — run: ytmusic-tui auth");
+        let text = render_to_string(&view, 60, 6);
+        assert!(text.contains("Session expired"), "text:\n{text}");
+    }
+
+    // -- rendering (TestBackend) -------------------------------------------
+
+    #[test]
+    fn level_one_render_shows_playlist_titles_and_counts() {
+        let view = loaded_list_view();
+        let text = render_to_string(&view, 50, 8);
+        assert!(text.contains("My Mix"), "text:\n{text}");
+        assert!(text.contains("Chill"), "text:\n{text}");
+        // The borderless DataTable has a "Tracks" header column carrying the
+        // numeric count.
+        assert!(text.contains("Tracks"), "missing Tracks column:\n{text}");
+        assert!(text.contains("25"), "missing track count:\n{text}");
+        assert!(text.contains("2 playlist(s)"), "text:\n{text}");
+    }
+
+    #[test]
+    fn level_two_render_shows_tracks_and_back_hint() {
+        let view = loaded_track_view();
+        let text = render_to_string(&view, 60, 8);
+        assert!(text.contains("First"), "text:\n{text}");
+        assert!(text.contains("Artist A"), "text:\n{text}");
+        assert!(text.contains("Esc to go back"), "text:\n{text}");
+        assert!(text.contains("2 track(s)"), "text:\n{text}");
+    }
+
+    #[test]
+    fn render_highlights_selection_with_primary_bg_and_no_glyph() {
+        // The borderless DataTable cursor is a primary-colored row background,
+        // not a `▶` glyph.
+        let view = loaded_list_view();
+        let text = render_to_string(&view, 50, 8);
+        assert!(!text.contains('▶'), "stray cursor glyph:\n{text}");
+
+        let backend = TestBackend::new(50, 8);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        terminal
+            .draw(|frame| view.render(frame, frame.area(), &theme))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        assert!(
+            buffer.content().iter().any(|c| c.bg == theme.primary),
+            "selected row not highlighted with primary"
+        );
+    }
+
+    #[test]
+    fn empty_playlist_list_renders_message() {
+        let mut view = PlaylistView::new();
+        view.set_playlists(vec![]);
+        let text = render_to_string(&view, 40, 6);
+        assert!(text.contains("No playlists found"), "text:\n{text}");
+    }
+}

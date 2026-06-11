@@ -1,0 +1,104 @@
+[package]
+name = "ytmusic-tui"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "YouTube Music TUI client (Rust port)"
+
+[[bin]]
+name = "ytmusic-tui"
+path = "src/main.rs"
+
+[lib]
+name = "ytmusic_tui"
+path = "src/lib.rs"
+
+[dependencies]
+# Display-width measurement for toast height (CJK/emoji are 2 columns wide).
+# Already in the tree transitively via ratatui — zero new lock entries.
+unicode-width = "0.2"
+# Domain models (Track, AlbumInfo, etc.) and parse helpers live in the api crate.
+# This makes the dependency flow app → api instead of api → app.
+ytmusic-api = { version = "0.1.0", path = "../ytmusic-api" }
+
+rand = "0.9"
+
+# TOML parsing for config.toml and keymap.toml.  `features = ["parse"]` is the
+# default; no extra features needed — we only deserialize, never serialize.
+toml = { version = "0.8", default-features = false, features = ["parse"] }
+
+# Typed deserialization via #[derive(Deserialize)].  The "derive" feature is the
+# only thing we need; serde_json comes in via ytmusic-api so we reuse that dep
+# transitively, but we declare serde directly so the feature is stable.
+serde = { version = "1", features = ["derive"] }
+
+# libmpv binding for the audio player (M2). 6.0.0 builds against system
+# libmpv >= 2.x and exposes the end-file reason as a discriminable value,
+# which is the non-negotiable selection criterion (see spikes/mpv_spike).
+# `default-features = false` drops the `render` (OpenGL) feature: the player
+# needs only audio playback + the event loop.
+libmpv2 = { version = "6.0.0", default-features = false }
+
+# Direct dependency on the -sys crate (pinned to the version libmpv2 6.0.0
+# uses) for the safe `mpv_error_str(code) -> &'static str` helper that turns a
+# raw mpv error int into a human-readable string. libmpv2 re-exports only types
+# from -sys, not this function, so a direct dep is required.
+libmpv2-sys = "4.0.1"
+
+# Typed error definitions for the player module.
+thiserror = "2"
+
+# Terminal UI framework (M5). 0.30 bundles the crossterm backend by default
+# (the `crossterm` feature). Drives the synchronous render loop on the main
+# thread; widgets are pure values rendered into a Buffer, which is what the
+# TestBackend-based render tests assert against.
+ratatui = "0.30"
+
+# Terminal control + input events. Pinned to 0.29 to match the crossterm
+# version ratatui 0.30 links by default, so there is exactly one crossterm in
+# the tree (no 0.28/0.29 split). Used directly in main.rs for raw mode, the
+# alternate screen, and `event::poll`/`event::read` in the input loop.
+crossterm = "0.29"
+
+# Async runtime for the dedicated runtime thread (`Runtime::new` on a
+# std::thread, owning the InnerTubeClient and, in M6, the MPRIS server).
+# `rt-multi-thread` so the runtime can drive concurrent API calls; `sync` for
+# the `tokio::sync::mpsc` UI->runtime command channel; `macros` for
+# `#[tokio::test]`. The UI loop itself stays synchronous (ratatui), so there is
+# no `#[tokio::main]`.
+tokio = { version = "1", default-features = false, features = [
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    # "time" is used by the ignored live MPRIS test; declared explicitly
+    # rather than relying on zbus/mpris-server pulling it transitively.
+    "time",
+] }
+
+# Server-side MPRIS2 implementation (M6), built on zbus. 0.10.0 depends on zbus
+# 5.14+ (resolves to 5.16.x). The `tokio` feature switches zbus's reactor onto
+# the runtime thread's tokio runtime so the MPRIS server shares it (no extra
+# reactor thread). Crate + version chosen and proven live in spikes/mpris_spike
+# (FINDINGS.md): the async zbus write path makes EAGAIN/WouldBlock structurally
+# non-fatal — the exact failure class that hung the Python (dbus-fast) build.
+# `unstable` exposes `Server::connection()` so the connection-death watcher can
+# observe the SAME bus link the server serves on (MessageStream over it), rather
+# than a parallel session connection. This is the death-observability path the
+# M0 spike proved (FINDINGS.md §"Connection-death detection recipe").
+mpris-server = { version = "0.10", features = ["tokio", "unstable"] }
+
+# Direct zbus dep only for the low-level connection-death observability APIs
+# (MessageStream / Connection::monitor_activity) the MPRIS task arms; must match
+# the version mpris-server resolves and enable the same tokio reactor.
+zbus = { version = "5.16", default-features = false, features = ["tokio"] }
+
+# Stream adapter (StreamExt::next) for draining the connection-death
+# MessageStream. zbus already pulls futures-util transitively; declared directly
+# so the `StreamExt` import is stable.
+futures-util = { version = "0.3", default-features = false }
+
+[dev-dependencies]
+# Temporary directory support for config-loading tests.
+tempfile = "3"

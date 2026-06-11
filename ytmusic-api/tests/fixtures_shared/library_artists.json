@@ -1,0 +1,16 @@
+[
+  {
+    "browseId": "UC_1",
+    "artist": "Artist A",
+    "thumbnails": [
+      {"url": "https://lh3.google.com/lib_artist.jpg", "width": 226, "height": 226}
+    ]
+  },
+  {
+    "browseId": "UC_2",
+    "artist": "Artist B",
+    "thumbnails": [
+      {"url": "https://lh3.google.com/lib_artist.jpg", "width": 226, "height": 226}
+    ]
+  }
+]

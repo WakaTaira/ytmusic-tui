@@ -1,0 +1,389 @@
+{
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "tabs": [
+        {
+          "tabRenderer": {
+            "content": {
+              "sectionListRenderer": {
+                "contents": [
+                  {
+                    "musicResponsiveHeaderRenderer": {
+                      "title": {
+                        "runs": [
+                          {
+                            "text": "Morning Coffee Lo-Fi Chillhop Beats for Focus"
+                          }
+                        ]
+                      },
+                      "subtitle": {
+                        "runs": [
+                          {
+                            "text": "Album"
+                          },
+                          {
+                            "text": " • "
+                          },
+                          {
+                            "text": "2025"
+                          }
+                        ]
+                      },
+                      "secondSubtitle": {
+                        "runs": [
+                          {
+                            "text": "20 songs"
+                          },
+                          {
+                            "text": " • "
+                          },
+                          {
+                            "text": "1 hour"
+                          }
+                        ]
+                      },
+                      "thumbnail": {
+                        "musicThumbnailRenderer": {
+                          "thumbnail": {
+                            "thumbnails": [
+                              {
+                                "url": "https://yt3.googleusercontent.com/lo3kBR_9sjWn8Mu1ABvfXbsiiYxC1nImd49gfyqJiQJ5Ew-DXJa1nzIVXXBkA6L6gHWydIuyudxptSkV=w60-h60-l90-rj",
+                                "width": 60,
+                                "height": 60
+                              },
+                              {
+                                "url": "https://yt3.googleusercontent.com/lo3kBR_9sjWn8Mu1ABvfXbsiiYxC1nImd49gfyqJiQJ5Ew-DXJa1nzIVXXBkA6L6gHWydIuyudxptSkV=w544-h544-l90-rj",
+                                "width": 544,
+                                "height": 544
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "straplineTextOne": {
+                        "runs": [
+                          {
+                            "text": "LO-FI BEATS",
+                            "navigationEndpoint": {
+                              "browseEndpoint": {
+                                "browseId": "UCkXd-JReGCj32ZjQVywYUqw",
+                                "browseEndpointContextSupportedConfigs": {
+                                  "browseEndpointContextMusicConfig": {
+                                    "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "text": " & "
+                          },
+                          {
+                            "text": "Lofi Chillhop",
+                            "navigationEndpoint": {
+                              "browseEndpoint": {
+                                "browseId": "UCVnOFhxd8AeUUQ-zW767tSw",
+                                "browseEndpointContextSupportedConfigs": {
+                                  "browseEndpointContextMusicConfig": {
+                                    "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      "buttons": []
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "secondaryContents": {
+        "sectionListRenderer": {
+          "contents": [
+            {
+              "musicShelfRenderer": {
+                "contents": [
+                  {
+                    "musicResponsiveListItemRenderer": {
+                      "flexColumns": [
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "Lofi Study Chill",
+                                  "navigationEndpoint": {
+                                    "watchEndpoint": {
+                                      "videoId": "hVJcHYs2LgA"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {}
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "30K plays"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      ],
+                      "fixedColumns": [
+                        {
+                          "musicResponsiveListItemFixedColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "2:01"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      ],
+                      "index": {
+                        "runs": [
+                          {
+                            "text": "1"
+                          }
+                        ]
+                      },
+                      "overlay": {
+                        "musicItemThumbnailOverlayRenderer": {
+                          "content": {
+                            "musicPlayButtonRenderer": {
+                              "playNavigationEndpoint": {
+                                "watchEndpoint": {
+                                  "videoId": "hVJcHYs2LgA",
+                                  "watchEndpointMusicSupportedConfigs": {
+                                    "watchEndpointMusicConfig": {
+                                      "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "menu": {
+                        "menuRenderer": {
+                          "items": [],
+                          "topLevelButtons": [
+                            {
+                              "likeButtonRenderer": {
+                                "likeStatus": "INDIFFERENT"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "musicResponsiveListItemRenderer": {
+                      "flexColumns": [
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "Chillhop Gentle Breeze",
+                                  "navigationEndpoint": {
+                                    "watchEndpoint": {
+                                      "videoId": "OAKZj4PHGX8"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {}
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "16K plays"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      ],
+                      "fixedColumns": [
+                        {
+                          "musicResponsiveListItemFixedColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "4:00"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      ],
+                      "index": {
+                        "runs": [
+                          {
+                            "text": "2"
+                          }
+                        ]
+                      },
+                      "overlay": {
+                        "musicItemThumbnailOverlayRenderer": {
+                          "content": {
+                            "musicPlayButtonRenderer": {
+                              "playNavigationEndpoint": {
+                                "watchEndpoint": {
+                                  "videoId": "OAKZj4PHGX8",
+                                  "watchEndpointMusicSupportedConfigs": {
+                                    "watchEndpointMusicConfig": {
+                                      "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "menu": {
+                        "menuRenderer": {
+                          "items": [],
+                          "topLevelButtons": [
+                            {
+                              "likeButtonRenderer": {
+                                "likeStatus": "INDIFFERENT"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "musicResponsiveListItemRenderer": {
+                      "flexColumns": [
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "Lofi Work Mode",
+                                  "navigationEndpoint": {
+                                    "watchEndpoint": {
+                                      "videoId": "RMIz-jDgjB0"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {}
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "14K plays"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      ],
+                      "fixedColumns": [
+                        {
+                          "musicResponsiveListItemFixedColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "2:33"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      ],
+                      "index": {
+                        "runs": [
+                          {
+                            "text": "3"
+                          }
+                        ]
+                      },
+                      "overlay": {
+                        "musicItemThumbnailOverlayRenderer": {
+                          "content": {
+                            "musicPlayButtonRenderer": {
+                              "playNavigationEndpoint": {
+                                "watchEndpoint": {
+                                  "videoId": "RMIz-jDgjB0",
+                                  "watchEndpointMusicSupportedConfigs": {
+                                    "watchEndpointMusicConfig": {
+                                      "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "menu": {
+                        "menuRenderer": {
+                          "items": [],
+                          "topLevelButtons": [
+                            {
+                              "likeButtonRenderer": {
+                                "likeStatus": "INDIFFERENT"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                ],
+                "shelfDivider": {
+                  "musicShelfDividerRenderer": {
+                    "hidden": true
+                  }
+                },
+                "contentsMultiSelectable": true
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

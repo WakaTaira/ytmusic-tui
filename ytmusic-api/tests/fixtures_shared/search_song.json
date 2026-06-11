@@ -1,0 +1,15 @@
+{
+  "category": "Songs",
+  "resultType": "song",
+  "videoId": "dQw4w9WgXcQ",
+  "title": "Never Gonna Give You Up",
+  "artists": [{"name": "Rick Astley", "id": "UCabc"}],
+  "album": {"name": "Whenever You Need Somebody", "id": "MPREabc"},
+  "duration": "3:33",
+  "duration_seconds": 213,
+  "thumbnails": [
+    {"url": "https://lh3.google.com/small.jpg", "width": 60, "height": 60},
+    {"url": "https://lh3.google.com/large.jpg", "width": 226, "height": 226}
+  ],
+  "isExplicit": false
+}

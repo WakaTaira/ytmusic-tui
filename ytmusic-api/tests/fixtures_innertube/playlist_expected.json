@@ -1,0 +1,43 @@
+{
+  "_note": "ytmusicapi-shaped STAGE-1 output: the track dicts parse_playlist_items yields for get_playlist's shelf. FAITHFUL: matches ytmusicapi 1.12.1 against playlist.json (ignored artist 'id' fields dropped).",
+  "items": [
+    {
+      "videoId": "7s4RmXxcZvM",
+      "title": "「宝島」(吹奏楽) ピアノで弾きました",
+      "artists": [
+        {
+          "name": "Fujii Kaze"
+        }
+      ],
+      "duration": "2:59",
+      "duration_seconds": 179,
+      "album": null
+    },
+    {
+      "videoId": "KwZFalJdsbQ",
+      "title": "Futon Anthem",
+      "artists": [
+        {
+          "name": "Test Uploader C"
+        }
+      ],
+      "duration": "3:13",
+      "duration_seconds": 193,
+      "album": null
+    },
+    {
+      "videoId": "hlr_7Za6v0M",
+      "title": "Returns To Dreamland",
+      "artists": [
+        {
+          "name": "Mr Goofy Guy"
+        }
+      ],
+      "duration": "1:55",
+      "duration_seconds": 115,
+      "album": {
+        "name": "Returns To Dreamland"
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+[package]
+name = "ytmusic-api"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "YouTube Music InnerTube client (auth + transport core)"
+
+[lib]
+name = "ytmusic_api"
+path = "src/lib.rs"
+
+[dependencies]
+# Async runtime. Only the bits the transport needs: a multi-thread runtime so
+# blocking integration callers can spin one up, plus macros for #[tokio::test].
+tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-thread", "macros"] }
+
+# HTTP client. `default-features = false` drops reqwest's bundled OpenSSL/native
+# TLS; `rustls` swaps in a pure-Rust TLS stack that verifies against the OS trust
+# store via rustls-platform-verifier (no system OpenSSL build dependency). The
+# Cookie header is managed manually from browser.json, so the cookie store
+# feature is intentionally omitted.
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+
+# JSON (de)serialization for the InnerTube request body and untyped response
+# navigation (serde_json::Value mirrors ytmusicapi's dict-walking parse path).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# SHA-1 for the SAPISIDHASH authorization header. The maintained RustCrypto
+# implementation; `Digest` trait drives the one-shot hash.
+sha1 = "0.11"
+
+# Typed error definitions for the ApiError taxonomy.
+thiserror = "2"

@@ -1,0 +1,66 @@
+{
+  "_note": "ytmusicapi-shaped STAGE-1 output of get_album (post-processed): track 'album' is the album TITLE string and 'artists' inherit the album-level artists. Subset = the fields stage-2 dict_to_album_track reads. Captured from ytmusicapi 1.12.1 against album.json.",
+  "title": "Morning Coffee Lo-Fi Chillhop Beats for Focus",
+  "artists": [
+    {
+      "name": "LO-FI BEATS"
+    },
+    {
+      "name": "Lofi Chillhop"
+    }
+  ],
+  "year": "2025",
+  "tracks": [
+    {
+      "videoId": "hVJcHYs2LgA",
+      "title": "Lofi Study Chill",
+      "artists": [
+        {
+          "name": "LO-FI BEATS",
+          "id": "UCkXd-JReGCj32ZjQVywYUqw"
+        },
+        {
+          "name": "Lofi Chillhop",
+          "id": "UCVnOFhxd8AeUUQ-zW767tSw"
+        }
+      ],
+      "album": "Morning Coffee Lo-Fi Chillhop Beats for Focus",
+      "duration": "2:01",
+      "duration_seconds": 121
+    },
+    {
+      "videoId": "OAKZj4PHGX8",
+      "title": "Chillhop Gentle Breeze",
+      "artists": [
+        {
+          "name": "LO-FI BEATS",
+          "id": "UCkXd-JReGCj32ZjQVywYUqw"
+        },
+        {
+          "name": "Lofi Chillhop",
+          "id": "UCVnOFhxd8AeUUQ-zW767tSw"
+        }
+      ],
+      "album": "Morning Coffee Lo-Fi Chillhop Beats for Focus",
+      "duration": "4:00",
+      "duration_seconds": 240
+    },
+    {
+      "videoId": "RMIz-jDgjB0",
+      "title": "Lofi Work Mode",
+      "artists": [
+        {
+          "name": "LO-FI BEATS",
+          "id": "UCkXd-JReGCj32ZjQVywYUqw"
+        },
+        {
+          "name": "Lofi Chillhop",
+          "id": "UCVnOFhxd8AeUUQ-zW767tSw"
+        }
+      ],
+      "album": "Morning Coffee Lo-Fi Chillhop Beats for Focus",
+      "duration": "2:33",
+      "duration_seconds": 153
+    }
+  ]
+}

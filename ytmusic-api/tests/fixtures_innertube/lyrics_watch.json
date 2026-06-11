@@ -1,0 +1,557 @@
+{
+  "responseContext": {
+    "serviceTrackingParams": [
+      {
+        "service": "CSI",
+        "params": [
+          {
+            "key": "c",
+            "value": "WEB_REMIX"
+          },
+          {
+            "key": "cver",
+            "value": "1.20260610.01.00"
+          },
+          {
+            "key": "yt_li",
+            "value": "1"
+          },
+          {
+            "key": "GetWatchPage_rid",
+            "value": "0xbf6e24e9d5eb27c8"
+          }
+        ]
+      },
+      {
+        "service": "GFEEDBACK",
+        "params": [
+          {
+            "key": "logged_in",
+            "value": "1"
+          }
+        ]
+      },
+      {
+        "service": "ECATCHER",
+        "params": [
+          {
+            "key": "client.version",
+            "value": "1.20000101"
+          },
+          {
+            "key": "client.name",
+            "value": "WEB_REMIX"
+          }
+        ]
+      }
+    ],
+    "innertubeTokenJar": {
+      "appTokens": [
+        {
+          "type": 2,
+          "value": "EicKI1FQblNRTi13ZDhQelh3a0Z5Y0RXS3phdG5TNGlXN2FYTDcwEAA=",
+          "maxAgeSeconds": 86400,
+          "creationTimeUsec": "1781123693333604"
+        }
+      ]
+    },
+    "responseId": "IhMI2PGq6ML9lAMVx0CDCB3TXxv3"
+  },
+  "contents": {
+    "singleColumnMusicWatchNextResultsRenderer": {
+      "tabbedRenderer": {
+        "watchNextTabbedResultsRenderer": {
+          "tabs": [
+            {
+              "tabRenderer": {
+                "title": "Up next",
+                "content": {
+                  "musicQueueRenderer": {
+                    "content": {
+                      "playlistPanelRenderer": {
+                        "contents": [
+                          {
+                            "playlistPanelVideoWrapperRenderer": {
+                              "primaryRenderer": {
+                                "playlistPanelVideoRenderer": {
+                                  "videoId": "bSnlKl_PoQU",
+                                  "title": {
+                                    "runs": [
+                                      {
+                                        "text": "Bohemian Rhapsody"
+                                      }
+                                    ]
+                                  },
+                                  "lengthText": {
+                                    "runs": [
+                                      {
+                                        "text": "5:55"
+                                      }
+                                    ]
+                                  },
+                                  "thumbnail": {
+                                    "thumbnails": [
+                                      {
+                                        "url": "https://yt3.googleusercontent.com/9CrMB2k2WFBUGXQXlaFfwP8e5_Q8FiUqQ8ljMGWm22VyLmvLZEqBMPUNjf6FNZrmMDUBTlEsFxk88_kOCQ=w544-h544-l90-rj",
+                                        "width": 544,
+                                        "height": 544
+                                      }
+                                    ]
+                                  },
+                                  "longBylineText": {
+                                    "runs": [
+                                      {
+                                        "text": "Queen",
+                                        "navigationEndpoint": {
+                                          "browseEndpoint": {
+                                            "browseId": "UCEPMVbUzImPl4p8k4LkGevA",
+                                            "browseEndpointContextSupportedConfigs": {
+                                              "browseEndpointContextMusicConfig": {
+                                                "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "text": " • "
+                                      },
+                                      {
+                                        "text": "A Night At The Opera (Deluxe Edition 2011 Remaster)",
+                                        "navigationEndpoint": {
+                                          "browseEndpoint": {
+                                            "browseId": "MPREb_qS4JbK1E3Kr",
+                                            "browseEndpointContextSupportedConfigs": {
+                                              "browseEndpointContextMusicConfig": {
+                                                "pageType": "MUSIC_PAGE_TYPE_ALBUM"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "text": " • "
+                                      },
+                                      {
+                                        "text": "1975"
+                                      }
+                                    ]
+                                  },
+                                  "menu": {
+                                    "menuRenderer": {
+                                      "items": []
+                                    }
+                                  }
+                                }
+                              },
+                              "counterpart": [
+                                {
+                                  "counterpartRenderer": {
+                                    "playlistPanelVideoRenderer": {
+                                      "videoId": "fJ9rUzIMcZQ",
+                                      "title": {
+                                        "runs": [
+                                          {
+                                            "text": "Bohemian Rhapsody (Live)"
+                                          }
+                                        ]
+                                      },
+                                      "lengthText": {
+                                        "runs": [
+                                          {
+                                            "text": "6:00"
+                                          }
+                                        ]
+                                      },
+                                      "thumbnail": {
+                                        "thumbnails": [
+                                          {
+                                            "url": "https://i.ytimg.com/vi/fJ9rUzIMcZQ/hqdefault.jpg?sqp=-oaymwEWCMACELQBIAQqCghQEJADGFogjgJIWg&rs=AMzJL3nv69bFgzNVEI8NDARXFWp4Z8dTVQ",
+                                            "width": 320,
+                                            "height": 180
+                                          }
+                                        ]
+                                      },
+                                      "longBylineText": {
+                                        "runs": [
+                                          {
+                                            "text": "Queen"
+                                          },
+                                          {
+                                            "text": " • "
+                                          },
+                                          {
+                                            "text": "2B views"
+                                          },
+                                          {
+                                            "text": " • "
+                                          },
+                                          {
+                                            "text": "14M likes"
+                                          }
+                                        ]
+                                      },
+                                      "menu": {
+                                        "menuRenderer": {
+                                          "items": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        ],
+                        "playlistId": "RDAMVMbSnlKl_PoQU",
+                        "isInfinite": true
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "tabRenderer": {
+                "endpoint": {
+                  "browseEndpoint": {
+                    "browseId": "MPLYt_qS4JbK1E3Kr-11",
+                    "browseEndpointContextSupportedConfigs": {
+                      "browseEndpointContextMusicConfig": {
+                        "pageType": "MUSIC_PAGE_TYPE_TRACK_LYRICS"
+                      }
+                    }
+                  }
+                },
+                "title": "Lyrics"
+              }
+            },
+            {
+              "tabRenderer": {
+                "endpoint": {
+                  "browseEndpoint": {
+                    "browseId": "MPTRt_qS4JbK1E3Kr-11",
+                    "browseEndpointContextSupportedConfigs": {
+                      "browseEndpointContextMusicConfig": {
+                        "pageType": "MUSIC_PAGE_TYPE_TRACK_RELATED"
+                      }
+                    }
+                  }
+                },
+                "title": "Related"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "currentVideoEndpoint": {
+    "watchEndpoint": {
+      "videoId": "bSnlKl_PoQU",
+      "playlistId": "RDAMVMbSnlKl_PoQU",
+      "index": 0,
+      "playerParams": "ygYQNTZCNDRGNkQxMDU1N0NDNg%3D%3D",
+      "playlistSetVideoId": "56B44F6D10557CC6",
+      "loggingContext": {
+        "vssLoggingContext": {
+          "serializedContextData": "GhFSREFNVk1iU25sS2xfUG9RVQ%3D%3D"
+        }
+      }
+    }
+  },
+  "playerOverlays": {
+    "playerOverlayRenderer": {
+      "actions": [
+        {
+          "likeButtonRenderer": {
+            "target": {
+              "videoId": "bSnlKl_PoQU"
+            },
+            "likeStatus": "INDIFFERENT",
+            "likesAllowed": true,
+            "serviceEndpoints": [
+              {
+                "likeEndpoint": {
+                  "status": "LIKE",
+                  "target": {
+                    "videoId": "bSnlKl_PoQU"
+                  },
+                  "actions": [
+                    {
+                      "musicLibraryStatusUpdateCommand": {
+                        "libraryStatus": "MUSIC_LIBRARY_STATUS_IN_LIBRARY",
+                        "addToLibraryFeedbackToken": "AB9zfpI6blodFzBOOQ1ptFve6ZG4HPMaLZ9sMX9kp6bNzYnJ63vmX45tHGMRm3JcFkocOLGFXX5GfB1f9-IXhkCTMVQBz87yzg"
+                      }
+                    }
+                  ],
+                  "likeParams": "OAI%3D"
+                }
+              },
+              {
+                "likeEndpoint": {
+                  "status": "DISLIKE",
+                  "target": {
+                    "videoId": "bSnlKl_PoQU"
+                  },
+                  "dislikeParams": "OAI%3D"
+                }
+              },
+              {
+                "likeEndpoint": {
+                  "status": "INDIFFERENT",
+                  "target": {
+                    "videoId": "bSnlKl_PoQU"
+                  },
+                  "removeLikeParams": "OAI%3D"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "browserMediaSession": {
+        "browserMediaSessionRenderer": {
+          "album": {
+            "runs": [
+              {
+                "text": "A Night At The Opera (Deluxe Edition 2011 Remaster)"
+              }
+            ]
+          },
+          "thumbnailDetails": {
+            "thumbnails": [
+              {
+                "url": "https://yt3.googleusercontent.com/9CrMB2k2WFBUGXQXlaFfwP8e5_Q8FiUqQ8ljMGWm22VyLmvLZEqBMPUNjf6FNZrmMDUBTlEsFxk88_kOCQ=w544-h544-l90-rj",
+                "width": 544,
+                "height": 544
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "videoReporting": {
+    "reportFormModalRenderer": {
+      "optionsSupportedRenderers": {
+        "optionsRenderer": {
+          "items": [
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Sexual content"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLYlNubEtsX1BvUVVQBTILYlNubEtsX1BvUVWQASyYAQGoAQM%3D"
+                  }
+                }
+              }
+            },
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Violent or repulsive content"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLYlNubEtsX1BvUVVQBTILYlNubEtsX1BvUVWQATaYAQGoAQM%3D"
+                  }
+                }
+              }
+            },
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Hateful or abusive content"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLYlNubEtsX1BvUVVQBTILYlNubEtsX1BvUVWQARSYAQGoAQM%3D"
+                  }
+                }
+              }
+            },
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Harassment or bullying"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLYlNubEtsX1BvUVVQBTILYlNubEtsX1BvUVWQARGYAQGoAQM%3D"
+                  }
+                }
+              }
+            },
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Harmful or dangerous acts"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLYlNubEtsX1BvUVVQBTILYlNubEtsX1BvUVWQAQ2YAQGoAQM%3D"
+                  }
+                }
+              }
+            },
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Misinformation"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLYlNubEtsX1BvUVVQBTILYlNubEtsX1BvUVWQAUGYAQGoAQM%3D"
+                  }
+                }
+              }
+            },
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Child abuse"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLYlNubEtsX1BvUVVQBTILYlNubEtsX1BvUVWQAQyYAQGoAQM%3D"
+                  }
+                }
+              }
+            },
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Legal issue"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLYlNubEtsX1BvUVVQBTILYlNubEtsX1BvUVWQAUWYAQGoAQM%3D"
+                  }
+                }
+              }
+            },
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Promotes terrorism"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLYlNubEtsX1BvUVVQBTILYlNubEtsX1BvUVWQATWYAQGoAQM%3D"
+                  }
+                }
+              }
+            },
+            {
+              "optionSelectableItemRenderer": {
+                "text": {
+                  "runs": [
+                    {
+                      "text": "Spam or misleading"
+                    }
+                  ]
+                },
+                "submitEndpoint": {
+                  "flagEndpoint": {
+                    "flagAction": "EAciDwoLYlNubEtsX1BvUVVQBTILYlNubEtsX1BvUVWQATGYAQGoAQM%3D"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "title": {
+        "runs": [
+          {
+            "text": "Report video"
+          }
+        ]
+      },
+      "submitButton": {
+        "buttonRenderer": {
+          "style": "STYLE_BRAND",
+          "isDisabled": true,
+          "text": {
+            "runs": [
+              {
+                "text": "Report"
+              }
+            ]
+          }
+        }
+      },
+      "cancelButton": {
+        "buttonRenderer": {
+          "style": "STYLE_TEXT",
+          "isDisabled": false,
+          "text": {
+            "runs": [
+              {
+                "text": "Cancel"
+              }
+            ]
+          }
+        }
+      },
+      "footer": {
+        "runs": [
+          {
+            "text": "If you are the copyright owner of this video and believe it has been uploaded without your permission, please follow "
+          },
+          {
+            "text": "these directions",
+            "navigationEndpoint": {
+              "urlEndpoint": {
+                "url": "//support.google.com/youtube/answer/2807622?hl=en"
+              }
+            }
+          },
+          {
+            "text": " to submit a copyright infringement notice."
+          }
+        ]
+      }
+    }
+  },
+  "queueContextParams": "CAIaEVJEQU1WTWJTbmxLbF9Qb1FVIN_ay-jC_ZQDKiNRUG5TUU4td2Q4UHpYd2tGeWNEV0t6YXRuUzRpVzdhWEw3MEIRUkRBTVZNYlNubEtsX1BvUVVQAVoECAAQAWIAcAF4AZIBDEVnQVlBUSUzRCUzRKIBHxIQNTZCNDRGNkQxMDU1N0NDNhoLYlNubEtsX1BvUVU="
+}

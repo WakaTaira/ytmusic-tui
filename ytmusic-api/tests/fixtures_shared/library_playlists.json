@@ -1,0 +1,20 @@
+[
+  {
+    "playlistId": "PL_1",
+    "title": "Chill",
+    "description": "Best songs ever",
+    "count": 10,
+    "thumbnails": [
+      {"url": "https://lh3.google.com/pl_thumb.jpg", "width": 226, "height": 226}
+    ]
+  },
+  {
+    "playlistId": "PL_2",
+    "title": "Workout",
+    "description": "Best songs ever",
+    "count": "25",
+    "thumbnails": [
+      {"url": "https://lh3.google.com/pl_thumb.jpg", "width": 226, "height": 226}
+    ]
+  }
+]

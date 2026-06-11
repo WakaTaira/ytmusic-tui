@@ -1,0 +1,95 @@
+{
+  "responseContext": {
+    "serviceTrackingParams": [
+      {
+        "service": "GFEEDBACK",
+        "params": [
+          {
+            "key": "has_unlimited_entitlement",
+            "value": "True"
+          },
+          {
+            "key": "browse_id",
+            "value": "MPLYt_qS4JbK1E3Kr-11"
+          },
+          {
+            "key": "browse_id_prefix",
+            "value": ""
+          },
+          {
+            "key": "logged_in",
+            "value": "1"
+          }
+        ]
+      },
+      {
+        "service": "CSI",
+        "params": [
+          {
+            "key": "c",
+            "value": "WEB_REMIX"
+          },
+          {
+            "key": "cver",
+            "value": "1.20260610.01.00"
+          },
+          {
+            "key": "yt_li",
+            "value": "1"
+          },
+          {
+            "key": "GetBrowseTrackLyricsPage_rid",
+            "value": "0x3d5941c7a2f69b3c"
+          }
+        ]
+      },
+      {
+        "service": "ECATCHER",
+        "params": [
+          {
+            "key": "client.version",
+            "value": "1.20000101"
+          },
+          {
+            "key": "client.name",
+            "value": "WEB_REMIX"
+          }
+        ]
+      }
+    ],
+    "responseId": "IhMI6cTY6ML9lAMVSUYPAh01DCEN"
+  },
+  "contents": {
+    "sectionListRenderer": {
+      "contents": [
+        {
+          "musicDescriptionShelfRenderer": {
+            "description": {
+              "runs": [
+                {
+                  "text": "Is this the real life? Is this just fantasy?\nCaught in a landslide, no escape from reality\nOpen your eyes, look up to the skies and see\nI'm just a poor boy (ooh, poor boy), I need no sympathy\nBecause I'm easy come, easy go, little high, little low\nAny way the wind blows doesn't really matter to me, to me\n\nMama, just killed a man\nPut a gun against his head, pulled my trigger, now he's dead\nMama, life had just begun\nBut now I've gone and thrown it all away\nMama, ooh, didn't mean to make you cry\nIf I'm not back again this time tomorrow\nCarry on, carry on as if nothing really matters\n\nToo late, my time has come\nSends shivers down my spine, body's aching all the time\nGoodbye everybody, I've got to go\nGotta leave you all behind, and face the truth\nMama, ooh (any way the wind blows)\nI don't wanna die\nI sometimes wish I'd never been born at all\n\nI see a little silhouetto of a man\nScaramouche, Scaramouche, will you do the Fandango?\nThunderbolt and lightning, very, very frightening me\n(Galileo) Galileo (Galileo), Galileo, Galileo Figaro, magnifico\nI'm just a poor boy, nobody loves me\n(He's just a poor boy from a poor family)\n(Spare him his life from this monstrosity)\n\nEasy come, easy go, will you let me go?\nBismillah! No, we will not let you go (let him go)\nBismillah! We will not let you go (let him go)\nBismillah! We will not let you go (let me go)\nWill not let you go (let me go)\nWill not let you go, never, never, never (let me go)\nNo, no, no, no, no, no, no\n\nOh, mamma mia, mamma mia\nMamma mia, let me go\nBeelzebub has a devil put aside for me, for me, for me\n\nSo you think you can stone me and spit in my eye?\nSo you think you can love me and leave me to die?\nOh, baby, can't do this to me, baby\nJust gotta get out, just gotta get right outta here\n\nOoh\nOoh, yeah, ooh, yeah\n\nNothing really matters, anyone can see\nNothing really matters\nNothing really matters to me\n\nAny way the wind blows"
+                }
+              ]
+            },
+            "maxCollapsedLines": 0,
+            "maxExpandedLines": 0,
+            "onShowCommands": [
+              {
+                "logLyricEventCommand": {
+                  "serializedLyricInfo": "EhB0X3FTNEpiSzFFM0tyLTExGAIiCTEzMjU5NjU3OA=="
+                }
+              }
+            ],
+            "footer": {
+              "runs": [
+                {
+                  "text": "Source: Musixmatch"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

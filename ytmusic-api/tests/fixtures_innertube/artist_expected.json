@@ -1,0 +1,66 @@
+{
+  "_note": "ytmusicapi-shaped STAGE-1 output of get_artist. Only the sections api.py consumes are kept: songs.results, albums.results, related.results. The 'singles' carousel that ytmusicapi also returns is intentionally OMITTED because api.py ignores it. channel_id in the domain type is the INPUT id, not subscriptionButton.channelId. Captured from ytmusicapi 1.12.1 against artist.json.",
+  "name": "Lofi Girl",
+  "description": "",
+  "songs": [
+    {
+      "videoId": "zJymZhHQmfs",
+      "title": "Snowman",
+      "artists": [
+        {
+          "name": "WYS",
+          "id": "UC5x6ZNyH0Ohcvzrex31H2VA"
+        },
+        {
+          "name": "Lofi Girl",
+          "id": "UCi5YpRRZmwegT235crEZ2YQ"
+        }
+      ],
+      "album": {
+        "name": "Snowman",
+        "id": "MPREb_EbO5NzWKli0"
+      },
+      "duration": null,
+      "duration_seconds": null
+    },
+    {
+      "videoId": "B_IrQoHbhAE",
+      "title": "Whirlpools",
+      "artists": [
+        {
+          "name": "Casiio",
+          "id": "UCF-mN-XHUCabVfi71bU_Ecg"
+        },
+        {
+          "name": "Kainbeats",
+          "id": "UCTC2H5TTtKCRs5rG_spJDAw"
+        },
+        {
+          "name": "Lofi Girl",
+          "id": "UCi5YpRRZmwegT235crEZ2YQ"
+        }
+      ],
+      "album": {
+        "name": "Best-of lofi hip-hop 2024",
+        "id": "MPREb_fVf9LjrtLpk"
+      },
+      "duration": null,
+      "duration_seconds": null
+    }
+  ],
+  "albums": [
+    {
+      "browseId": "MPREb_uIxpnvfvGsl",
+      "title": "Lofi Girl x The Sims - cozy music to feel ooh be gah!",
+      "artists": [],
+      "year": "2026"
+    },
+    {
+      "browseId": "MPREb_Q4sZOGlm97U",
+      "title": "4 A.M Chill Session",
+      "artists": [],
+      "year": "2026"
+    }
+  ],
+  "related": []
+}

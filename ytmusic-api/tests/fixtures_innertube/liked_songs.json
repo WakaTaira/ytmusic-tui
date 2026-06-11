@@ -1,0 +1,765 @@
+{
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "secondaryContents": {
+        "sectionListRenderer": {
+          "contents": [
+            {
+              "musicPlaylistShelfRenderer": {
+                "playlistId": "LM",
+                "header": {
+                  "musicSideAlignedItemRenderer": {}
+                },
+                "contents": [
+                  {
+                    "musicResponsiveListItemRenderer": {
+                      "flexColumns": [
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "「宝島」(吹奏楽) ピアノで弾きました",
+                                  "navigationEndpoint": {
+                                    "watchEndpoint": {
+                                      "videoId": "7s4RmXxcZvM",
+                                      "playlistId": "LM",
+                                      "loggingContext": {
+                                        "vssLoggingContext": {
+                                          "serializedContextData": "GgJMTQ%3D%3D"
+                                        }
+                                      },
+                                      "watchEndpointMusicSupportedConfigs": {
+                                        "watchEndpointMusicConfig": {
+                                          "musicVideoType": "MUSIC_VIDEO_TYPE_OMV"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "Fujii Kaze",
+                                  "navigationEndpoint": {
+                                    "browseEndpoint": {
+                                      "browseId": "UCxjfYUXFwmjUCGHMeBri5_w",
+                                      "browseEndpointContextSupportedConfigs": {
+                                        "browseEndpointContextMusicConfig": {
+                                          "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {},
+                            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_MEDIUM"
+                          }
+                        }
+                      ],
+                      "fixedColumns": [
+                        {
+                          "musicResponsiveListItemFixedColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "2:59"
+                                }
+                              ]
+                            },
+                            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH",
+                            "size": "MUSIC_RESPONSIVE_LIST_ITEM_FIXED_COLUMN_SIZE_SMALL"
+                          }
+                        }
+                      ],
+                      "thumbnail": {
+                        "musicThumbnailRenderer": {
+                          "thumbnail": {
+                            "thumbnails": [
+                              {
+                                "url": "https://i.ytimg.com/vi/7s4RmXxcZvM/sddefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCghqEJQEGHgg6AJIWg&rs=AMzJL3kmiSqGCECzKX_yEwv6iQhQhocvPQ",
+                                "width": 400,
+                                "height": 225
+                              }
+                            ]
+                          },
+                          "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_UNSPECIFIED",
+                          "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FIT"
+                        }
+                      },
+                      "overlay": {
+                        "musicItemThumbnailOverlayRenderer": {
+                          "content": {
+                            "musicPlayButtonRenderer": {
+                              "playNavigationEndpoint": {
+                                "watchEndpoint": {
+                                  "videoId": "7s4RmXxcZvM",
+                                  "playlistId": "LM",
+                                  "playerParams": "ygYQNTZCNDRGNkQxMDU1N0NDNg%3D%3D",
+                                  "playlistSetVideoId": "56B44F6D10557CC6",
+                                  "loggingContext": {
+                                    "vssLoggingContext": {
+                                      "serializedContextData": "GgJMTQ%3D%3D"
+                                    }
+                                  },
+                                  "watchEndpointMusicSupportedConfigs": {
+                                    "watchEndpointMusicConfig": {
+                                      "musicVideoType": "MUSIC_VIDEO_TYPE_OMV"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "musicResponsiveListItemRenderer": {
+                      "flexColumns": [
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "Futon Anthem",
+                                  "navigationEndpoint": {
+                                    "watchEndpoint": {
+                                      "videoId": "KwZFalJdsbQ",
+                                      "playlistId": "LM",
+                                      "loggingContext": {
+                                        "vssLoggingContext": {
+                                          "serializedContextData": "GgJMTQ%3D%3D"
+                                        }
+                                      },
+                                      "watchEndpointMusicSupportedConfigs": {
+                                        "watchEndpointMusicConfig": {
+                                          "musicVideoType": "MUSIC_VIDEO_TYPE_UGC"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "Test Uploader C",
+                                  "navigationEndpoint": {
+                                    "browseEndpoint": {
+                                      "browseId": "UCtestChannelIdPlaceholder3",
+                                      "browseEndpointContextSupportedConfigs": {
+                                        "browseEndpointContextMusicConfig": {
+                                          "pageType": "MUSIC_PAGE_TYPE_USER_CHANNEL"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {},
+                            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_MEDIUM"
+                          }
+                        }
+                      ],
+                      "fixedColumns": [
+                        {
+                          "musicResponsiveListItemFixedColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "3:13"
+                                }
+                              ]
+                            },
+                            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH",
+                            "size": "MUSIC_RESPONSIVE_LIST_ITEM_FIXED_COLUMN_SIZE_SMALL"
+                          }
+                        }
+                      ],
+                      "thumbnail": {
+                        "musicThumbnailRenderer": {
+                          "thumbnail": {
+                            "thumbnails": [
+                              {
+                                "url": "https://i.ytimg.com/vi/KwZFalJdsbQ/sddefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCghqEJQEGHgg6AJIWg&rs=AMzJL3m6SvpUaMpENXfjngkCar8rcWxASQ",
+                                "width": 400,
+                                "height": 225
+                              }
+                            ]
+                          },
+                          "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_UNSPECIFIED",
+                          "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FIT"
+                        }
+                      },
+                      "overlay": {
+                        "musicItemThumbnailOverlayRenderer": {
+                          "content": {
+                            "musicPlayButtonRenderer": {
+                              "playNavigationEndpoint": {
+                                "watchEndpoint": {
+                                  "videoId": "KwZFalJdsbQ",
+                                  "playlistId": "LM",
+                                  "playerParams": "ygYQMjg5RjRBNDZERjBBMzBEMg%3D%3D",
+                                  "playlistSetVideoId": "289F4A46DF0A30D2",
+                                  "loggingContext": {
+                                    "vssLoggingContext": {
+                                      "serializedContextData": "GgJMTQ%3D%3D"
+                                    }
+                                  },
+                                  "watchEndpointMusicSupportedConfigs": {
+                                    "watchEndpointMusicConfig": {
+                                      "musicVideoType": "MUSIC_VIDEO_TYPE_UGC"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "musicResponsiveListItemRenderer": {
+                      "flexColumns": [
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "Returns To Dreamland",
+                                  "navigationEndpoint": {
+                                    "watchEndpoint": {
+                                      "videoId": "hlr_7Za6v0M",
+                                      "playlistId": "LM",
+                                      "params": "ogMLUllBVGktUHFzTEU%3D",
+                                      "loggingContext": {
+                                        "vssLoggingContext": {
+                                          "serializedContextData": "GgJMTQ%3D%3D"
+                                        }
+                                      },
+                                      "watchEndpointMusicSupportedConfigs": {
+                                        "watchEndpointMusicConfig": {
+                                          "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "Mr Goofy Guy"
+                                }
+                              ]
+                            },
+                            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                          }
+                        },
+                        {
+                          "musicResponsiveListItemFlexColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "Returns To Dreamland",
+                                  "navigationEndpoint": {
+                                    "browseEndpoint": {
+                                      "browseId": "MPREb_gpAy67tM1Mv",
+                                      "browseEndpointContextSupportedConfigs": {
+                                        "browseEndpointContextMusicConfig": {
+                                          "pageType": "MUSIC_PAGE_TYPE_ALBUM"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_MEDIUM"
+                          }
+                        }
+                      ],
+                      "fixedColumns": [
+                        {
+                          "musicResponsiveListItemFixedColumnRenderer": {
+                            "text": {
+                              "runs": [
+                                {
+                                  "text": "1:55"
+                                }
+                              ]
+                            },
+                            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH",
+                            "size": "MUSIC_RESPONSIVE_LIST_ITEM_FIXED_COLUMN_SIZE_SMALL"
+                          }
+                        }
+                      ],
+                      "thumbnail": {
+                        "musicThumbnailRenderer": {
+                          "thumbnail": {
+                            "thumbnails": [
+                              {
+                                "url": "https://yt3.googleusercontent.com/sbY5RcPwwWRYgt0gwRolK-RAXf3G2Fw-4vXZRWLUSQQOjj_ZUZQt1x8FpoKs1TSUD3DarZg1EgQNyIc=w120-h120-l90-rj",
+                                "width": 120,
+                                "height": 120
+                              }
+                            ]
+                          },
+                          "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_UNSPECIFIED",
+                          "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FIT"
+                        }
+                      },
+                      "overlay": {
+                        "musicItemThumbnailOverlayRenderer": {
+                          "content": {
+                            "musicPlayButtonRenderer": {
+                              "playNavigationEndpoint": {
+                                "watchEndpoint": {
+                                  "videoId": "hlr_7Za6v0M",
+                                  "playlistId": "LM",
+                                  "params": "ogMLUllBVGktUHFzTEU%3D",
+                                  "playerParams": "ygYQMDE3MjA4RkFBODUyMzNGOQ%3D%3D",
+                                  "playlistSetVideoId": "017208FAA85233F9",
+                                  "loggingContext": {
+                                    "vssLoggingContext": {
+                                      "serializedContextData": "GgJMTQ%3D%3D"
+                                    }
+                                  },
+                                  "watchEndpointMusicSupportedConfigs": {
+                                    "watchEndpointMusicConfig": {
+                                      "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "collapsedItemCount": 40,
+                "contentsMultiSelectable": true,
+                "targetId": "LM"
+              }
+            }
+          ]
+        }
+      },
+      "tabs": [
+        {
+          "tabRenderer": {
+            "content": {
+              "sectionListRenderer": {
+                "contents": [
+                  {
+                    "musicResponsiveHeaderRenderer": {
+                      "thumbnail": {
+                        "musicThumbnailRenderer": {
+                          "thumbnail": {
+                            "thumbnails": [
+                              {
+                                "url": "https://www.gstatic.com/youtube/media/ytm/images/pbg/liked-songs-delhi-1200.png",
+                                "width": 1200,
+                                "height": 1200
+                              }
+                            ]
+                          },
+                          "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_UNSPECIFIED",
+                          "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_UNSPECIFIED"
+                        }
+                      },
+                      "buttons": [
+                        {
+                          "downloadButtonRenderer": {
+                            "style": "STYLE_DEFAULT",
+                            "targetId": "playlist-download-button",
+                            "command": {
+                              "offlinePlaylistEndpoint": {
+                                "playlistId": "LM",
+                                "action": "ACTION_ADD",
+                                "offlineability": {
+                                  "offlineabilityRenderer": {
+                                    "offlineable": true
+                                  }
+                                },
+                                "onAddCommand": {
+                                  "getDownloadActionCommand": {
+                                    "playlistId": "LM",
+                                    "params": "CAI%3D"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "musicPlayButtonRenderer": {
+                            "playNavigationEndpoint": {
+                              "watchEndpoint": {
+                                "videoId": "7s4RmXxcZvM",
+                                "playlistId": "LM",
+                                "params": "wAEB",
+                                "loggingContext": {
+                                  "vssLoggingContext": {
+                                    "serializedContextData": "GgJMTQ%3D%3D"
+                                  }
+                                },
+                                "watchEndpointMusicSupportedConfigs": {
+                                  "watchEndpointMusicConfig": {
+                                    "musicVideoType": "MUSIC_VIDEO_TYPE_OMV"
+                                  }
+                                }
+                              }
+                            },
+                            "playIcon": {
+                              "iconType": "PLAY_ARROW"
+                            },
+                            "pauseIcon": {
+                              "iconType": "PAUSE"
+                            },
+                            "iconColor": 4278387459,
+                            "backgroundColor": 0,
+                            "activeBackgroundColor": 0,
+                            "loadingIndicatorColor": 14745645,
+                            "playingIcon": {
+                              "iconType": "PAUSE"
+                            },
+                            "iconLoadingColor": 0,
+                            "activeScaleFactor": 1,
+                            "accessibilityPlayData": {},
+                            "accessibilityPauseData": {}
+                          }
+                        },
+                        {
+                          "menuRenderer": {
+                            "items": [
+                              {
+                                "menuNavigationItemRenderer": {
+                                  "text": {
+                                    "runs": [
+                                      {
+                                        "text": "Shuffle play"
+                                      }
+                                    ]
+                                  },
+                                  "icon": {
+                                    "iconType": "MUSIC_SHUFFLE"
+                                  },
+                                  "navigationEndpoint": {
+                                    "watchPlaylistEndpoint": {
+                                      "playlistId": "LM",
+                                      "params": "wAEB8gECKAE%3D"
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "menuNavigationItemRenderer": {
+                                  "text": {
+                                    "runs": [
+                                      {
+                                        "text": "Start mix"
+                                      }
+                                    ]
+                                  },
+                                  "icon": {
+                                    "iconType": "MIX"
+                                  },
+                                  "navigationEndpoint": {
+                                    "watchPlaylistEndpoint": {
+                                      "playlistId": "RDAMPLLM",
+                                      "params": "wAEB"
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "menuServiceItemRenderer": {
+                                  "text": {
+                                    "runs": [
+                                      {
+                                        "text": "Play next"
+                                      }
+                                    ]
+                                  },
+                                  "icon": {
+                                    "iconType": "QUEUE_PLAY_NEXT"
+                                  },
+                                  "serviceEndpoint": {
+                                    "queueAddEndpoint": {
+                                      "queueTarget": {
+                                        "playlistId": "LM",
+                                        "onEmptyQueue": {
+                                          "watchEndpoint": {
+                                            "playlistId": "LM"
+                                          }
+                                        }
+                                      },
+                                      "queueInsertPosition": "INSERT_AFTER_CURRENT_VIDEO",
+                                      "commands": [
+                                        {
+                                          "addToToastAction": {
+                                            "item": {
+                                              "notificationTextRenderer": {
+                                                "successResponseText": {
+                                                  "runs": [
+                                                    {
+                                                      "text": "Playlist will play next"
+                                                    }
+                                                  ]
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "menuServiceItemRenderer": {
+                                  "text": {
+                                    "runs": [
+                                      {
+                                        "text": "Add to queue"
+                                      }
+                                    ]
+                                  },
+                                  "icon": {
+                                    "iconType": "ADD_TO_REMOTE_QUEUE"
+                                  },
+                                  "serviceEndpoint": {
+                                    "queueAddEndpoint": {
+                                      "queueTarget": {
+                                        "playlistId": "LM",
+                                        "onEmptyQueue": {
+                                          "watchEndpoint": {
+                                            "playlistId": "LM"
+                                          }
+                                        }
+                                      },
+                                      "queueInsertPosition": "INSERT_AT_END",
+                                      "commands": [
+                                        {
+                                          "addToToastAction": {
+                                            "item": {
+                                              "notificationTextRenderer": {
+                                                "successResponseText": {
+                                                  "runs": [
+                                                    {
+                                                      "text": "Playlist added to queue"
+                                                    }
+                                                  ]
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "toggleMenuServiceItemRenderer": {
+                                  "defaultText": {
+                                    "runs": [
+                                      {
+                                        "text": "Pin to Listen again"
+                                      }
+                                    ]
+                                  },
+                                  "defaultIcon": {
+                                    "iconType": "KEEP"
+                                  },
+                                  "defaultServiceEndpoint": {
+                                    "feedbackEndpoint": {
+                                      "feedbackToken": "AB9zfpLxw9YqnXAVIvGjbcQZS4VfFRQZUKbJXia9u44wegTAfruj0wx10Pi4KXBF6VbJKqGZ4HWm-JS6D8rZOfLTlmduki9gyw"
+                                    }
+                                  },
+                                  "toggledText": {
+                                    "runs": [
+                                      {
+                                        "text": "Unpin from Listen again"
+                                      }
+                                    ]
+                                  },
+                                  "toggledIcon": {
+                                    "iconType": "KEEP_OFF"
+                                  },
+                                  "toggledServiceEndpoint": {
+                                    "feedbackEndpoint": {
+                                      "feedbackToken": "AB9zfpI4MVM9kmz4IhKWDWC1uTvO2rcz7hxl5hoTAMHCYRPnsuEYIoofY3gpW6L1MH-aXlK5QYGtTwGh9ODG75NNCr14em8pLw"
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ],
+                      "title": {
+                        "runs": [
+                          {
+                            "text": "Liked Music"
+                          }
+                        ]
+                      },
+                      "subtitle": {
+                        "runs": [
+                          {
+                            "text": "Auto playlist"
+                          },
+                          {
+                            "text": " • "
+                          },
+                          {
+                            "text": "2026"
+                          }
+                        ]
+                      },
+                      "description": {
+                        "musicDescriptionShelfRenderer": {
+                          "description": {
+                            "runs": [
+                              {
+                                "text": "Music you like in any YouTube app will show here. You can change this in Settings."
+                              }
+                            ]
+                          },
+                          "moreButton": {
+                            "toggleButtonRenderer": {
+                              "isToggled": false,
+                              "isDisabled": false,
+                              "defaultIcon": {
+                                "iconType": "EXPAND"
+                              },
+                              "defaultText": {
+                                "runs": [
+                                  {
+                                    "text": "More"
+                                  }
+                                ]
+                              },
+                              "toggledIcon": {
+                                "iconType": "COLLAPSE"
+                              },
+                              "toggledText": {
+                                "runs": [
+                                  {
+                                    "text": "Less"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "shelfStyle": "MUSIC_SHELF_STYLE_OPEN_DIALOG_ON_CLICK"
+                        }
+                      },
+                      "secondSubtitle": {
+                        "runs": [
+                          {
+                            "text": "48 songs"
+                          },
+                          {
+                            "text": " • "
+                          },
+                          {
+                            "text": "2+ hours"
+                          }
+                        ]
+                      },
+                      "facepile": {
+                        "avatarStackViewModel": {
+                          "avatars": [
+                            {
+                              "avatarViewModel": {
+                                "image": {
+                                  "sources": [
+                                    {
+                                      "url": "https://yt3.ggpht.com/placeholder-user-avatar=s48-c-k-c0x00000000-no-cc-rj-rp"
+                                    }
+                                  ],
+                                  "processor": {
+                                    "borderImageProcessor": {
+                                      "circular": true
+                                    }
+                                  }
+                                },
+                                "avatarImageSize": "AVATAR_SIZE_XS"
+                              }
+                            }
+                          ],
+                          "text": {
+                            "content": "TestUser"
+                          },
+                          "rendererContext": {
+                            "accessibilityContext": {
+                              "label": "TestUser"
+                            },
+                            "commandContext": {
+                              "onTap": {
+                                "innertubeCommand": {
+                                  "browseEndpoint": {
+                                    "browseId": "UCtestChannelIdPlaceholder0",
+                                    "browseEndpointContextSupportedConfigs": {
+                                      "browseEndpointContextMusicConfig": {
+                                        "pageType": "MUSIC_PAGE_TYPE_USER_CHANNEL"
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

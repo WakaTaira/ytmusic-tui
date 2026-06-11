@@ -2,69 +2,100 @@
 
 A terminal music player for YouTube Music, built for keyboard-driven workflows.
 
-> **Status:** Beta. Playback, search, library, history, lyrics, radio, likes, MPRIS, theming, and custom keymaps are functional. A Rust rewrite is planned once the Python version stabilizes.
+> **Status:** Beta. Playback, search, library, history, lyrics, radio, likes,
+> MPRIS, theming, and custom keymaps are functional.
 
-![Home view](screenshots/home.svg)
-
-<details>
-<summary>More screenshots</summary>
-
-![Library view](screenshots/library.svg)
-![Queue view](screenshots/queue.svg)
-
-</details>
+> **Screenshots:** coming soon.
 
 ## What is this?
 
-**ytmusic-tui** brings your YouTube Music library to the terminal -- playlists, search, recommendations, and queue management with vim-style keybindings. Inspired by [spotify_player](https://github.com/aome510/spotify_player), designed for tiling WM setups.
+**ytmusic-tui** brings your YouTube Music library to the terminal — playlists,
+search, recommendations, and queue management with vim-style keybindings.
+Inspired by [spotify_player](https://github.com/aome510/spotify_player),
+designed for tiling WM setups.
 
 ## Features
 
-- **Multi-category search** -- songs, albums, artists, and playlists in a 4-pane grid, with `#songs:`-style category filters
+- **Multi-category search** — songs, albums, artists, and playlists in a 4-pane
+  grid, with `#songs:`-style category filters
 - **Home view** with personalized recommendations
-- **Playlist browsing** -- drill into playlists, queue from any track
-- **3-pane library** -- Playlists, Albums, and Artists tabs (Tab to cycle)
-- **Album and Artist views** -- dedicated detail pages for albums and artists
+- **Playlist browsing** — drill into playlists, queue from any track
+- **3-pane library** — Playlists, Albums, and Artists tabs (Tab to cycle)
+- **Album and Artist views** — dedicated detail pages
 - **Queue management** with shuffle and repeat
-- **Radio** -- start a YouTube Music radio from any track (`R`)
-- **Likes** -- like/unlike tracks without leaving the terminal (`f`)
-- **Recently played** -- your listening history as a page (`H`)
+- **Radio** — start a YouTube Music radio from any track (`R`)
+- **Likes** — like/unlike tracks without leaving the terminal (`f`)
+- **Recently played** — your listening history as a page (`H`)
 - **Lyrics page** (`L` key)
-- **MPRIS2 integration** -- playerctl / waybar / KDE Connect control and metadata
-- **Navigation history** -- Esc goes back through visited pages
-- **Action popup** (`.` key) -- context actions for the selected track/playlist/album
-- **Filter bar** (`/` key) -- live-filter the current list without leaving the view
-- **Custom keymaps** via `~/.config/ytmusic-tui/keymap.toml`
-- **Responsive layout** -- adapts orientation based on terminal size
+- **MPRIS2 integration** — playerctl / waybar / KDE Connect control and metadata
+- **Navigation history** — Esc goes back through visited pages
+- **Action popup** (`.` key) — context actions for the selected track/playlist/album
+- **Filter bar** (`/` key) — live-filter the current list without leaving the view
+- **Custom keymaps** via `~/.config/ytmusic-tui/keymap.toml`, including two-key
+  sequences (`g s` for search page)
+- **Responsive layout** — adapts orientation based on terminal size
 - **mpv-based audio backend** (plays YouTube URLs directly via ytdl-hook)
 - **Vim-style keybindings** (spotify_player-compatible defaults, fully remappable)
 - **TOML configuration** (`~/.config/ytmusic-tui/config.toml`)
 - **Theme system** with four built-in palettes: synthwave, nord, gruvbox, catppuccin
-- **Theme switcher** (`T` key) -- change themes on the fly
+- **Theme switcher** (`T` key) — change themes on the fly
 - **Player bar** with progress, volume, and now-playing info
 
 ## Requirements
 
-- Python 3.12+
-- [mpv](https://mpv.io/)
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp)
+- [libmpv2](https://mpv.io/) — the shared library `libmpv.so.2` must be on the
+  system library path.
+  - Arch Linux: `sudo pacman -S mpv` (includes `libmpv.so.2`)
+  - Debian/Ubuntu: `sudo apt install libmpv2`
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) — mpv's ytdl-hook uses it to
+  resolve YouTube stream URLs. Keep it up to date: YouTube rotates its
+  JavaScript challenge periodically, and an outdated yt-dlp silently fails to
+  play anything (keep at least version 2026.6.9 or newer).
 
 ## Installation
 
 ```bash
 # Install system dependencies (Arch Linux)
-sudo pacman -S mpv yt-dlp python
+sudo pacman -S mpv yt-dlp
 
-# Install ytmusic-tui
-pip install -e ".[dev]"
+# Build from source
+git clone https://github.com/WakaTaira/ytmusic-tui.git
+cd ytmusic-tui
+cargo build --release
 
-# Authenticate with YouTube Music (interactive, guides you through
-# copying request headers from music.youtube.com)
-ytmusic-tui auth
+# The binary is at:
+#   target/release/ytmusic-tui
+# Install it wherever you like, e.g.:
+cp target/release/ytmusic-tui ~/.local/bin/
 ```
 
-Cookies expire after a while; if your library suddenly shows up empty,
-just run `ytmusic-tui auth` again.
+### Authenticate with YouTube Music
+
+Authentication is cookie-based. You need a `browser.json` file in ytmusicapi
+format at `~/.config/ytmusic-tui/browser.json`. There are two ways to create it:
+
+**Option A — ytmusicapi CLI (requires Python)**
+
+```bash
+pip install ytmusicapi
+ytmusicapi browser --file ~/.config/ytmusic-tui/browser.json
+```
+
+The command guides you through copying the request headers from
+music.youtube.com in your browser's DevTools.
+
+**Option B — manual header paste**
+
+1. Open [music.youtube.com](https://music.youtube.com) and sign in.
+2. Open DevTools → Network → reload the page → pick any `browse` request.
+3. Right-click the request → Copy → Copy as cURL.
+4. Run `ytmusicapi browser` and paste the headers when prompted.
+
+Cookies expire after a while. If your library suddenly shows up empty, run
+`ytmusicapi browser` again (or re-export your headers).
+
+> **Note:** OAuth is broken upstream (ytmusicapi issue #813). Browser cookie
+> auth is the only working method.
 
 ## Usage
 
@@ -72,50 +103,65 @@ just run `ytmusic-tui auth` again.
 ytmusic-tui
 ```
 
+If a `browser.json` is missing or invalid, the player still starts and shows a
+session warning on the status line. Use the auth commands above to create one,
+then restart.
+
 ## Keybindings
 
-| Key       | Action                             |
-|-----------|------------------------------------|
-| `j` / `k` (or `↓` / `↑`) | Navigate rows down/up |
-| `Enter`   | Play / Select                      |
-| `Space`   | Play / Pause                       |
-| `n` / `p` | Next / Previous                    |
-| `>` / `<` | Seek +5s / -5s                     |
-| `^`       | Seek to start                      |
-| `_`       | Mute toggle                        |
-| `b`       | Cycle audio quality (low/normal/high) |
-| `f`       | Like / unlike current track        |
-| `R`       | Start radio from current track     |
-| `H`       | Recently played (history)          |
-| `/`       | Filter current list                |
-| `.`       | Action popup (context menu)        |
-| `T`       | Theme switcher                     |
-| `Tab`     | Cycle panes (search / library)     |
-| `g`       | Home                               |
-| `l`       | Library                            |
-| `q`       | Queue view                         |
-| `a`       | Go to current track's artist       |
-| `A`       | Go to current track's album        |
-| `s`       | Shuffle toggle                     |
-| `r`       | Repeat toggle                      |
-| `+` / `-` | Volume up/down                    |
-| `d`       | Remove from queue                  |
-| `Esc`     | Back (navigation history)          |
-| `Q`       | Quit                               |
-| `1`-`7`   | Direct view switch                 |
+| Key                            | Action                             |
+|--------------------------------|------------------------------------|
+| `j` / `k` (or `↓` / `↑`)      | Navigate rows down / up            |
+| `Enter`                        | Play / Select                      |
+| `Space`                        | Play / Pause                       |
+| `n` / `p`                      | Next / Previous                    |
+| `>` / `<`                      | Seek +5 s / -5 s                   |
+| `^`                            | Seek to start                      |
+| `_`                            | Mute toggle                        |
+| `b`                            | Cycle audio quality (low/normal/high) |
+| `f`                            | Like / unlike current track        |
+| `R`                            | Start radio from current track     |
+| `H`                            | Recently played (history)          |
+| `/`                            | Filter current list                |
+| `.`                            | Action popup (context menu)        |
+| `T`                            | Theme switcher                     |
+| `Tab`                          | Cycle panes (search / library)     |
+| `g`                            | Home                               |
+| `l`                            | Library                            |
+| `q`                            | Queue view                         |
+| `L`                            | Lyrics                             |
+| `a`                            | Go to current track's artist       |
+| `A`                            | Go to current track's album        |
+| `s`                            | Shuffle toggle                     |
+| `r`                            | Repeat toggle                      |
+| `+` / `-`                      | Volume up / down                   |
+| `d`                            | Remove from queue                  |
+| `Esc`                          | Back (navigation history)          |
+| `Q`                            | Quit                               |
 
 All keybindings can be remapped via `keymap.toml` (see Configuration).
 
-**Unbound actions.** Some actions ship without a default key but can be
-bound in `keymap.toml`. `search_page` jumps to the search page and focuses
-its input -- the spotify_player default for this is the two-key sequence
-`g s`, which the terminal binding layer cannot express, so it is left
-unbound. Assign it a single key if you want it:
+### Unbound actions
 
-```toml
-[keybinds]
-search_page = "ctrl+s"  # go to the search page and focus its input
-```
+Some actions ship without a default key but can be assigned in `keymap.toml`:
+
+- **`search_page`** — jump to the search view and focus its input box. The
+  spotify_player default for this is the two-key sequence `g s`, which this
+  binary supports natively (unlike the Python version). It ships with `g s`
+  pre-wired; you can rebind it to a single key if you prefer:
+
+  ```toml
+  [keybinds]
+  search_page = "ctrl+s"
+  ```
+
+### Keymap behavior notes
+
+- **Typo'd action names** are silently ignored (forward compatibility: new
+  action names added in future versions will not break existing keymap files).
+- **Typo'd key strings** (unparseable key syntax) are surfaced as a one-line
+  warning on the status line once at startup, then silently dropped. Fix the
+  typo and restart to clear the warning.
 
 ## Configuration
 
@@ -137,64 +183,107 @@ theme = "synthwave"  # synthwave / nord / gruvbox / catppuccin
 
 ### keymap.toml
 
-Override any keybinding by copying the default keymap and editing it:
+Override any keybinding by creating or editing the user keymap file:
 
 ```bash
+# Copy the shipped defaults as a starting point
 cp config/default_keymap.toml ~/.config/ytmusic-tui/keymap.toml
+# (The config/ directory is at the repo root alongside the Cargo workspace)
 ```
 
 ```toml
 # ~/.config/ytmusic-tui/keymap.toml
-# Only list the bindings you want to change.
+# List only the bindings you want to change.
 
 [keybinds]
-toggle_pause = "space"
-next_track = "n"
+toggle_pause   = "space"
+next_track     = "n"
 previous_track = "p"
-open_action_popup = "full_stop"
-open_theme_popup = "T"
-# Key names follow Textual conventions (see default_keymap.toml for all actions)
+search_page    = "g s"    # two-key sequence; supported natively
+# Key names follow the Python/Textual convention (see default_keymap.toml for all actions)
 ```
+
+The config format is identical to the Python version's `keymap.toml`, so
+existing files work unchanged.
 
 ### Themes
 
-| Theme       | Description                          |
-|-------------|--------------------------------------|
-| synthwave   | Magenta/cyan/purple on dark (default)|
-| nord        | Blue/teal accent on dark gray        |
-| gruvbox     | Orange/yellow on dark brown          |
-| catppuccin  | Lavender/pink on dark                |
+| Theme      | Description                           |
+|------------|---------------------------------------|
+| synthwave  | Magenta/cyan/purple on dark (default) |
+| nord       | Blue/teal accent on dark gray         |
+| gruvbox    | Orange/yellow on dark brown           |
+| catppuccin | Lavender/pink on dark                 |
+
+## MPRIS2 / waybar / playerctl
+
+The player registers itself on the session D-Bus as
+`org.mpris.MediaPlayer2.ytmusic-tui`. Commands via `playerctl` just work:
+
+```bash
+playerctl --player ytmusic-tui play-pause
+playerctl --player ytmusic-tui next
+playerctl --player ytmusic-tui metadata
+```
+
+**waybar position counter freezes.** This is a waybar client-side behavior, not
+a player bug. The MPRIS spec says compliant players must not spam the `Position`
+property via `PropertiesChanged` signals — ytmusic-tui follows the spec.
+waybar's mpris module renders event-driven by default and so does not
+auto-refresh position. Fix this by adding `"interval": 1` to the mpris module
+in your waybar config:
+
+```jsonc
+// ~/.config/waybar/config.jsonc
+"mpris": {
+    "interval": 1,
+    ...
+}
+```
 
 ## Architecture
 
 ```
-src/ytmusic_tui/
-  app.py          # Application skeleton: bindings, keymap, compose, navigation
-  actions.py      # Action handler mixins (playback / browse / popup follow-ups)
-  api.py          # YouTube Music API wrapper (ytmusicapi)
-  auth.py         # Auth validation, error classification, `ytmusic-tui auth` CLI
-  player.py       # mpv playback controller
-  queue.py        # Playback queue with shuffle/repeat
-  config.py       # TOML config loading, theme system, keymap loader
-  navigation.py   # Page-stack navigation history (back with Esc)
-  layout.py       # Responsive orientation detection
-  formatting.py   # Shared formatting helpers
-  mpris.py        # MPRIS2 media controls (Linux)
-  views/
-    home.py       # Recommendations with interactive section tables
-    search.py     # 4-pane multi-category search with #category: filters
-    library.py    # 3-pane library (Playlists/Albums/Artists)
-    playlist.py   # Playlist browser (list -> tracks drill-down)
-    album.py      # Album detail view
-    artist.py     # Artist detail view
-    history.py    # Recently played
-    lyrics.py     # Lyrics page
-    queue.py      # Queue display with remove support
-    player.py     # Player bar (now playing, progress, volume)
-    popup.py      # Action / theme / playlist-picker popups
-    filter_bar.py # Live filter bar for DataTable views
-    guards.py     # Teardown-safety for worker UI callbacks
+.
+├── ytmusic-api/         # Library crate: InnerTube transport + auth + domain models
+│   src/
+│   ├── lib.rs           # Public API re-exports (InnerTubeClient, BrowserAuth, Track, ...)
+│   ├── auth.rs          # Browser-header auth + SAPISIDHASH generation
+│   ├── client.rs        # InnerTubeClient: HTTP requests, session canary
+│   ├── classify.rs      # classify_api_error: error taxonomy (auth / not-found / network / ...)
+│   ├── endpoints/       # One file per API surface (home, search, album, artist, ...)
+│   ├── models.rs        # Domain types: Track, AlbumInfo, ArtistInfo, PlaylistInfo, ...
+│   └── parse.rs / nav.rs / context.rs  # InnerTube response navigation helpers
+│
+└── ytmusic-tui/         # Binary + lib crate: UI, player, queue, keymap, config
+    src/
+    ├── main.rs          # Binary entry: config loading, terminal setup, render/input loop
+    ├── lib.rs           # Crate module root
+    ├── app/mod.rs       # AppCommand/AppEvent channels, spawn_runtime (tokio + forwarder threads)
+    ├── player.rs        # libmpv-rs wrapper: play, seek, volume, mute, PlayerEvent stream
+    ├── queue.rs         # QueueManager: shuffle, repeat, track list
+    ├── config.rs        # TOML config loading, theme definitions, keymap loading
+    ├── keymap.rs        # Keymap dispatcher: key→Action, two-key sequence support
+    ├── navigation.rs    # NavigationManager: page-stack history (Esc goes back)
+    ├── layout.rs        # Responsive orientation detection (aspect ratio 2.3 threshold)
+    ├── formatting.rs    # Duration formatting helpers
+    ├── mpris/           # MPRIS2 server (mpris-server 0.10 on the tokio runtime)
+    └── views/           # One module per page + popup + filter bar (ratatui widgets)
 ```
+
+The binary runs two extra threads beyond the main render thread:
+
+1. **Runtime thread** — a `std::thread` hosting a `tokio::Runtime`. Owns the
+   `InnerTubeClient`, `QueueManager`, `Player`, and (M6) the MPRIS server. All
+   async API calls and playback commands land here via a `tokio::sync::mpsc`
+   unbounded channel.
+2. **Forwarder thread** — a `std::thread` that blocks on mpv's `PlayerEvent`
+   receiver and re-publishes each event as an `AppEvent` onto the UI's
+   `std::sync::mpsc` channel. A second sink will be added for MPRIS metadata
+   updates without changing the forwarder's shape (YAGNI until a second
+   consumer exists).
+
+The main thread's ratatui render loop is fully synchronous and never blocks.
 
 ## Contributing
 
