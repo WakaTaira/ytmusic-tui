@@ -28,3 +28,5 @@ initial-prompt.md
 loop-prompt.md
 runner.sh
 .claude/
+DOCS_DIRECTIVE.md
+DOCS_PROGRESS.md
