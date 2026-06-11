@@ -4,9 +4,9 @@
 //! classes only.  Endpoint-flow tests (those that mock `YTMusic` client
 //! methods) are DEFERRED to M3d and listed at the bottom of this file.
 //!
-//! Fixture data is shared with the Python test suite: files live at
-//! `tests/fixtures/` in the repo root (two levels above this crate's
-//! `CARGO_MANIFEST_DIR`).
+//! Fixture data lives at `tests/fixtures_shared/` inside this crate (under
+//! `CARGO_MANIFEST_DIR`). These fixtures were originally shared with the
+//! now-removed Python test suite.
 
 use serde_json::{Value, json};
 use ytmusic_api::Track;
@@ -21,10 +21,10 @@ use ytmusic_api::parse::{
 // Fixture helpers
 // ---------------------------------------------------------------------------
 
-/// Load a JSON fixture from `tests/fixtures/<name>` (repo root).
+/// Load a JSON fixture from `tests/fixtures_shared/<name>` (within this crate).
 fn load_fixture(name: &str) -> Value {
     let path = format!(
-        "{}/../../tests/fixtures/{}",
+        "{}/tests/fixtures_shared/{}",
         env!("CARGO_MANIFEST_DIR"),
         name
     );
