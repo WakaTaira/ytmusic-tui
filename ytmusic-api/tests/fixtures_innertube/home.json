@@ -62,7 +62,7 @@
                               "thumbnail": {
                                 "thumbnails": [
                                   {
-                                    "url": "https://yt3.ggpht.com/1XfwecDLx_mdW3V6hezLSKEigcg84F93IKAD_iNd3j5axzn9G1OYTcRda1JqsrzKt-tZXxjHeQ=s88-c-k-c0x00ffffff-no-rj",
+                                    "url": "https://yt3.ggpht.com/placeholder-user-avatar=s88-c-k-c0x00ffffff-no-rj",
                                     "width": 0,
                                     "height": 0
                                   }
@@ -72,7 +72,7 @@
                               "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FILL",
                               "onTap": {
                                 "browseEndpoint": {
-                                  "browseId": "UCdaLiUmsllx108e6XK_kwUg",
+                                  "browseId": "UCtestChannelIdPlaceholder0",
                                   "browseEndpointContextSupportedConfigs": {
                                     "browseEndpointContextMusicConfig": {
                                       "pageType": "MUSIC_PAGE_TYPE_USER_CHANNEL"
@@ -312,10 +312,10 @@
                             "subtitle": {
                               "runs": [
                                 {
-                                  "text": "XxxTentaWrld",
+                                  "text": "Test Uploader B",
                                   "navigationEndpoint": {
                                     "browseEndpoint": {
-                                      "browseId": "UCuo0sz0mICpwp399EQevcFg",
+                                      "browseId": "UCtestChannelIdPlaceholder2",
                                       "params": "ggMEgAKgAw%3D%3D",
                                       "browseEndpointContextSupportedConfigs": {
                                         "browseEndpointContextMusicConfig": {
@@ -405,7 +405,7 @@
                                 "text": "Recaps",
                                 "navigationEndpoint": {
                                   "browseEndpoint": {
-                                    "browseId": "UCdaLiUmsllx108e6XK_kwUg",
+                                    "browseId": "UCtestChannelIdPlaceholder0",
                                     "params": "ggMEgAKvCA%3D%3D",
                                     "browseEndpointContextSupportedConfigs": {
                                       "browseEndpointContextMusicConfig": {
@@ -430,7 +430,7 @@
                               },
                               "navigationEndpoint": {
                                 "browseEndpoint": {
-                                  "browseId": "UCdaLiUmsllx108e6XK_kwUg",
+                                  "browseId": "UCtestChannelIdPlaceholder0",
                                   "params": "ggMEgAKvCA%3D%3D",
                                   "browseEndpointContextSupportedConfigs": {
                                     "browseEndpointContextMusicConfig": {
@@ -479,7 +479,7 @@
                                   "text": "TestUser",
                                   "navigationEndpoint": {
                                     "browseEndpoint": {
-                                      "browseId": "UCdaLiUmsllx108e6XK_kwUg",
+                                      "browseId": "UCtestChannelIdPlaceholder0",
                                       "browseEndpointContextSupportedConfigs": {
                                         "browseEndpointContextMusicConfig": {
                                           "pageType": "MUSIC_PAGE_TYPE_USER_CHANNEL"
@@ -573,7 +573,7 @@
                                   "text": "TestUser",
                                   "navigationEndpoint": {
                                     "browseEndpoint": {
-                                      "browseId": "UCdaLiUmsllx108e6XK_kwUg",
+                                      "browseId": "UCtestChannelIdPlaceholder0",
                                       "browseEndpointContextSupportedConfigs": {
                                         "browseEndpointContextMusicConfig": {
                                           "pageType": "MUSIC_PAGE_TYPE_USER_CHANNEL"
@@ -667,7 +667,7 @@
                                   "text": "TestUser",
                                   "navigationEndpoint": {
                                     "browseEndpoint": {
-                                      "browseId": "UCdaLiUmsllx108e6XK_kwUg",
+                                      "browseId": "UCtestChannelIdPlaceholder0",
                                       "browseEndpointContextSupportedConfigs": {
                                         "browseEndpointContextMusicConfig": {
                                           "pageType": "MUSIC_PAGE_TYPE_USER_CHANNEL"

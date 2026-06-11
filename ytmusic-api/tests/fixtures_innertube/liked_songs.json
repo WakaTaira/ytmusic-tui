@@ -165,10 +165,10 @@
                             "text": {
                               "runs": [
                                 {
-                                  "text": "dankeサン",
+                                  "text": "Test Uploader C",
                                   "navigationEndpoint": {
                                     "browseEndpoint": {
-                                      "browseId": "UCU90PpZ-jViPqj2bjPTQvYA",
+                                      "browseId": "UCtestChannelIdPlaceholder3",
                                       "browseEndpointContextSupportedConfigs": {
                                         "browseEndpointContextMusicConfig": {
                                           "pageType": "MUSIC_PAGE_TYPE_USER_CHANNEL"
@@ -715,7 +715,7 @@
                                 "image": {
                                   "sources": [
                                     {
-                                      "url": "https://yt3.ggpht.com/1XfwecDLx_mdW3V6hezLSKEigcg84F93IKAD_iNd3j5axzn9G1OYTcRda1JqsrzKt-tZXxjHeQ=s48-c-k-c0x00000000-no-cc-rj-rp"
+                                      "url": "https://yt3.ggpht.com/placeholder-user-avatar=s48-c-k-c0x00000000-no-cc-rj-rp"
                                     }
                                   ],
                                   "processor": {
@@ -739,7 +739,7 @@
                               "onTap": {
                                 "innertubeCommand": {
                                   "browseEndpoint": {
-                                    "browseId": "UCdaLiUmsllx108e6XK_kwUg",
+                                    "browseId": "UCtestChannelIdPlaceholder0",
                                     "browseEndpointContextSupportedConfigs": {
                                       "browseEndpointContextMusicConfig": {
                                         "pageType": "MUSIC_PAGE_TYPE_USER_CHANNEL"

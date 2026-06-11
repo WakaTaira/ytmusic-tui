@@ -49,10 +49,10 @@
                                   "text": {
                                     "runs": [
                                       {
-                                        "text": "Lana Nealsen",
+                                        "text": "Test Uploader A",
                                         "navigationEndpoint": {
                                           "browseEndpoint": {
-                                            "browseId": "UCFseNiOeJuP61-YM12LQMog",
+                                            "browseId": "UCtestChannelIdPlaceholder1",
                                             "browseEndpointContextSupportedConfigs": {
                                               "browseEndpointContextMusicConfig": {
                                                 "pageType": "MUSIC_PAGE_TYPE_USER_CHANNEL"

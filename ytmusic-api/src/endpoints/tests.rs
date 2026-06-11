@@ -244,7 +244,7 @@ fn playlist_tracks_returns_expected() {
     assert_eq!(tracks[0].duration_seconds, 179.0);
 
     assert_eq!(tracks[1].video_id, "KwZFalJdsbQ");
-    assert_eq!(tracks[1].artist, "dankeサン");
+    assert_eq!(tracks[1].artist, "Test Uploader C");
 
     assert_eq!(tracks[2].video_id, "hlr_7Za6v0M");
     assert_eq!(tracks[2].album, "Returns To Dreamland");
@@ -282,7 +282,7 @@ fn liked_songs_returns_expected() {
     assert_eq!(tracks[0].duration_seconds, 179.0);
 
     assert_eq!(tracks[1].video_id, "KwZFalJdsbQ");
-    assert_eq!(tracks[1].artist, "dankeサン");
+    assert_eq!(tracks[1].artist, "Test Uploader C");
     assert_eq!(tracks[1].duration_seconds, 193.0);
 
     assert_eq!(tracks[2].video_id, "hlr_7Za6v0M");
@@ -427,7 +427,7 @@ fn history_flattens_dated_shelves() {
         tracks[0].title,
         "[Armored Core Ⅵ] Mechanized Memories  - in the end -  機械化された記憶　lyrics 和訳"
     );
-    assert_eq!(tracks[0].artist, "Lana Nealsen, 6.7M views");
+    assert_eq!(tracks[0].artist, "Test Uploader A, 6.7M views");
     assert_eq!(tracks[0].album, "");
     assert_eq!(tracks[0].duration_seconds, 329.0);
 
@@ -522,7 +522,7 @@ fn radio_returns_seeded_queue() {
     assert_eq!(tracks[1].duration_seconds, 195.0);
 
     assert_eq!(tracks[2].video_id, "9SJG2LKGspI");
-    assert_eq!(tracks[2].artist, "Sun Levi");
+    assert_eq!(tracks[2].artist, "Test Uploader D");
     assert_eq!(tracks[2].duration_seconds, 150.0);
 
     // The radio flow posts `next` with the seed videoId, derived playlistId, and

@@ -139,10 +139,10 @@
                             "text": {
                               "runs": [
                                 {
-                                  "text": "dankeサン",
+                                  "text": "Test Uploader C",
                                   "navigationEndpoint": {
                                     "browseEndpoint": {
-                                      "browseId": "UCU90PpZ-jViPqj2bjPTQvYA",
+                                      "browseId": "UCtestChannelIdPlaceholder3",
                                       "browseEndpointContextSupportedConfigs": {
                                         "browseEndpointContextMusicConfig": {
                                           "pageType": "MUSIC_PAGE_TYPE_USER_CHANNEL"

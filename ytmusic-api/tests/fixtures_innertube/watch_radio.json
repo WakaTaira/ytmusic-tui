@@ -340,10 +340,10 @@
                               "longBylineText": {
                                 "runs": [
                                   {
-                                    "text": "Sun Levi",
+                                    "text": "Test Uploader D",
                                     "navigationEndpoint": {
                                       "browseEndpoint": {
-                                        "browseId": "UCEDXQxr3ND3RZaHZBUrSvBw",
+                                        "browseId": "UCtestChannelIdPlaceholder4",
                                         "browseEndpointContextSupportedConfigs": {
                                           "browseEndpointContextMusicConfig": {
                                             "pageType": "MUSIC_PAGE_TYPE_USER_CHANNEL"
