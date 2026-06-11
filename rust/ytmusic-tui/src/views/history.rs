@@ -17,11 +17,11 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Paragraph, TableState};
 use ytmusic_api::Track;
 
 use super::filter_bar::matches_filter;
-use super::{PageState, Theme};
+use super::{PageState, Theme, borderless_table, section_title, table_header, table_row};
 use crate::formatting::format_duration;
 
 /// What an Enter keypress on the history view resolves to.
@@ -195,21 +195,25 @@ impl HistoryView {
     // -- Rendering -----------------------------------------------------------
 
     /// Render the history view into `area`.
+    ///
+    /// An accent "Recently played" title line + a muted status line, over a
+    /// borderless DataTable with `Title`/`Artist`/`Album`/`Duration` columns
+    /// (no panel border — flat `surface`).
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        // Wrap in a bordered, surface-filled panel titled "Recently played"
-        // (Python's Label moved into the panel title). Status + list inside.
-        let block = super::panel_block(theme, "Recently played");
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
         let chunks = Layout::vertical([
+            Constraint::Length(1), // "Recently played" title
             Constraint::Length(1), // status
-            Constraint::Min(1),    // list
+            Constraint::Min(1),    // table
         ])
-        .split(inner);
+        .split(area);
 
-        self.render_status(frame, chunks[0], theme);
-        self.render_tracks(frame, chunks[1], theme);
+        frame.render_widget(
+            Paragraph::new(Line::from(section_title(theme, "Recently played", true)))
+                .style(Style::default().bg(theme.surface)),
+            chunks[0],
+        );
+        self.render_status(frame, chunks[1], theme);
+        self.render_tracks(frame, chunks[2], theme);
     }
 
     fn render_status(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
@@ -221,7 +225,11 @@ impl HistoryView {
                 .fg(theme.text_muted)
                 .add_modifier(Modifier::ITALIC)
         };
-        frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(text, style)))
+                .style(Style::default().bg(theme.surface)),
+            area,
+        );
     }
 
     fn status_text(&self) -> (String, bool) {
@@ -254,43 +262,47 @@ impl HistoryView {
             return;
         }
 
-        let items: Vec<ListItem> = visible
+        let header = table_header(theme, &HISTORY_COLUMNS, true);
+        let rows = visible
             .iter()
             .filter_map(|&i| tracks.get(i))
-            .map(track_row)
+            .map(|t| table_row(theme, &track_columns(t), true))
             .collect();
+        let table = borderless_table(theme, header, rows, history_widths(), true);
 
-        let list = List::new(items)
-            .style(Style::default().fg(theme.text).bg(theme.surface))
-            .highlight_style(super::selected_row_style(theme))
-            .highlight_symbol("▶ ");
-
-        let mut list_state = ListState::default();
-        list_state.select(Some(self.cursor.min(visible.len() - 1)));
-        frame.render_stateful_widget(list, area, &mut list_state);
+        let mut state = TableState::default();
+        state.select(Some(self.cursor.min(visible.len() - 1)));
+        frame.render_stateful_widget(table, area, &mut state);
     }
 }
 
-/// Format a track row: `Title — Artist  Album  Duration`.
-fn track_row(track: &Track) -> ListItem<'static> {
-    let mut spans = vec![Span::raw(track.title.clone())];
-    if !track.artist.is_empty() {
-        spans.push(Span::raw(" — "));
-        spans.push(Span::raw(track.artist.clone()));
-    }
-    if !track.album.is_empty() {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            track.album.clone(),
-            Style::default().add_modifier(Modifier::DIM),
-        ));
-    }
+/// Column labels for the history table (Python `add_columns`).
+const HISTORY_COLUMNS: [&str; 4] = ["Title", "Artist", "Album", "Duration"];
+
+/// Column widths (including the one-space cell padding on each side).
+fn history_widths() -> Vec<Constraint> {
+    vec![
+        Constraint::Min(10),    // Title (flex)
+        Constraint::Length(22), // Artist
+        Constraint::Length(22), // Album
+        Constraint::Length(10), // Duration
+    ]
+}
+
+/// Format a track into its `Title`/`Artist`/`Album`/`Duration` columns.
+fn track_columns(track: &Track) -> Vec<String> {
     let duration = format_duration(track.duration_seconds);
-    if duration != "—" {
-        spans.push(Span::raw("  "));
-        spans.push(Span::raw(duration));
-    }
-    ListItem::new(Line::from(spans))
+    let duration = if duration == "—" {
+        String::new()
+    } else {
+        duration
+    };
+    vec![
+        track.title.clone(),
+        track.artist.clone(),
+        track.album.clone(),
+        duration,
+    ]
 }
 
 #[cfg(test)]
@@ -431,10 +443,33 @@ mod tests {
     }
 
     #[test]
-    fn loaded_render_shows_selection_marker() {
+    fn loaded_render_highlights_selection_with_primary_and_shows_columns() {
+        // Borderless DataTable: primary-bg cursor (no `▶`), with the
+        // Title/Artist/Album/Duration column headers and the "Recently played"
+        // title.
         let view = loaded_view();
         let text = render_to_string(&view, 70, 12);
-        assert!(text.contains("▶"), "missing selection marker:\n{text}");
+        assert!(!text.contains('▶'), "stray cursor glyph:\n{text}");
+        assert!(text.contains("Recently played"), "missing title:\n{text}");
+        for col in ["Title", "Artist", "Album", "Duration"] {
+            assert!(text.contains(col), "missing '{col}' column:\n{text}");
+        }
+
+        let backend = TestBackend::new(70, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        terminal
+            .draw(|frame| view.render(frame, frame.area(), &theme))
+            .unwrap();
+        assert!(
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .any(|c| c.bg == theme.primary),
+            "selected row not highlighted with primary"
+        );
     }
 
     #[test]

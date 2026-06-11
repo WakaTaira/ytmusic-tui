@@ -19,12 +19,12 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style, Stylize};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph, TableState};
 use ytmusic_api::{HomeSection, HomeSectionItem, Track};
 
-use super::{PageState, Theme};
+use super::{PageState, Theme, borderless_table, section_title, table_header, table_row};
 use crate::formatting::format_duration;
 
 /// What an Enter keypress on the home view resolves to.
@@ -224,7 +224,12 @@ impl HomeView {
         frame.render_widget(paragraph, area);
     }
 
-    /// Draw the stacked section lists.
+    /// Draw the stacked section tables.
+    ///
+    /// Each section is a one-line accent title followed by a borderless
+    /// DataTable (header + item rows), with a one-row gap between sections,
+    /// reproducing the home SVG (a flat `surface` page with section titles and
+    /// borderless tables, NOT bordered panels).
     fn render_sections(
         &self,
         frame: &mut Frame<'_>,
@@ -232,22 +237,30 @@ impl HomeView {
         theme: &Theme,
         sections: &[HomeSection],
     ) {
-        // One vertical chunk per section. Height = title + items, capped so a
-        // very long section does not starve the others (Python capped table
-        // height at 12 rows via CSS max-height).
-        let constraints: Vec<Constraint> = sections
-            .iter()
-            .map(|s| Constraint::Length(section_height(s.items.len())))
-            .collect();
+        // Per section: 1 title row + 1 header row + item rows, plus a 1-row
+        // gap after every section but the last.
+        let mut constraints: Vec<Constraint> = Vec::new();
+        for (idx, section) in sections.iter().enumerate() {
+            constraints.push(Constraint::Length(section_block_height(
+                section.items.len(),
+            )));
+            if idx + 1 < sections.len() {
+                constraints.push(Constraint::Length(SECTION_GAP));
+            }
+        }
         let chunks = Layout::vertical(constraints).split(area);
 
-        for (idx, (section, &chunk)) in sections.iter().zip(chunks.iter()).enumerate() {
+        // Section blocks land on the even chunk indices (the odd ones are gaps).
+        for (idx, section) in sections.iter().enumerate() {
+            let Some(&chunk) = chunks.get(idx * 2) else {
+                break;
+            };
             let is_active = idx == self.section_idx;
             self.render_one_section(frame, chunk, theme, section, is_active);
         }
     }
 
-    /// Draw a single section as a titled, optionally-highlighted list.
+    /// Draw a single section: an accent title line over a borderless table.
     fn render_one_section(
         &self,
         frame: &mut Frame<'_>,
@@ -256,79 +269,81 @@ impl HomeView {
         section: &HomeSection,
         is_active: bool,
     ) {
-        let items: Vec<ListItem> = section.items.iter().map(|i| item_to_list_item(i)).collect();
-
-        // The section title is rendered as the block title in the accent color
-        // (Python: `.section-title { color: $accent; text-style: bold }`). The
-        // active section's border brightens to `primary` (Python's focused-pane
-        // accent border); inactive sections use the muted `primary-background`.
-        let title = Span::styled(
-            section.title.clone(),
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD),
-        );
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(if is_active {
-                theme.primary
-            } else {
-                theme.primary_background
-            }))
-            .style(Style::default().bg(theme.surface))
-            .title(title);
-
-        let list = List::new(items)
-            .block(block)
-            .style(Style::default().fg(theme.text).bg(theme.surface))
-            .highlight_style(super::selected_row_style(theme))
-            .highlight_symbol("▶ ");
-
-        // Only the active section shows a selection; inactive sections render
-        // without a highlighted row (matching one focused Textual table).
-        let mut list_state = ListState::default();
-        if is_active {
-            list_state.select(Some(self.item_idx));
+        if area.height == 0 {
+            return;
         }
-        frame.render_stateful_widget(list, area, &mut list_state);
+        let [title_area, table_area] =
+            Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
+
+        // Section title: accent bold, always (Python `.section-title`); it is
+        // not dimmed when the section is un-focused (the SVG keeps both titles
+        // in accent — only the table styling changes with focus).
+        frame.render_widget(
+            Paragraph::new(Line::from(section_title(theme, &section.title, true)))
+                .style(Style::default().bg(theme.surface)),
+            title_area,
+        );
+
+        // Borderless DataTable: Title / Artist / Info / Duration columns,
+        // focused styling on the active section only.
+        let header = table_header(theme, &HOME_COLUMNS, is_active);
+        let rows = section
+            .items
+            .iter()
+            .map(|item| table_row(theme, &item_columns(item), is_active))
+            .collect();
+        let table = borderless_table(theme, header, rows, home_widths(), is_active);
+
+        let mut state = TableState::default();
+        if is_active {
+            state.select(Some(self.item_idx));
+        }
+        frame.render_stateful_widget(table, table_area, &mut state);
     }
 }
 
 /// Maximum item rows shown per section before it stops growing.
 ///
-/// Python capped each section table at `max-height: 12`. We reserve one row for
-/// the title line, so the chunk height is `1 + min(items, CAP)`.
-const SECTION_ITEM_CAP: u16 = 12;
+/// Python capped each section table at `max-height: 12`.
+const SECTION_ITEM_CAP: usize = 12;
 
-/// Chunk height for a section with `item_count` items: up to
-/// [`SECTION_ITEM_CAP`] item rows plus the two border rows (top carries the
-/// section title, bottom closes the box).
-fn section_height(item_count: usize) -> u16 {
-    // Cap BEFORE narrowing: a usize -> u16 cast first would wrap huge counts.
-    let items = item_count.min(SECTION_ITEM_CAP as usize) as u16;
+/// Blank rows inserted between two stacked sections (the SVG shows a one-row
+/// `surface` gap between "Quick picks" and "Mixed for you").
+const SECTION_GAP: u16 = 1;
+
+/// Column labels for a home section table (matching the SVG header row).
+const HOME_COLUMNS: [&str; 3] = ["Title", "Artist / Info", "Duration"];
+
+/// Fixed column widths (including the one-space cell padding on each side),
+/// matching the SVG lanes: Title 15, Artist/Info 15, Duration 10.
+fn home_widths() -> Vec<Constraint> {
+    vec![
+        Constraint::Length(15),
+        Constraint::Length(15),
+        Constraint::Length(10),
+    ]
+}
+
+/// Height of one section block: title row + header row + capped item rows.
+fn section_block_height(item_count: usize) -> u16 {
+    let items = item_count.min(SECTION_ITEM_CAP) as u16;
+    // 1 title + 1 header + items.
     items.saturating_add(2)
 }
 
-/// Format one home item as a list row.
-///
-/// Tracks render `Title — Artist  Duration` (Python `_format_row` produced
-/// title / artist / duration columns); playlists render `Title  (N tracks)`.
-/// The em-dash separator matches the player bar's `title - artist` style while
-/// keeping the columns visually distinct.
-fn item_to_list_item(item: &HomeSectionItem) -> ListItem<'static> {
-    let line = match item {
+/// Format one home item into the three column strings (Title / Artist-Info /
+/// Duration). Tracks fill all three; playlists put the track count in the
+/// middle "Info" column and leave duration blank.
+fn item_columns(item: &HomeSectionItem) -> Vec<String> {
+    match item {
         HomeSectionItem::Track(track) => {
-            let mut spans = vec![Span::raw(track.title.clone())];
-            if !track.artist.is_empty() {
-                spans.push(Span::raw(" — "));
-                spans.push(Span::raw(track.artist.clone()));
-            }
             let duration = format_duration(track.duration_seconds);
-            if duration != "—" {
-                spans.push(Span::raw("  "));
-                spans.push(Span::raw(duration));
-            }
-            Line::from(spans)
+            let duration = if duration == "—" {
+                String::new()
+            } else {
+                duration
+            };
+            vec![track.title.clone(), track.artist.clone(), duration]
         }
         HomeSectionItem::Playlist(playlist) => {
             let info = if playlist.track_count > 0 {
@@ -336,14 +351,9 @@ fn item_to_list_item(item: &HomeSectionItem) -> ListItem<'static> {
             } else {
                 "Playlist".to_owned()
             };
-            Line::from(vec![
-                Span::raw(playlist.title.clone()),
-                Span::raw("  "),
-                Span::raw(info).dim(),
-            ])
+            vec![playlist.title.clone(), info, String::new()]
         }
-    };
-    ListItem::new(line)
+    }
 }
 
 #[cfg(test)]
@@ -565,11 +575,21 @@ mod tests {
     }
 
     #[test]
-    fn loaded_render_shows_selection_marker_on_active_section() {
+    fn loaded_render_highlights_active_section_selected_row_with_primary() {
+        // The borderless DataTable marks the selection with a primary-colored
+        // row background (no `▶` glyph, matching the SVG cursor).
         let view = two_section_view();
+        let terminal = render_to_terminal(&view, 60, 20);
+        let theme = Theme::default();
+        let buffer = terminal.backend().buffer();
+        let has_primary_row = buffer.content().iter().any(|c| c.bg == theme.primary);
+        assert!(
+            has_primary_row,
+            "active section's selected row not highlighted with primary"
+        );
+        // And the old `▶` cursor glyph is gone.
         let text = render_to_string(&view, 60, 20);
-        // The highlight symbol marks the selected row.
-        assert!(text.contains("▶"), "missing selection marker:\n{text}");
+        assert!(!text.contains('▶'), "stray cursor glyph in table:\n{text}");
     }
 
     /// Render the view to a TestBackend terminal (for cell-style assertions).
@@ -584,33 +604,41 @@ mod tests {
     }
 
     #[test]
-    fn loaded_render_draws_bordered_sections_with_surface_fill() {
-        // Each section is a full-bordered panel on a surface background.
+    fn loaded_render_is_borderless_on_surface() {
+        // Sections are borderless tables on the surface background — no box
+        // glyphs anywhere (the SVG draws no border chars).
         let view = two_section_view();
         let terminal = render_to_terminal(&view, 60, 20);
         let theme = Theme::default();
         let buffer = terminal.backend().buffer();
-        // The top-left corner of the first section panel is a box corner.
-        assert_eq!(buffer[(0, 0)].symbol(), "┌", "section is not box-bordered");
-        // Some interior cell carries the surface background fill.
-        let has_surface = buffer
-            .content()
-            .iter()
-            .any(|c| c.style().bg == Some(theme.surface));
-        assert!(has_surface, "section panel missing surface background");
+        for cell in buffer.content() {
+            assert!(
+                !"┌┐└┘─│".contains(cell.symbol()),
+                "home drew a box border glyph: {:?}",
+                cell.symbol()
+            );
+        }
+        // The surface fill is present.
+        assert!(
+            buffer.content().iter().any(|c| c.bg == theme.surface),
+            "home missing surface background"
+        );
     }
 
     #[test]
-    fn active_section_border_uses_primary() {
-        // The focused (first) section's border is the brighter `primary`.
+    fn active_section_header_uses_header_bg() {
+        // The focused (first) section's column-header row uses the brighter
+        // focused header background; an inactive section uses the dimmer panel
+        // background.
         let view = two_section_view();
         let terminal = render_to_terminal(&view, 60, 20);
         let theme = Theme::default();
         let buffer = terminal.backend().buffer();
+        // Row 1 is the first section's header (row 0 is its title).
         assert_eq!(
-            buffer[(0, 0)].style().fg,
-            Some(theme.primary),
-            "active section border is not the primary color"
+            buffer[(2, 1)].bg,
+            theme.header_bg,
+            "active section header is not header_bg"
         );
     }
 

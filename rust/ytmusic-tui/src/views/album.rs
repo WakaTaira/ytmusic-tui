@@ -16,10 +16,10 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Paragraph, TableState};
 use ytmusic_api::{AlbumInfo, Track};
 
-use super::{PageState, Theme};
+use super::{PageState, Theme, borderless_table, table_header, table_row};
 use crate::formatting::format_duration;
 
 /// What an Enter keypress on the album view resolves to.
@@ -143,20 +143,18 @@ impl AlbumView {
     // -- Rendering -----------------------------------------------------------
 
     /// Render the album view into `area`.
+    ///
+    /// An accent album-title header + muted `Artist - Year` meta line + a muted
+    /// status line, over a borderless DataTable with `#`/`Title`/`Artist`/
+    /// `Duration` columns (no "Album" panel border — flat `surface`).
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        // Wrap in a bordered, surface-filled "Album" panel. The album-name
-        // header, status, and track list draw inside the border.
-        let block = super::panel_block(theme, "Album");
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
-        // Header (2 rows: title + meta) + status (1 row) + track list.
+        // Header (2 rows: title + meta) + status (1 row) + track table.
         let chunks = Layout::vertical([
             Constraint::Length(2), // title + meta
             Constraint::Length(1), // status / track count
-            Constraint::Min(1),    // track list
+            Constraint::Min(1),    // track table
         ])
-        .split(inner);
+        .split(area);
 
         self.render_header(frame, chunks[0], theme);
         self.render_status(frame, chunks[1], theme);
@@ -191,7 +189,8 @@ impl AlbumView {
                 Style::default()
                     .fg(theme.accent)
                     .add_modifier(Modifier::BOLD),
-            ))),
+            )))
+            .style(Style::default().bg(theme.surface)),
             rows[0],
         );
         frame.render_widget(
@@ -200,7 +199,8 @@ impl AlbumView {
                 Style::default()
                     .fg(theme.text_muted)
                     .add_modifier(Modifier::ITALIC),
-            ))),
+            )))
+            .style(Style::default().bg(theme.surface)),
             rows[1],
         );
     }
@@ -215,7 +215,11 @@ impl AlbumView {
                 .fg(theme.text_muted)
                 .add_modifier(Modifier::ITALIC)
         };
-        frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(text, style)))
+                .style(Style::default().bg(theme.surface)),
+            area,
+        );
     }
 
     /// Compute the status line text and error flag.
@@ -236,7 +240,7 @@ impl AlbumView {
         }
     }
 
-    /// Draw the track list.
+    /// Draw the track table.
     fn render_tracks(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
         let PageState::Loaded(album) = &self.state else {
             return; // loading / error: status line carries the message
@@ -245,45 +249,50 @@ impl AlbumView {
             return;
         }
 
-        let items: Vec<ListItem> = album
+        let header = table_header(theme, &ALBUM_COLUMNS, true);
+        let rows = album
             .tracks
             .iter()
             .enumerate()
-            .map(|(i, t)| track_row(i + 1, t))
+            .map(|(i, t)| table_row(theme, &track_columns(i + 1, t), true))
             .collect();
+        let table = borderless_table(theme, header, rows, album_widths(), true);
 
-        let list = List::new(items)
-            .style(Style::default().fg(theme.text).bg(theme.surface))
-            .highlight_style(super::selected_row_style(theme))
-            .highlight_symbol("▶ ");
-
-        let mut list_state = ListState::default();
-        if !album.tracks.is_empty() {
-            list_state.select(Some(self.cursor.min(album.tracks.len() - 1)));
-        }
-        frame.render_stateful_widget(list, area, &mut list_state);
+        let mut state = TableState::default();
+        // saturating_sub keeps this safe even if the early empty-return above
+        // is ever bypassed (the guard-consistent form used by all other views).
+        state.select(Some(self.cursor.min(album.tracks.len().saturating_sub(1))));
+        frame.render_stateful_widget(table, area, &mut state);
     }
 }
 
-/// Format a track as a numbered row: `N. Title — Artist  Duration`.
-fn track_row(num: usize, track: &Track) -> ListItem<'static> {
-    let mut spans = vec![
-        Span::styled(
-            format!("{num:2}. "),
-            Style::default().add_modifier(Modifier::DIM),
-        ),
-        Span::raw(track.title.clone()),
-    ];
-    if !track.artist.is_empty() {
-        spans.push(Span::raw(" — "));
-        spans.push(Span::raw(track.artist.clone()));
-    }
+/// Column labels for the album track table (Python `add_columns`).
+const ALBUM_COLUMNS: [&str; 4] = ["#", "Title", "Artist", "Duration"];
+
+/// Column widths (including the one-space cell padding on each side).
+fn album_widths() -> Vec<Constraint> {
+    vec![
+        Constraint::Length(5),  // "#"
+        Constraint::Min(10),    // Title (flex)
+        Constraint::Length(24), // Artist
+        Constraint::Length(10), // Duration
+    ]
+}
+
+/// Format a track into its `#`/`Title`/`Artist`/`Duration` column strings.
+fn track_columns(num: usize, track: &Track) -> Vec<String> {
     let duration = format_duration(track.duration_seconds);
-    if duration != "—" {
-        spans.push(Span::raw("  "));
-        spans.push(Span::raw(duration));
-    }
-    ListItem::new(Line::from(spans))
+    let duration = if duration == "—" {
+        String::new()
+    } else {
+        duration
+    };
+    vec![
+        num.to_string(),
+        track.title.clone(),
+        track.artist.clone(),
+        duration,
+    ]
 }
 
 #[cfg(test)]
@@ -461,10 +470,31 @@ mod tests {
     }
 
     #[test]
-    fn loaded_render_shows_selection_marker() {
+    fn loaded_render_highlights_selection_with_primary_and_shows_columns() {
+        // Borderless DataTable: primary-bg cursor (no `▶`), with the album's
+        // `#`/`Title`/`Artist`/`Duration` column headers.
         let view = loaded_view();
         let text = render_to_string(&view, 70, 12);
-        assert!(text.contains("▶"), "missing selection marker:\n{text}");
+        assert!(!text.contains('▶'), "stray cursor glyph:\n{text}");
+        for col in ["Title", "Artist", "Duration"] {
+            assert!(text.contains(col), "missing '{col}' column:\n{text}");
+        }
+
+        let backend = TestBackend::new(70, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        terminal
+            .draw(|frame| view.render(frame, frame.area(), &theme))
+            .unwrap();
+        assert!(
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .any(|c| c.bg == theme.primary),
+            "selected row not highlighted with primary"
+        );
     }
 
     #[test]

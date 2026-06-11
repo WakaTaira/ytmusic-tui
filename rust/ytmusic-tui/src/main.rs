@@ -1960,8 +1960,9 @@ impl AppModel {
             return;
         }
 
-        // Fill the bar with the panel background (textual `$panel`).
-        let bar_block = Block::default().style(Style::default().bg(self.theme.primary_background));
+        // Fill the bar with the panel background (textual `$panel`, the
+        // `#40284d` title-bar fill in the SVGs — lighter than the screen).
+        let bar_block = Block::default().style(Style::default().bg(self.theme.panel_bg));
         frame.render_widget(bar_block, area);
 
         // Centered title.
@@ -2912,19 +2913,19 @@ mod tests {
     fn render_fills_the_frame_with_the_theme_surface_background() {
         // The whole frame is painted with the theme surface color first, so the
         // terminal's default background never shows through. Row 0 is the
-        // permanent title bar (primary_background), so sample row 1 which is
-        // inside the content area and must carry the surface bg.
+        // permanent title bar (panel_bg, the `#40284d` SVG title fill), so
+        // sample row 1 which is inside the content area and must carry surface.
         let model = AppModel::new(Theme::default());
         let backend = TestBackend::new(60, 12);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| model.render(frame)).unwrap();
         let theme = Theme::default();
         let buffer = terminal.backend().buffer();
-        // (0, 0) is the title bar row → primary_background.
+        // (0, 0) is the title bar row → panel_bg (lighter than the screen).
         assert_eq!(
             buffer[(0, 0)].style().bg,
-            Some(theme.primary_background),
-            "title bar row should carry primary_background"
+            Some(theme.panel_bg),
+            "title bar row should carry panel_bg"
         );
         // (0, 1) is the first content row → surface.
         assert_eq!(
@@ -2935,9 +2936,10 @@ mod tests {
     }
 
     #[test]
-    fn render_draws_a_bordered_section_title_with_accent() {
-        // A loaded home view draws each section in a bordered panel whose title
-        // is the section name in the accent color (the Python panel-title CSS).
+    fn render_draws_a_borderless_section_with_accent_title() {
+        // A loaded home view draws each section as a borderless DataTable with
+        // an accent-colored section title above it (NOT a bordered panel — the
+        // SVG draws no box glyphs).
         let mut model = AppModel::new(Theme::default());
         fold(&mut model, AppEvent::HomeLoaded(vec![track_section()]));
         let backend = TestBackend::new(70, 20);
@@ -2945,11 +2947,18 @@ mod tests {
         terminal.draw(|frame| model.render(frame)).unwrap();
         let theme = Theme::default();
         let buffer = terminal.backend().buffer();
-        // A border glyph somewhere carries the active section's primary border.
-        let has_border = buffer.content().iter().any(|c| {
-            (c.symbol() == "─" || c.symbol() == "│") && c.style().fg == Some(theme.primary)
-        });
-        assert!(has_border, "no accented/primary section border rendered");
+        // No box-drawing glyphs in the content area (rows 1..content_end).
+        // (The player bar's top divider lives on its own row and uses `─`; we
+        // restrict the scan to the home content rows above it.)
+        for y in 1..16u16 {
+            for x in 0..70u16 {
+                let s = buffer[(x, y)].symbol();
+                assert!(
+                    !"┌┐└┘│".contains(s),
+                    "home content drew a box glyph {s:?} at ({x},{y})"
+                );
+            }
+        }
         // The section title 'Q' (of "Quick picks") is drawn in the accent color.
         let has_accent_title = buffer
             .content()
@@ -2963,7 +2972,9 @@ mod tests {
 
     #[test]
     fn render_styles_the_selected_row_with_cursor_colors() {
-        // The active section's selected row uses the cursor colors (primary bg).
+        // The active section's selected row uses the cursor colors: a primary
+        // background with the text foreground (the SVG selected row is
+        // `#ff77e9` bg / `#eee5f5` text).
         let mut model = AppModel::new(Theme::default());
         fold(&mut model, AppEvent::HomeLoaded(vec![track_section()]));
         let backend = TestBackend::new(70, 20);
@@ -2974,7 +2985,7 @@ mod tests {
         let has_cursor = buffer
             .content()
             .iter()
-            .any(|c| c.style().bg == Some(theme.primary) && c.style().fg == Some(theme.background));
+            .any(|c| c.style().bg == Some(theme.primary) && c.style().fg == Some(theme.text));
         assert!(
             has_cursor,
             "no row rendered with the selected-row cursor colors"

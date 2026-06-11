@@ -31,10 +31,10 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph, TableState};
 use ytmusic_api::{AlbumInfo, PlaylistInfo, RelatedArtist, SearchResults, Track};
 
-use super::{PageState, Theme};
+use super::{PageState, Theme, borderless_table, table_header, table_row};
 use crate::formatting::format_duration;
 use crate::layout::{Orientation, detect_orientation};
 
@@ -429,7 +429,11 @@ impl SearchView {
                 .fg(theme.text_muted)
                 .add_modifier(Modifier::ITALIC)
         };
-        frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(text, style)))
+                .style(Style::default().bg(theme.surface)),
+            area,
+        );
     }
 
     /// Compute the status text and whether it is an error (for styling).
@@ -499,10 +503,13 @@ impl SearchView {
         }
     }
 
-    /// Draw one pane: a titled, bordered list with the active pane highlighted.
+    /// Draw one pane: a bordered box (Python `_SearchPane { border: solid }`,
+    /// focused `$accent` / un-focused `$primary-background`) with the pane title
+    /// on the border, containing a borderless DataTable with that pane's columns
+    /// (Tracks: Title/Artist/Album/Duration; Albums: Title/Artist/Year;
+    /// Artists: Name; Playlists: Title/Tracks).
     fn render_pane(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme, pane: Pane) {
         let is_active = pane == self.focused_pane;
-        let items = self.pane_items(pane);
 
         let title_style = if is_active {
             Style::default()
@@ -521,89 +528,118 @@ impl SearchView {
             .border_style(border_style)
             .style(Style::default().bg(theme.surface))
             .title(Span::styled(pane.title(), title_style));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
 
-        let list = List::new(items)
-            .block(block)
-            .style(Style::default().fg(theme.text).bg(theme.surface))
-            .highlight_style(super::selected_row_style(theme))
-            .highlight_symbol("▶ ");
+        let (labels, widths) = pane_columns(pane);
+        let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+        let header = table_header(theme, &label_refs, is_active);
+        let rows = self
+            .pane_rows(pane)
+            .into_iter()
+            .map(|cols| table_row(theme, &cols, is_active))
+            .collect();
+        let table = borderless_table(theme, header, rows, widths, is_active);
 
-        let mut list_state = ListState::default();
+        let mut state = TableState::default();
         if is_active && self.pane_len(pane) > 0 {
             let cursor = self.cursors[pane.index()].min(self.pane_len(pane) - 1);
-            list_state.select(Some(cursor));
+            state.select(Some(cursor));
         }
-        frame.render_stateful_widget(list, area, &mut list_state);
+        frame.render_stateful_widget(table, inner, &mut state);
     }
 
-    /// Build the list rows for a pane from the loaded results (empty otherwise).
-    fn pane_items(&self, pane: Pane) -> Vec<ListItem<'static>> {
+    /// Build the column rows for a pane from the loaded results (empty otherwise).
+    fn pane_rows(&self, pane: Pane) -> Vec<Vec<String>> {
         let Some(results) = self.results() else {
             return Vec::new();
         };
         match pane {
-            Pane::Tracks => results.tracks.iter().map(track_row).collect(),
-            Pane::Albums => results.albums.iter().map(album_row).collect(),
-            Pane::Artists => results.artists.iter().map(artist_row).collect(),
-            Pane::Playlists => results.playlists.iter().map(playlist_row).collect(),
+            Pane::Tracks => results.tracks.iter().map(track_columns).collect(),
+            Pane::Albums => results.albums.iter().map(album_columns).collect(),
+            Pane::Artists => results.artists.iter().map(artist_columns).collect(),
+            Pane::Playlists => results.playlists.iter().map(playlist_columns).collect(),
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Row formatters
+// Column labels / widths / formatters (per Python `_PANE_COLUMNS`)
 // ---------------------------------------------------------------------------
 
-/// Format a track row: `Title — Artist  Duration` (Python columns
-/// Title/Artist/Album/Duration, condensed to one line for the narrow pane).
-fn track_row(track: &Track) -> ListItem<'static> {
-    let mut spans = vec![Span::raw(track.title.clone())];
-    if !track.artist.is_empty() {
-        spans.push(Span::raw(" — "));
-        spans.push(Span::raw(track.artist.clone()));
+/// The column labels and widths for a search pane's DataTable.
+///
+/// Search panes live in a 2x2 grid, so each is narrow; the columns use
+/// proportional ([`Constraint::Percentage`]/[`Constraint::Ratio`]) widths so the
+/// Title column always keeps a usable share rather than being starved by
+/// fixed-width secondary columns (which `Table` would satisfy first).
+fn pane_columns(pane: Pane) -> (Vec<String>, Vec<Constraint>) {
+    let owned =
+        |labels: &[&str]| -> Vec<String> { labels.iter().map(|s| (*s).to_owned()).collect() };
+    match pane {
+        Pane::Tracks => (
+            owned(&["Title", "Artist", "Album", "Duration"]),
+            vec![
+                Constraint::Ratio(2, 5),
+                Constraint::Ratio(1, 5),
+                Constraint::Ratio(1, 5),
+                Constraint::Ratio(1, 5),
+            ],
+        ),
+        Pane::Albums => (
+            owned(&["Title", "Artist", "Year"]),
+            vec![
+                Constraint::Ratio(1, 2),
+                Constraint::Ratio(1, 3),
+                Constraint::Ratio(1, 6),
+            ],
+        ),
+        Pane::Artists => (owned(&["Name"]), vec![Constraint::Percentage(100)]),
+        Pane::Playlists => (
+            owned(&["Title", "Tracks"]),
+            vec![Constraint::Ratio(3, 4), Constraint::Ratio(1, 4)],
+        ),
     }
+}
+
+/// Track columns: `Title`/`Artist`/`Album`/`Duration`.
+fn track_columns(track: &Track) -> Vec<String> {
     let duration = format_duration(track.duration_seconds);
-    if duration != "—" {
-        spans.push(Span::raw("  "));
-        spans.push(Span::raw(duration));
-    }
-    ListItem::new(Line::from(spans))
-}
-
-/// Format an album row: `Title — Artist  Year`.
-fn album_row(album: &AlbumInfo) -> ListItem<'static> {
-    let mut spans = vec![Span::raw(album.title.clone())];
-    if !album.artist.is_empty() {
-        spans.push(Span::raw(" — "));
-        spans.push(Span::raw(album.artist.clone()));
-    }
-    if !album.year.is_empty() {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            album.year.clone(),
-            Style::default().add_modifier(Modifier::DIM),
-        ));
-    }
-    ListItem::new(Line::from(spans))
-}
-
-/// Format an artist row: just the name.
-fn artist_row(artist: &RelatedArtist) -> ListItem<'static> {
-    ListItem::new(Line::from(Span::raw(artist.name.clone())))
-}
-
-/// Format a playlist row: `Title  (N tracks)`.
-fn playlist_row(playlist: &PlaylistInfo) -> ListItem<'static> {
-    let count = if playlist.track_count > 0 {
-        format!("{} tracks", playlist.track_count)
+    let duration = if duration == "—" {
+        String::new()
     } else {
-        "Playlist".to_owned()
+        duration
     };
-    ListItem::new(Line::from(vec![
-        Span::raw(playlist.title.clone()),
-        Span::raw("  "),
-        Span::styled(count, Style::default().add_modifier(Modifier::DIM)),
-    ]))
+    vec![
+        track.title.clone(),
+        track.artist.clone(),
+        track.album.clone(),
+        duration,
+    ]
+}
+
+/// Album columns: `Title`/`Artist`/`Year`.
+fn album_columns(album: &AlbumInfo) -> Vec<String> {
+    vec![
+        album.title.clone(),
+        album.artist.clone(),
+        album.year.clone(),
+    ]
+}
+
+/// Artist columns: `Name`.
+fn artist_columns(artist: &RelatedArtist) -> Vec<String> {
+    vec![artist.name.clone()]
+}
+
+/// Playlist columns: `Title`/`Tracks`.
+fn playlist_columns(playlist: &PlaylistInfo) -> Vec<String> {
+    let count = if playlist.track_count > 0 {
+        playlist.track_count.to_string()
+    } else {
+        String::new()
+    };
+    vec![playlist.title.clone(), count]
 }
 
 #[cfg(test)]

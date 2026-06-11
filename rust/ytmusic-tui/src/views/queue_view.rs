@@ -29,11 +29,11 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Paragraph, TableState};
 use ytmusic_api::Track;
 
 use super::filter_bar::matches_filter;
-use super::{PageState, Theme};
+use super::{PageState, Theme, borderless_table, table_header, table_row};
 use crate::formatting::format_duration;
 
 /// A point-in-time snapshot of the queue (sent from the runtime thread).
@@ -223,18 +223,17 @@ impl QueueView {
     // -- Rendering -----------------------------------------------------------
 
     /// Render the queue view into `area`.
+    ///
+    /// A muted status line (track count) over a borderless DataTable with
+    /// `# / Title / Artist / Album / Duration` columns, matching the queue SVG
+    /// (no "Queue" panel border — the screen is flat `surface`).
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        // Wrap in a bordered, surface-filled "Queue" panel. Status + list inside.
-        let block = super::panel_block(theme, "Queue");
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
-        // Status (1 row) + track list.
+        // Status (1 row) + track table.
         let chunks = Layout::vertical([
             Constraint::Length(1), // status
-            Constraint::Min(1),    // list
+            Constraint::Min(1),    // table
         ])
-        .split(inner);
+        .split(area);
 
         self.render_status(frame, chunks[0], theme);
         self.render_tracks(frame, chunks[1], theme);
@@ -249,7 +248,11 @@ impl QueueView {
                 .fg(theme.text_muted)
                 .add_modifier(Modifier::ITALIC)
         };
-        frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(text, style)))
+                .style(Style::default().bg(theme.surface)),
+            area,
+        );
     }
 
     fn status_text(&self) -> (String, bool) {
@@ -273,63 +276,74 @@ impl QueueView {
     }
 
     fn render_tracks(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+        // The queue table fills its area with the focused-table styling even
+        // when empty (the SVG paints empty rows in `row_bg`), so always draw the
+        // header on a Loaded state.
         let PageState::Loaded(snap) = &self.state else {
             return;
         };
         let visible = self.visible_indices();
-        if visible.is_empty() {
-            return;
-        }
 
         // Keep the original queue position number and the current-track marker
         // mapped to the original index, so a filtered view still shows real
         // positions and highlights the playing track when it is visible.
-        let items: Vec<ListItem> = visible
+        let rows = visible
             .iter()
             .filter_map(|&i| snap.tracks.get(i).map(|t| (i, t)))
-            .map(|(i, t)| track_row(i + 1, t, snap.current_index == Some(i)))
+            .map(|(i, t)| {
+                table_row(
+                    theme,
+                    &queue_columns(i + 1, t, snap.current_index == Some(i)),
+                    true,
+                )
+            })
             .collect();
 
-        let list = List::new(items)
-            .style(Style::default().fg(theme.text).bg(theme.surface))
-            .highlight_style(super::selected_row_style(theme))
-            .highlight_symbol("▶ ");
+        let header = table_header(theme, &QUEUE_COLUMNS, true);
+        let table = borderless_table(theme, header, rows, queue_widths(), true);
 
-        let mut list_state = ListState::default();
-        list_state.select(Some(self.cursor.min(visible.len() - 1)));
-        frame.render_stateful_widget(list, area, &mut list_state);
+        let mut state = TableState::default();
+        if !visible.is_empty() {
+            state.select(Some(self.cursor.min(visible.len() - 1)));
+        }
+        frame.render_stateful_widget(table, area, &mut state);
     }
 }
 
-/// Format a queue row: `[>] N. Title — Artist  Duration`.
+/// Column labels for the queue table (matching the queue SVG header row).
+const QUEUE_COLUMNS: [&str; 5] = ["#", "Title", "Artist", "Album", "Duration"];
+
+/// Column widths (including the one-space cell padding on each side). Title is
+/// the flexible column; the rest are fixed lanes like the SVG.
+fn queue_widths() -> Vec<Constraint> {
+    vec![
+        Constraint::Length(5),  // "#" + marker
+        Constraint::Min(20),    // Title (flex)
+        Constraint::Length(24), // Artist
+        Constraint::Length(24), // Album
+        Constraint::Length(10), // Duration
+    ]
+}
+
+/// Format one queue track into its five column strings.
 ///
-/// The `is_current` flag renders a `>` marker in the index column for the
-/// currently playing track (mirrors Python's `">" if track == current else " "`).
-fn track_row(num: usize, track: &Track, is_current: bool) -> ListItem<'static> {
+/// The `#` column carries the 1-based position with a leading `>` marker for
+/// the currently playing track (Python's `">" if track == current else " "`).
+fn queue_columns(num: usize, track: &Track, is_current: bool) -> Vec<String> {
     let marker = if is_current { ">" } else { " " };
-    let mut spans = vec![
-        Span::styled(
-            format!("{marker}{num:2}. "),
-            if is_current {
-                Style::default()
-                    .fg(ratatui::style::Color::Reset) // accented by the highlight when selected
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().add_modifier(Modifier::DIM)
-            },
-        ),
-        Span::raw(track.title.clone()),
-    ];
-    if !track.artist.is_empty() {
-        spans.push(Span::raw(" — "));
-        spans.push(Span::raw(track.artist.clone()));
-    }
     let duration = format_duration(track.duration_seconds);
-    if duration != "—" {
-        spans.push(Span::raw("  "));
-        spans.push(Span::raw(duration));
-    }
-    ListItem::new(Line::from(spans))
+    let duration = if duration == "—" {
+        String::new()
+    } else {
+        duration
+    };
+    vec![
+        format!("{marker}{num}"),
+        track.title.clone(),
+        track.artist.clone(),
+        track.album.clone(),
+        duration,
+    ]
 }
 
 #[cfg(test)]
@@ -469,6 +483,20 @@ mod tests {
     }
 
     // -- rendering -----------------------------------------------------------
+
+    #[test]
+    fn loaded_render_shows_column_headers_and_is_borderless() {
+        // The queue renders a borderless DataTable with the SVG's five columns.
+        let view = loaded_view();
+        let text = render_to_string(&view, 80, 10);
+        for col in ["Title", "Artist", "Album", "Duration"] {
+            assert!(text.contains(col), "missing '{col}' column header:\n{text}");
+        }
+        assert!(
+            !text.contains('┌') && !text.contains('│'),
+            "queue drew a box border:\n{text}"
+        );
+    }
 
     #[test]
     fn loaded_render_shows_tracks_and_count() {

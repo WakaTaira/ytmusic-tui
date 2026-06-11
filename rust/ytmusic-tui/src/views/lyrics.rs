@@ -98,19 +98,18 @@ impl LyricsView {
     // -- Rendering -----------------------------------------------------------
 
     /// Render the lyrics view into `area`.
+    ///
+    /// An accent title line (`Title - Artist`, or "Lyrics") over the status /
+    /// scrollable lyrics body, on a flat `surface` background (Python's
+    /// `#lyrics-title { color: $accent }` + scrollable `#lyrics-text` — no panel
+    /// border).
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        // Wrap in a bordered, surface-filled "Lyrics" panel. The per-track
-        // header (title - artist) and the body draw inside the border.
-        let block = super::panel_block(theme, "Lyrics");
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
         // Title header (1 row) + status / lyrics body.
         let chunks = Layout::vertical([
             Constraint::Length(1), // header
             Constraint::Min(1),    // body
         ])
-        .split(inner);
+        .split(area);
 
         // Header: track name + artist in accent color (matches Python's
         // `#lyrics-title` which updates to `"{title} - {artist}" or "Lyrics"`).
@@ -125,7 +124,8 @@ impl LyricsView {
                 Style::default()
                     .fg(theme.accent)
                     .add_modifier(Modifier::BOLD),
-            ))),
+            )))
+            .style(Style::default().bg(theme.surface)),
             chunks[0],
         );
 
@@ -133,6 +133,9 @@ impl LyricsView {
     }
 
     fn render_body(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+        // Every body variant paints the surface background so the screen color
+        // shows through consistently (the rest of the views fill surface too).
+        let surface = Style::default().bg(theme.surface);
         match &self.state {
             PageState::Loading => {
                 frame.render_widget(
@@ -141,7 +144,8 @@ impl LyricsView {
                         Style::default()
                             .fg(theme.text_muted)
                             .add_modifier(Modifier::ITALIC),
-                    ))),
+                    )))
+                    .style(surface),
                     area,
                 );
             }
@@ -150,7 +154,8 @@ impl LyricsView {
                     Paragraph::new(Line::from(Span::styled(
                         msg.clone(),
                         Style::default().fg(theme.primary),
-                    ))),
+                    )))
+                    .style(surface),
                     area,
                 );
             }
@@ -163,14 +168,15 @@ impl LyricsView {
                         Style::default()
                             .fg(theme.text_muted)
                             .add_modifier(Modifier::ITALIC),
-                    ))),
+                    )))
+                    .style(surface),
                     area,
                 );
             }
             PageState::Loaded(Some(text)) => {
                 // Render the lyrics as a scrollable paragraph with word wrap.
                 let paragraph = Paragraph::new(text.as_str())
-                    .style(Style::default().fg(theme.text))
+                    .style(Style::default().fg(theme.text).bg(theme.surface))
                     .wrap(Wrap { trim: false })
                     .scroll((self.scroll, 0));
                 frame.render_widget(paragraph, area);
