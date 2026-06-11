@@ -37,7 +37,7 @@
 | Responsive layout | works | `layout.rs` aspect-ratio 2.3; used by search + library render |
 | Session canary (logged-out HTTP 200) | works | `CheckSession` → `is_session_valid` → `SessionInvalid` warning line |
 | Audio quality cycle (`b`) | works | `CycleAudioQuality`; applies from next track |
-| MPRIS2 | **missing** | **M6** — no `mpris` module yet; forwarder has the documented 2nd-sink seam |
+| MPRIS2 | works | M6: mpris-server 0.10 on the runtime tokio; only-changed emit, Position structurally un-emittable, live playerctl/busctl verified |
 | CI | partial | Rust `cargo fmt/clippy/test/build` gate runs locally; no dedicated GH Actions Rust job confirmed in-tree yet |
 
 ## HANDOFF §5.5 spotify_player comparison (remaining gaps)
