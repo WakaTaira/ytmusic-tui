@@ -84,6 +84,8 @@ use ytmusic_api::{
     AlbumInfo, ArtistInfo, HomeSection, InnerTubeClient, PlaylistInfo, SearchResults, Track,
 };
 
+use crate::views::queue_view::QueueSnapshot;
+
 use crate::player::{Player, PlayerEvent};
 use crate::queue::{QueueManager, RepeatMode};
 
@@ -151,6 +153,23 @@ pub enum AppCommand {
     SetVolume(i64),
     /// Adjust the volume by a relative delta.
     AdjustVolume(i64),
+    /// Fetch a single album's tracks. `browse_id` identifies the album.
+    /// Replies with [`AppEvent::AlbumLoaded`] or [`AppEvent::ApiError`].
+    FetchAlbum(String),
+    /// Fetch an artist's page (top songs / albums / related artists).
+    /// `channel_id` identifies the artist. Replies with
+    /// [`AppEvent::ArtistLoaded`] or [`AppEvent::ApiError`].
+    FetchArtist(String),
+    /// Fetch lyrics for the given `video_id`. Replies with
+    /// [`AppEvent::LyricsLoaded`] or [`AppEvent::ApiError`].
+    FetchLyrics(String),
+    /// Fetch the user's listening history. Replies with
+    /// [`AppEvent::HistoryLoaded`] or [`AppEvent::ApiError`].
+    FetchHistory,
+    /// Request a snapshot of the current queue state (for the queue view).
+    /// Replies immediately with [`AppEvent::QueueSnapshot`] — no API call
+    /// needed.
+    FetchQueue,
     /// Validate the auth session (the "logged-out HTTP 200" canary). Replies
     /// with [`AppEvent::SessionInvalid`] only when the session is *not* valid;
     /// a valid session produces no event (the UI assumes valid by default).
@@ -232,6 +251,19 @@ pub enum AppEvent {
     TrackEnded,
     /// The current stream failed; the string is a short description.
     TrackError(String),
+    /// An album's tracks finished loading.
+    AlbumLoaded(AlbumInfo),
+    /// An artist's page data finished loading.
+    ArtistLoaded(ArtistInfo),
+    /// Lyrics for the current track finished loading. `None` means the API
+    /// confirmed no lyrics are available for this track (not an error).
+    LyricsLoaded(Option<String>),
+    /// The user's listening history finished loading.
+    HistoryLoaded(Vec<Track>),
+    /// A snapshot of the current queue state (response to
+    /// [`AppCommand::FetchQueue`], or emitted after any queue mutation so the
+    /// queue view stays current).
+    QueueSnapshot(QueueSnapshot),
     /// The auth session is invalid (YouTube served a logged-out page with HTTP
     /// 200). The UI renders a one-line warning prompting `ytmusic-tui auth`.
     /// Only emitted in response to [`AppCommand::CheckSession`] when the canary
@@ -257,6 +289,23 @@ impl RuntimeHandle {
     /// is gone), so the caller can stop trying.
     pub fn send(&self, command: AppCommand) -> bool {
         self.commands.send(command).is_ok()
+    }
+
+    /// Create a stub `RuntimeHandle` for unit tests.
+    ///
+    /// Returns `(handle, receiver)` — `handle` can be passed to any method
+    /// that takes `&RuntimeHandle`; `receiver` lets the test drain and inspect
+    /// the commands the code under test sent. The stub handle has no background
+    /// threads; calling `shutdown` on it is a no-op.
+    #[doc(hidden)]
+    pub fn stub() -> (Self, tokio::sync::mpsc::UnboundedReceiver<AppCommand>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let handle = Self {
+            commands: tx,
+            runtime_thread: None,
+            forwarder_thread: None,
+        };
+        (handle, rx)
     }
 
     /// Shut the runtime down: send [`AppCommand::Quit`], then join both
@@ -411,6 +460,31 @@ fn run_runtime(
                 }
                 AppCommand::FetchLikedSongs => {
                     handle_fetch_liked_songs(client.as_ref(), events).await;
+                }
+                AppCommand::FetchAlbum(browse_id) => {
+                    handle_fetch_album(client.as_ref(), &browse_id, events).await;
+                }
+                AppCommand::FetchArtist(channel_id) => {
+                    handle_fetch_artist(client.as_ref(), &channel_id, events).await;
+                }
+                AppCommand::FetchLyrics(video_id) => {
+                    handle_fetch_lyrics(client.as_ref(), &video_id, events).await;
+                }
+                AppCommand::FetchHistory => {
+                    handle_fetch_history(client.as_ref(), events).await;
+                }
+                AppCommand::FetchQueue => {
+                    // Emit a snapshot of the current queue; no API call needed.
+                    // The current track's index is derived from the queue's
+                    // current_track(), which already handles the -1 sentinel.
+                    let tracks = queue.tracks();
+                    let current_index = queue
+                        .current_track()
+                        .and_then(|ct| tracks.iter().position(|t| t == ct));
+                    let _ = events.send(AppEvent::QueueSnapshot(QueueSnapshot {
+                        tracks,
+                        current_index,
+                    }));
                 }
                 AppCommand::CheckSession => handle_check_session(client.as_ref(), events).await,
                 AppCommand::Play(track) => {
@@ -726,6 +800,83 @@ fn report_player_result(
     if let Err(err) = result {
         let _ = events.send(AppEvent::TrackError(err.to_string()));
     }
+}
+
+/// Fetch a single album by `browse_id` and emit the result (or a classified
+/// error). Mirrors Python `api.get_album(browse_id)`.
+async fn handle_fetch_album(
+    client: Option<&InnerTubeClient>,
+    browse_id: &str,
+    events: &StdSender<AppEvent>,
+) {
+    let Some(client) = client else {
+        let _ = events.send(AppEvent::ApiError(
+            "Not signed in — run: ytmusic-tui auth".to_owned(),
+        ));
+        return;
+    };
+    let event = match client.get_album(browse_id).await {
+        Ok(album) => AppEvent::AlbumLoaded(album),
+        Err(err) => AppEvent::ApiError(ytmusic_api::classify_api_error(&err)),
+    };
+    let _ = events.send(event);
+}
+
+/// Fetch an artist page by `channel_id` and emit the result (or a classified
+/// error). Mirrors Python `api.get_artist(channel_id)`.
+async fn handle_fetch_artist(
+    client: Option<&InnerTubeClient>,
+    channel_id: &str,
+    events: &StdSender<AppEvent>,
+) {
+    let Some(client) = client else {
+        let _ = events.send(AppEvent::ApiError(
+            "Not signed in — run: ytmusic-tui auth".to_owned(),
+        ));
+        return;
+    };
+    let event = match client.get_artist(channel_id).await {
+        Ok(artist) => AppEvent::ArtistLoaded(artist),
+        Err(err) => AppEvent::ApiError(ytmusic_api::classify_api_error(&err)),
+    };
+    let _ = events.send(event);
+}
+
+/// Fetch lyrics for `video_id` and emit the result (or a classified error).
+/// `None` from the API means "no lyrics available" — a valid loaded state, not
+/// an error. Mirrors Python `api.get_lyrics(video_id)`.
+async fn handle_fetch_lyrics(
+    client: Option<&InnerTubeClient>,
+    video_id: &str,
+    events: &StdSender<AppEvent>,
+) {
+    let Some(client) = client else {
+        let _ = events.send(AppEvent::ApiError(
+            "Not signed in — run: ytmusic-tui auth".to_owned(),
+        ));
+        return;
+    };
+    let event = match client.get_lyrics(video_id).await {
+        Ok(lyrics) => AppEvent::LyricsLoaded(lyrics),
+        Err(err) => AppEvent::ApiError(ytmusic_api::classify_api_error(&err)),
+    };
+    let _ = events.send(event);
+}
+
+/// Fetch the user's listening history and emit the result (or a classified
+/// error). Mirrors Python `api.get_history()`.
+async fn handle_fetch_history(client: Option<&InnerTubeClient>, events: &StdSender<AppEvent>) {
+    let Some(client) = client else {
+        let _ = events.send(AppEvent::ApiError(
+            "Not signed in — run: ytmusic-tui auth".to_owned(),
+        ));
+        return;
+    };
+    let event = match client.get_history().await {
+        Ok(tracks) => AppEvent::HistoryLoaded(tracks),
+        Err(err) => AppEvent::ApiError(ytmusic_api::classify_api_error(&err)),
+    };
+    let _ = events.send(event);
 }
 
 #[cfg(test)]

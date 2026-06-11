@@ -16,12 +16,22 @@
 //! * [`playlist`] — the two-level playlist browser.
 //! * [`search`] — the 4-pane search view (Tracks/Albums/Artists/Playlists).
 //! * [`library`] — the 3-pane library view (Playlists/Albums/Artists).
+//! * [`album`] — the album detail view (header + track list).
+//! * [`artist`] — the artist page (top songs / albums / related artists).
+//! * [`lyrics`] — scrollable lyrics for the current track.
+//! * [`history`] — recently-played track list.
+//! * [`queue_view`] — the current playback queue with position highlight.
 //! * [`player_bar`] — the bottom now-playing bar.
 
+pub mod album;
+pub mod artist;
+pub mod history;
 pub mod home;
 pub mod library;
+pub mod lyrics;
 pub mod player_bar;
 pub mod playlist;
+pub mod queue_view;
 pub mod search;
 
 use ratatui::style::Color;

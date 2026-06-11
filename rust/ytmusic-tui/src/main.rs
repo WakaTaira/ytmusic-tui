@@ -47,10 +47,15 @@ use ytmusic_tui::config::{self, AppConfig};
 use ytmusic_tui::navigation::{NavigationManager, PageState as NavPage};
 use ytmusic_tui::player::Player;
 use ytmusic_tui::views::Theme;
+use ytmusic_tui::views::album::{AlbumAction, AlbumView};
+use ytmusic_tui::views::artist::{ArtistAction, ArtistView};
+use ytmusic_tui::views::history::{HistoryAction, HistoryView};
 use ytmusic_tui::views::home::{HomeAction, HomeView};
 use ytmusic_tui::views::library::{LibraryAction, LibraryView};
+use ytmusic_tui::views::lyrics::LyricsView;
 use ytmusic_tui::views::player_bar::{PLAYER_BAR_HEIGHT, PlayerBar, PlayerBarState};
 use ytmusic_tui::views::playlist::{PlaylistAction, PlaylistView};
+use ytmusic_tui::views::queue_view::{QueueAction, QueueView};
 use ytmusic_tui::views::search::{SearchAction, SearchView};
 
 /// How long the input poll waits before the loop falls through to drain events
@@ -308,10 +313,15 @@ fn drain_events(
 /// dispatch table pure and testable. Bindings match [`config::DEFAULT_KEYMAP`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Action {
-    /// Quit the app (`q` / `Q`). DEFAULT_KEYMAP maps `quit = "Q"` and
-    /// `switch_queue = "q"`. Until M5c wires the full keymap, lowercase `q`
-    /// also quits so the app is quittable before the queue view exists; the
-    /// keymap dispatcher supersedes this.
+    /// Quit the app (`Q` and Ctrl+C).
+    ///
+    /// Key-conflict resolution (M5b-2b): `DEFAULT_KEYMAP` has
+    /// `switch_queue = "q"` and `quit = "Q"`. Now that the queue view exists:
+    ///
+    /// * lowercase `q` switches to the queue view.
+    /// * uppercase `Q` (and Ctrl+C) quits.
+    ///
+    /// The interim "q also quits" comment from M5b-2a is removed here.
     Quit,
     /// Toggle play/pause (`space`).
     TogglePause,
@@ -355,6 +365,13 @@ enum Action {
     /// Switch to the library view (DEFAULT_KEYMAP `switch_library = "l"`; also
     /// `3`).
     SwitchLibrary,
+    /// Switch to the queue view (DEFAULT_KEYMAP `switch_queue = "q"`; also `4`).
+    SwitchQueue,
+    /// Switch to the history view (DEFAULT_KEYMAP `switch_history = "H"`; also
+    /// `5`).
+    SwitchHistory,
+    /// Open lyrics for the currently playing track (`L`; also `6`).
+    SwitchLyrics,
 }
 
 /// Per-press volume step, matching the Python `volume_up` / `volume_down`
@@ -367,22 +384,27 @@ const VOLUME_STEP: i64 = 5;
 /// is M5c.
 fn map_key(key: KeyEvent) -> Option<Action> {
     match key.code {
-        // `Q` is the canonical quit (DEFAULT_KEYMAP); `q` is also accepted.
-        KeyCode::Char('q' | 'Q') => Some(Action::Quit),
+        // `Q` quits; `q` switches to the queue view.
+        // (Key-conflict resolution: DEFAULT_KEYMAP `quit = "Q"`,
+        // `switch_queue = "q"`. See the Action::Quit doc.)
+        KeyCode::Char('Q') => Some(Action::Quit),
+        KeyCode::Char('q') => Some(Action::SwitchQueue),
         KeyCode::Char(' ') => Some(Action::TogglePause),
         KeyCode::Char('+' | '=') => Some(Action::VolumeUp),
         KeyCode::Char('-') => Some(Action::VolumeDown),
-        // Transport keys (DEFAULT_KEYMAP: n/p/s/r). Hardcoded until M5c wires
-        // the merged keymap.toml.
+        // Transport keys (DEFAULT_KEYMAP: n/p/s/r).
         KeyCode::Char('n') => Some(Action::NextTrack),
         KeyCode::Char('p') => Some(Action::PreviousTrack),
         KeyCode::Char('s') => Some(Action::ToggleShuffle),
         KeyCode::Char('r') => Some(Action::CycleRepeat),
-        // View switches (DEFAULT_KEYMAP: g/l; digits mirror Python's hidden
-        // 1/2/3 bindings; `/` is the search-view shortcut — see SwitchSearch).
+        // View switches (DEFAULT_KEYMAP: g/l; digits mirror Python's 1-6
+        // bindings; `/` is the search-view shortcut).
         KeyCode::Char('g' | '1') => Some(Action::SwitchHome),
         KeyCode::Char('/' | '2') => Some(Action::SwitchSearch),
         KeyCode::Char('l' | '3') => Some(Action::SwitchLibrary),
+        KeyCode::Char('4') => Some(Action::SwitchQueue),
+        KeyCode::Char('H' | '5') => Some(Action::SwitchHistory),
+        KeyCode::Char('L' | '6') => Some(Action::SwitchLyrics),
         KeyCode::Esc => Some(Action::GoBack),
         KeyCode::Char('j') => Some(Action::SelectNext),
         KeyCode::Char('k') => Some(Action::SelectPrevious),
@@ -403,9 +425,9 @@ fn map_key(key: KeyEvent) -> Option<Action> {
 // AppModel — view state + event folding + action application (pure-ish)
 // ---------------------------------------------------------------------------
 
-/// Which content view is active (the M5b minimal view switch; M5c/M5b-2 add the
-/// rest). The home and playlist views each keep their own state; this enum just
-/// records which one renders and receives navigation keys.
+/// Which content view is active. The home, playlist, search, library, album,
+/// artist, lyrics, history, and queue views each keep their own state; this
+/// enum records which one renders and receives navigation keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum View {
     /// The home recommendations view (the startup view).
@@ -416,16 +438,31 @@ enum View {
     Search,
     /// The 3-pane library view (Playlists/Albums/Artists).
     Library,
+    /// The album detail view (header + track list).
+    Album,
+    /// The artist page (top songs / albums / related artists).
+    Artist,
+    /// Scrollable lyrics for the current track.
+    Lyrics,
+    /// Recently-played track list.
+    History,
+    /// The current playback queue with position highlight.
+    Queue,
 }
 
 /// Map a navigation page type (the `page_type` of a [`NavPage`]) to its content
 /// [`View`]. Kept pure so the page→view mapping is unit-testable without a
-/// `RuntimeHandle`. Unknown / not-yet-ported pages fall back to [`View::Home`].
+/// `RuntimeHandle`. Unknown pages fall back to [`View::Home`].
 fn view_for_page(page_type: &str) -> View {
     match page_type {
         "playlist" => View::Playlist,
         "search" => View::Search,
         "library" => View::Library,
+        "album" => View::Album,
+        "artist" => View::Artist,
+        "lyrics" => View::Lyrics,
+        "history" => View::History,
+        "queue" => View::Queue,
         _ => View::Home,
     }
 }
@@ -439,12 +476,17 @@ fn page_type_for_view(view: View) -> &'static str {
         View::Playlist => "playlist",
         View::Search => "search",
         View::Library => "library",
+        View::Album => "album",
+        View::Artist => "artist",
+        View::Lyrics => "lyrics",
+        View::History => "history",
+        View::Queue => "queue",
     }
 }
 
-/// The full UI state for the M5b home + playlist + player-bar surface.
+/// The full UI state for the TUI.
 ///
-/// Owns the view widgets' state, the navigation stack, and the quit flag.
+/// Owns all view widgets' state, the navigation stack, and the quit flag.
 /// Methods are split so the pure parts (event folding, navigation/key
 /// application) are unit-testable; only [`AppModel::apply`] for playback actions
 /// needs a `RuntimeHandle`, which tests exercise via a `None` runtime path where
@@ -454,8 +496,17 @@ struct AppModel {
     playlist: PlaylistView,
     search: SearchView,
     library: LibraryView,
+    album: AlbumView,
+    artist: ArtistView,
+    lyrics: LyricsView,
+    history: HistoryView,
+    queue_view: QueueView,
     player: PlayerBarState,
-    /// The page history stack (home ↔ playlist ↔ search ↔ library); Esc pops back.
+    /// The `video_id` of the currently playing track, updated from
+    /// [`AppEvent::NowPlaying`]. Stored here rather than in [`PlayerBarState`]
+    /// because the bar view has no need for it; it is only used to fetch lyrics.
+    current_video_id: Option<String>,
+    /// The page history stack; Esc pops back.
     nav: NavigationManager,
     /// The active content view.
     view: View,
@@ -484,7 +535,13 @@ impl AppModel {
             playlist: PlaylistView::new(),
             search: SearchView::new(),
             library: LibraryView::new(),
+            album: AlbumView::new(),
+            artist: ArtistView::new(),
+            lyrics: LyricsView::new(),
+            history: HistoryView::new(),
+            queue_view: QueueView::new(),
             player: PlayerBarState::default(),
+            current_video_id: None,
             nav: NavigationManager::new(NavPage::new("home")),
             view: View::Home,
             input_mode: false,
@@ -553,6 +610,12 @@ impl AppModel {
             }
             AppEvent::ApiError(msg) => self.on_api_error(msg),
             AppEvent::NowPlaying(now) => {
+                // Keep the video_id available for the lyrics fetch trigger.
+                self.current_video_id = if now.video_id.is_empty() {
+                    None
+                } else {
+                    Some(now.video_id.clone())
+                };
                 self.player.on_now_playing(
                     now.title,
                     now.artist,
@@ -561,6 +624,12 @@ impl AppModel {
                     now.shuffle,
                     now.repeat.into(),
                 );
+                // When the queue view is visible, re-snapshot so the ▶ marker
+                // stays accurate as tracks advance (FetchQueue is cheap — the
+                // runtime replies instantly with the current queue state).
+                if self.view == View::Queue {
+                    return Some(AppCommand::FetchQueue);
+                }
             }
             AppEvent::PlayerProgress(secs) => self.player.on_progress(secs),
             AppEvent::PlayerDuration(secs) => self.player.on_duration(secs),
@@ -571,6 +640,7 @@ impl AppModel {
                 // advance the queue. The runtime replies with NowPlaying +
                 // PlayerStarted for the next track (or an idle NowPlaying at the
                 // end of the queue) on the following ticks.
+                self.current_video_id = None;
                 self.player.on_track_ended();
                 return Some(AppCommand::NextTrack);
             }
@@ -578,6 +648,25 @@ impl AppModel {
                 // NEVER advance on a failed stream — a broken resolver would
                 // machine-gun the queue (the end-file battle lesson).
                 self.status = Some(format!("Playback error: {detail}"));
+            }
+            AppEvent::AlbumLoaded(album) => {
+                self.album.set_album(album);
+                self.status = None;
+            }
+            AppEvent::ArtistLoaded(artist) => {
+                self.artist.set_artist(artist);
+                self.status = None;
+            }
+            AppEvent::LyricsLoaded(lyrics) => {
+                self.lyrics.set_lyrics(lyrics);
+                self.status = None;
+            }
+            AppEvent::HistoryLoaded(tracks) => {
+                self.history.set_tracks(tracks);
+                self.status = None;
+            }
+            AppEvent::QueueSnapshot(snapshot) => {
+                self.queue_view.set_snapshot(snapshot);
             }
             AppEvent::SessionInvalid => {
                 self.session_warning = Some(SESSION_WARNING.to_owned());
@@ -608,7 +697,11 @@ impl AppModel {
             View::Playlist => self.playlist.set_error(msg.clone()),
             View::Search => self.search.set_error(msg.clone()),
             View::Library => self.library.set_error(msg.clone()),
-            View::Home => {}
+            View::Album => self.album.set_error(msg.clone()),
+            View::Artist => self.artist.set_error(msg.clone()),
+            View::Lyrics => self.lyrics.set_error(msg.clone()),
+            View::History => self.history.set_error(msg.clone()),
+            View::Home | View::Queue => {}
         }
         self.status = Some(msg);
     }
@@ -698,19 +791,21 @@ impl AppModel {
                 runtime.send(AppCommand::CycleRepeat);
             }
             // Tab / Shift-Tab move between "sections": home sections, search
-            // panes, and library panes. The playlist view is a single flat list,
-            // so they are inert there (Python's PlaylistView ignored Tab too).
+            // panes, library panes, and artist sections. Single-list views are
+            // inert (Python's PlaylistView / QueueView / HistoryView ignored Tab).
             Action::NextSection => match self.view {
                 View::Home => self.home.focus_next_section(),
                 View::Search => self.search.focus_next_pane(),
                 View::Library => self.library.focus_next_pane(),
-                View::Playlist => {}
+                View::Artist => self.artist.focus_next_section(),
+                View::Playlist | View::Album | View::Lyrics | View::History | View::Queue => {}
             },
             Action::PreviousSection => match self.view {
                 View::Home => self.home.focus_previous_section(),
                 View::Search => self.search.focus_previous_pane(),
                 View::Library => self.library.focus_previous_pane(),
-                View::Playlist => {}
+                View::Artist => self.artist.focus_previous_section(),
+                View::Playlist | View::Album | View::Lyrics | View::History | View::Queue => {}
             },
             Action::SelectNext => self.select_next(),
             Action::SelectPrevious => self.select_previous(),
@@ -719,6 +814,9 @@ impl AppModel {
             Action::SwitchHome => self.switch_view(View::Home, runtime),
             Action::SwitchSearch => self.switch_view(View::Search, runtime),
             Action::SwitchLibrary => self.switch_view(View::Library, runtime),
+            Action::SwitchQueue => self.switch_view(View::Queue, runtime),
+            Action::SwitchHistory => self.switch_view(View::History, runtime),
+            Action::SwitchLyrics => self.switch_view(View::Lyrics, runtime),
         }
     }
 
@@ -744,6 +842,7 @@ impl AppModel {
         }
         self.view = target;
         self.nav.push(NavPage::new(page_type_for_view(target)));
+        self.input_mode = false;
         match target {
             View::Search => {
                 // Focus the input so the user can type immediately (Python
@@ -751,13 +850,29 @@ impl AppModel {
                 self.input_mode = true;
             }
             View::Library => {
-                // Leaving any input focus, and (re)load the library panes.
-                self.input_mode = false;
+                // (Re)load the library panes on every switch-to.
                 self.refresh_library(runtime);
             }
-            View::Home | View::Playlist => {
-                self.input_mode = false;
+            View::History => {
+                // Re-fetch history on every view-switch (mirrors Python's
+                // `on_show` re-fetch).
+                self.refresh_history(runtime);
             }
+            View::Queue => {
+                // Immediately snapshot the current queue.
+                runtime.send(AppCommand::FetchQueue);
+            }
+            View::Lyrics => {
+                // Fetch lyrics for the currently playing track (if any).
+                // If nothing is playing, reflect that in the header.
+                if let Some(video_id) = self.current_video_id.clone() {
+                    self.lyrics.start_loading(&self.player.title);
+                    runtime.send(AppCommand::FetchLyrics(video_id));
+                } else {
+                    self.lyrics.start_loading("No track playing");
+                }
+            }
+            View::Home | View::Playlist | View::Album | View::Artist => {}
         }
     }
 
@@ -773,6 +888,13 @@ impl AppModel {
         runtime.send(AppCommand::FetchLikedSongs);
     }
 
+    /// Re-fetch history and reset its view to loading. Called on every
+    /// switch-to-history (mirrors Python's `HistoryView.on_show` re-fetch).
+    fn refresh_history(&mut self, runtime: &RuntimeHandle) {
+        self.history.set_loading();
+        runtime.send(AppCommand::FetchHistory);
+    }
+
     /// Move the cursor down in the active view.
     fn select_next(&mut self) {
         match self.view {
@@ -780,6 +902,11 @@ impl AppModel {
             View::Playlist => self.playlist.select_next(),
             View::Search => self.search.select_next(),
             View::Library => self.library.select_next(),
+            View::Album => self.album.select_next(),
+            View::Artist => self.artist.select_next(),
+            View::History => self.history.select_next(),
+            View::Queue => self.queue_view.select_next(),
+            View::Lyrics => self.lyrics.scroll_down(),
         }
     }
 
@@ -790,6 +917,11 @@ impl AppModel {
             View::Playlist => self.playlist.select_previous(),
             View::Search => self.search.select_previous(),
             View::Library => self.library.select_previous(),
+            View::Album => self.album.select_previous(),
+            View::Artist => self.artist.select_previous(),
+            View::History => self.history.select_previous(),
+            View::Queue => self.queue_view.select_previous(),
+            View::Lyrics => self.lyrics.scroll_up(),
         }
     }
 
@@ -800,6 +932,12 @@ impl AppModel {
             View::Playlist => self.activate_playlist(runtime),
             View::Search => self.activate_search(runtime),
             View::Library => self.activate_library(runtime),
+            View::Album => self.activate_album(runtime),
+            View::Artist => self.activate_artist(runtime),
+            View::History => self.activate_history(runtime),
+            View::Queue => self.activate_queue(runtime),
+            // Lyrics view has no selectable items.
+            View::Lyrics => {}
         }
     }
 
@@ -843,7 +981,7 @@ impl AppModel {
 
     /// Enter on the search view: route by the focused pane. Tracks play;
     /// playlists open in the playlist view (reusing its drill-in flow); albums
-    /// and artists defer to the M5b-2b album/artist views.
+    /// and artists navigate to their respective detail views.
     fn activate_search(&mut self, runtime: &RuntimeHandle) {
         match self.search.activate_selected() {
             Some(SearchAction::PlayTrack(track)) => {
@@ -851,8 +989,12 @@ impl AppModel {
                 runtime.send(AppCommand::Play(track));
             }
             Some(SearchAction::OpenPlaylist(info)) => self.open_playlist(info, runtime),
-            Some(SearchAction::OpenAlbum(album)) => self.defer_album(&album.title),
-            Some(SearchAction::OpenArtist(artist)) => self.defer_artist(&artist.name),
+            Some(SearchAction::OpenAlbum(album)) => {
+                self.open_album(album.browse_id.clone(), runtime)
+            }
+            Some(SearchAction::OpenArtist(artist)) => {
+                self.open_artist(artist.channel_id.clone(), runtime)
+            }
             None => {}
         }
     }
@@ -861,8 +1003,8 @@ impl AppModel {
     /// into its tracks *within* the library's Playlists pane (Python
     /// `_show_track_list`, which stays in `LibraryView` rather than switching to
     /// the standalone playlist view); a track row (drill-down or liked songs)
-    /// plays from the cursor, queueing the rest; albums and artists defer to
-    /// M5b-2b.
+    /// plays from the cursor, queueing the rest; albums and artists navigate to
+    /// their detail views.
     fn activate_library(&mut self, runtime: &RuntimeHandle) {
         match self.library.activate_selected() {
             Some(LibraryAction::OpenPlaylist(info)) => {
@@ -882,22 +1024,113 @@ impl AppModel {
                     start_index,
                 });
             }
-            Some(LibraryAction::OpenAlbum(album)) => self.defer_album(&album.title),
-            Some(LibraryAction::OpenArtist(artist)) => self.defer_artist(&artist.name),
+            Some(LibraryAction::OpenAlbum(album)) => {
+                self.open_album(album.browse_id.clone(), runtime)
+            }
+            Some(LibraryAction::OpenArtist(artist)) => {
+                self.open_artist(artist.channel_id.clone(), runtime)
+            }
             None => {}
         }
     }
 
-    /// Stub for the album view (M5b-2b): surface a one-line status instead of
-    /// opening. Python routed to `action_open_album`; the album view is the next
-    /// milestone, so this records intent without a half-built navigation.
-    fn defer_album(&mut self, title: &str) {
-        self.status = Some(format!("Album view arrives in M5b-2b: {title}"));
+    /// Navigate to the album detail view and kick off the fetch.
+    ///
+    /// Pushes "album" onto the nav stack so Esc returns to the caller (search,
+    /// library, or artist). Resets the album view to loading and fires
+    /// [`AppCommand::FetchAlbum`]. Mirrors Python's `action_open_album`.
+    fn open_album(&mut self, browse_id: String, runtime: &RuntimeHandle) {
+        self.input_mode = false;
+        self.view = View::Album;
+        self.album = AlbumView::new(); // fresh loading state for the new album
+        self.nav
+            .push(NavPage::with_context("album", "browse_id", &browse_id));
+        runtime.send(AppCommand::FetchAlbum(browse_id));
     }
 
-    /// Stub for the artist view (M5b-2b), mirroring [`AppModel::defer_album`].
-    fn defer_artist(&mut self, name: &str) {
-        self.status = Some(format!("Artist view arrives in M5b-2b: {name}"));
+    /// Navigate to the artist detail view and kick off the fetch.
+    ///
+    /// Mirrors [`AppModel::open_album`] but for artists. Recursive chains like
+    /// search→artist→related-artist→album work because each push is independent.
+    fn open_artist(&mut self, channel_id: String, runtime: &RuntimeHandle) {
+        self.input_mode = false;
+        self.view = View::Artist;
+        self.artist = ArtistView::new(); // fresh loading state for the new artist
+        self.nav
+            .push(NavPage::with_context("artist", "channel_id", &channel_id));
+        runtime.send(AppCommand::FetchArtist(channel_id));
+    }
+
+    /// Enter on the album view: play from the cursor, queueing the rest of the
+    /// album (same semantics as the playlist track list — Python's
+    /// `set_playlist(self._tracks, start_index=row_index)`).
+    fn activate_album(&mut self, runtime: &RuntimeHandle) {
+        match self.album.activate_selected() {
+            Some(AlbumAction::PlayTracks {
+                tracks,
+                start_index,
+            }) => {
+                self.player.on_started();
+                runtime.send(AppCommand::PlayPlaylist {
+                    tracks,
+                    start_index,
+                });
+            }
+            None => {}
+        }
+    }
+
+    /// Enter on the artist view: route by the focused section.
+    fn activate_artist(&mut self, runtime: &RuntimeHandle) {
+        match self.artist.activate_selected() {
+            Some(ArtistAction::PlayTrack(track)) => {
+                self.player.on_started();
+                runtime.send(AppCommand::Play(track));
+            }
+            Some(ArtistAction::OpenAlbum(album)) => {
+                self.open_album(album.browse_id.clone(), runtime)
+            }
+            Some(ArtistAction::OpenArtist(related)) => {
+                self.open_artist(related.channel_id.clone(), runtime);
+            }
+            None => {}
+        }
+    }
+
+    /// Enter on the history view: play the history from the cursor, queueing
+    /// the rest (same semantics as album/playlist — Python's
+    /// `set_playlist(self._tracks, start_index=row_index)`).
+    fn activate_history(&mut self, runtime: &RuntimeHandle) {
+        match self.history.activate_selected() {
+            Some(HistoryAction::PlayTracks {
+                tracks,
+                start_index,
+            }) => {
+                self.player.on_started();
+                runtime.send(AppCommand::PlayPlaylist {
+                    tracks,
+                    start_index,
+                });
+            }
+            None => {}
+        }
+    }
+
+    /// Enter on the queue view: jump to the selected position.
+    fn activate_queue(&mut self, runtime: &RuntimeHandle) {
+        match self.queue_view.activate_selected() {
+            Some(QueueAction::JumpTo {
+                tracks,
+                start_index,
+            }) => {
+                self.player.on_started();
+                runtime.send(AppCommand::PlayPlaylist {
+                    tracks,
+                    start_index,
+                });
+            }
+            None => {}
+        }
     }
 
     /// Switch to the playlist view, drilling into `info` and pushing the nav
@@ -948,24 +1181,53 @@ impl AppModel {
         if self.view == View::Library && self.library.go_back() {
             return;
         }
-        // 4. Otherwise pop the page stack (e.g. search/library → home).
+        // 4. Otherwise pop the page stack (album/artist/lyrics/history/queue → caller).
         if let Some(page) = self.nav.pop() {
-            self.switch_to_page(&page.page_type, runtime);
+            self.switch_to_page(&page, runtime);
         }
     }
 
     /// Switch the active view to match a popped navigation page.
     ///
-    /// Home / playlist / search keep their loaded state on return, so no
-    /// re-fetch is needed. The library view re-fetches on return, matching
-    /// Python's `_apply_page` calling `refresh_library` whenever the library
-    /// page becomes current (its panes are cheap to repopulate and may be stale).
-    fn switch_to_page(&mut self, page_type: &str, runtime: &RuntimeHandle) {
-        self.view = view_for_page(page_type);
+    /// Most views keep their loaded state on pop-back (no re-fetch). The
+    /// exceptions are:
+    ///
+    /// - **Library**: always re-fetches (Python's `_apply_page` calls
+    ///   `refresh_library` whenever the library page becomes current — its
+    ///   panes are cheap to repopulate and may be stale).
+    /// - **History / Queue**: always re-fetch since they track live state.
+    /// - **Artist / Album**: *must* re-fetch from context so that popping from
+    ///   artist B back to artist A re-loads A's data, not B's stale data.
+    ///   Mirrors Python's `_apply_page`, which reads `channel_id` / `browse_id`
+    ///   from the page context and re-fires the fetch every time a page is
+    ///   applied.
+    fn switch_to_page(&mut self, page: &NavPage, runtime: &RuntimeHandle) {
+        self.view = view_for_page(&page.page_type);
         // Leaving search input focus when navigating away from search.
         self.input_mode = false;
-        if self.view == View::Library {
-            self.refresh_library(runtime);
+        match self.view {
+            View::Library => self.refresh_library(runtime),
+            View::History => self.refresh_history(runtime),
+            View::Queue => {
+                runtime.send(AppCommand::FetchQueue);
+            }
+            View::Artist => {
+                // Re-fetch from the nav context so pop-back shows the correct
+                // artist (not the last one loaded into self.artist).
+                if let Some(channel_id) = page.context.get("channel_id") {
+                    self.artist = ArtistView::new();
+                    runtime.send(AppCommand::FetchArtist(channel_id.clone()));
+                }
+            }
+            View::Album => {
+                // Re-fetch from the nav context so pop-back shows the correct
+                // album.
+                if let Some(browse_id) = page.context.get("browse_id") {
+                    self.album = AlbumView::new();
+                    runtime.send(AppCommand::FetchAlbum(browse_id.clone()));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -989,6 +1251,11 @@ impl AppModel {
                 .search
                 .render(frame, chunks[1], &self.theme, self.input_mode),
             View::Library => self.library.render(frame, chunks[1], &self.theme),
+            View::Album => self.album.render(frame, chunks[1], &self.theme),
+            View::Artist => self.artist.render(frame, chunks[1], &self.theme),
+            View::Lyrics => self.lyrics.render(frame, chunks[1], &self.theme),
+            View::History => self.history.render(frame, chunks[1], &self.theme),
+            View::Queue => self.queue_view.render(frame, chunks[1], &self.theme),
         }
         PlayerBar.render(frame, chunks[2], &self.player, &self.theme);
     }
@@ -1036,9 +1303,38 @@ mod tests {
     }
 
     #[test]
-    fn quit_keys_map_to_quit() {
-        assert_eq!(map_key(key(KeyCode::Char('q'))), Some(Action::Quit));
+    fn quit_key_maps_to_quit() {
+        // Key-conflict resolution (M5b-2b): only uppercase Q quits.
         assert_eq!(map_key(key(KeyCode::Char('Q'))), Some(Action::Quit));
+    }
+
+    #[test]
+    fn lowercase_q_maps_to_switch_queue() {
+        // Lowercase q switches to the queue view, not quit (M5b-2b resolution).
+        assert_eq!(map_key(key(KeyCode::Char('q'))), Some(Action::SwitchQueue));
+    }
+
+    #[test]
+    fn digit_4_maps_to_switch_queue() {
+        assert_eq!(map_key(key(KeyCode::Char('4'))), Some(Action::SwitchQueue));
+    }
+
+    #[test]
+    fn h_and_5_map_to_switch_history() {
+        assert_eq!(
+            map_key(key(KeyCode::Char('H'))),
+            Some(Action::SwitchHistory)
+        );
+        assert_eq!(
+            map_key(key(KeyCode::Char('5'))),
+            Some(Action::SwitchHistory)
+        );
+    }
+
+    #[test]
+    fn capital_l_and_6_map_to_switch_lyrics() {
+        assert_eq!(map_key(key(KeyCode::Char('L'))), Some(Action::SwitchLyrics));
+        assert_eq!(map_key(key(KeyCode::Char('6'))), Some(Action::SwitchLyrics));
     }
 
     #[test]
@@ -1391,6 +1687,130 @@ mod tests {
         assert!(
             text.contains("Loading tracks for My Mix"),
             "missing playlist loading line:\n{text}"
+        );
+    }
+
+    // -- Fix 1: stale artist/album on nav pop-back (M5b-2b review) ----------
+
+    /// Simulate opening artist A, then navigating into artist B (related
+    /// artist), then pressing Esc.  The model must reset the artist view to
+    /// Loading and issue a FetchArtist for artist A's channel_id — not show
+    /// artist B's already-loaded data.
+    #[test]
+    fn esc_from_related_artist_refetches_original_artist() {
+        use ytmusic_api::ArtistInfo;
+        use ytmusic_tui::app::AppCommand;
+
+        let (runtime, mut cmd_rx) = RuntimeHandle::stub();
+
+        let mut model = AppModel::new(Theme::default());
+
+        // Step 1: navigate to artist A and simulate its data arriving.
+        model.open_artist("channel_A".to_owned(), &runtime);
+        // Drain the FetchArtist(channel_A) command that open_artist sent.
+        let _ = cmd_rx.try_recv();
+
+        fold(
+            &mut model,
+            AppEvent::ArtistLoaded(ArtistInfo::new(
+                "channel_A",
+                "Artist A",
+                "",
+                vec![],
+                vec![],
+                vec![],
+                "",
+            )),
+        );
+        assert_eq!(model.view, View::Artist);
+
+        // Step 2: navigate to related artist B (open_artist pushes a new entry).
+        model.open_artist("channel_B".to_owned(), &runtime);
+        // Drain the FetchArtist(channel_B) command.
+        let _ = cmd_rx.try_recv();
+
+        fold(
+            &mut model,
+            AppEvent::ArtistLoaded(ArtistInfo::new(
+                "channel_B",
+                "Artist B",
+                "",
+                vec![],
+                vec![],
+                vec![],
+                "",
+            )),
+        );
+
+        // Step 3: press Esc — should pop back to artist A, reset view to
+        // Loading, and issue FetchArtist("channel_A").
+        model.go_back(&runtime);
+
+        assert_eq!(model.view, View::Artist, "still on Artist view after Esc");
+        assert!(
+            matches!(model.artist.state(), ytmusic_tui::views::PageState::Loading),
+            "artist view should be reset to Loading after pop-back"
+        );
+        let cmd = cmd_rx
+            .try_recv()
+            .expect("FetchArtist command must be issued on pop-back");
+        assert_eq!(
+            cmd,
+            AppCommand::FetchArtist("channel_A".to_owned()),
+            "must re-fetch artist A, not artist B"
+        );
+    }
+
+    // -- Fix 2: NowPlaying triggers FetchQueue when queue view is open -------
+
+    /// While the queue view is active, a NowPlaying event must return
+    /// Some(FetchQueue) so the ▶ marker re-snapshots after auto-advance.
+    #[test]
+    fn now_playing_while_queue_view_open_returns_fetch_queue() {
+        use ytmusic_tui::app::{AppCommand, NowPlaying};
+        use ytmusic_tui::queue::RepeatMode;
+
+        let mut model = AppModel::new(Theme::default());
+        model.view = View::Queue;
+
+        let follow_up = model.on_event(AppEvent::NowPlaying(NowPlaying {
+            title: "Song".to_owned(),
+            artist: "Band".to_owned(),
+            album: "LP".to_owned(),
+            video_id: "v1".to_owned(),
+            duration_seconds: 200.0,
+            shuffle: false,
+            repeat: RepeatMode::Off,
+        }));
+        assert_eq!(
+            follow_up,
+            Some(AppCommand::FetchQueue),
+            "NowPlaying while Queue view is open must return FetchQueue"
+        );
+    }
+
+    /// While a non-queue view is active, NowPlaying must NOT return FetchQueue.
+    #[test]
+    fn now_playing_while_home_view_open_returns_none() {
+        use ytmusic_tui::app::NowPlaying;
+        use ytmusic_tui::queue::RepeatMode;
+
+        let mut model = AppModel::new(Theme::default());
+        // Default view is Home; no explicit assignment needed, but be explicit.
+        model.view = View::Home;
+
+        let follow_up = model.on_event(AppEvent::NowPlaying(NowPlaying {
+            title: "Song".to_owned(),
+            artist: "Band".to_owned(),
+            album: "LP".to_owned(),
+            video_id: "v2".to_owned(),
+            duration_seconds: 150.0,
+            shuffle: false,
+            repeat: RepeatMode::Off,
+        }));
+        assert_eq!(
+            follow_up, None,
+            "NowPlaying while Home view is open must not return FetchQueue"
         );
     }
 }
