@@ -369,6 +369,39 @@ enum NavAction {
 /// actions which nudged by 5.
 const VOLUME_STEP: i64 = 5;
 
+/// Decode a digit key (`1`–`8`) to the target [`View`] it switches to, or
+/// `None` if the key is not a view-switch digit.
+///
+/// These bindings mirror Python's hidden id-less `Binding("1", …, show=False)`
+/// entries (lines 126–133 of `app.py`). They are deliberately **not**
+/// keymap-remappable — Python omitted the `id=` parameter on all eight of
+/// them, which is the Textual mechanism that prevents user rebinding via
+/// `keymap.toml`. Here they are handled directly before the [`Keymap`]
+/// dispatcher in [`AppModel::dispatch_key`], outside the `action → key` map,
+/// so they behave identically: always-on, no config entry, no sequence prefix
+/// interaction.
+///
+/// Digit presses are blocked while the search input is focused (`input_mode`),
+/// while a popup is open, and while the filter bar is active — those tiers run
+/// before this function is ever called in the dispatch chain.
+fn map_digit_view(key: KeyEvent) -> Option<View> {
+    // Only plain digits — no modifier (Ctrl+1 etc. must not trigger).
+    if !key.modifiers.is_empty() {
+        return None;
+    }
+    match key.code {
+        KeyCode::Char('1') => Some(View::Home),
+        KeyCode::Char('2') => Some(View::Search),
+        KeyCode::Char('3') => Some(View::Library),
+        KeyCode::Char('4') => Some(View::Playlist),
+        KeyCode::Char('5') => Some(View::Queue),
+        KeyCode::Char('6') => Some(View::Album),
+        KeyCode::Char('7') => Some(View::Artist),
+        KeyCode::Char('8') => Some(View::Lyrics),
+        _ => None,
+    }
+}
+
 /// Decode a navigation key (arrows / `j` / `k` / Tab / Enter) into a
 /// [`NavAction`], or `None` if it is not a navigation key.
 ///
@@ -863,6 +896,22 @@ impl AppModel {
         if let Some(nav) = map_nav_key(key) {
             self.keymap.clear_pending();
             self.apply_nav(nav, runtime);
+            return;
+        }
+
+        // Digit view-switch keys (1–8) mirror Python's hidden id-less Bindings
+        // (app.py lines 126–133, show=False, no id → not user-remappable). They
+        // are handled directly here — not via the Keymap dispatcher — so that no
+        // keymap.toml entry can claim or suppress them, exactly as in Python.
+        // Digits are already blocked above when input_mode is on, a popup is
+        // open, or the filter bar is active.
+        if let Some(target) = map_digit_view(key) {
+            self.keymap.clear_pending();
+            // Digit 8 reaches the lyrics view via the same path as the `L`
+            // action (open_lyrics in Python).  The shared `switch_view` method
+            // handles the fetch-lyrics side-effect for View::Lyrics, so no
+            // special-casing is needed here.
+            self.switch_view(target, runtime);
             return;
         }
 
@@ -3215,5 +3264,139 @@ mod tests {
             follow_up, None,
             "NowPlaying while Home view is open must not return FetchQueue"
         );
+    }
+
+    // -- digit view-switch keys (Python app.py lines 126-133) ----------------
+    //
+    // Digits 1-8 are hidden, id-less Bindings in Python (show=False, no id =>
+    // not keymap-remappable).  The Rust port handles them the same way: directly
+    // in dispatch_key, outside the Keymap dispatcher, so no keymap.toml entry
+    // can claim or suppress them.
+
+    #[test]
+    fn digit_1_switches_to_home() {
+        let (runtime, _rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        model.view = View::Search; // start elsewhere so the switch is observable
+        model.dispatch_key(key(KeyCode::Char('1')), &runtime);
+        assert_eq!(model.view, View::Home);
+    }
+
+    #[test]
+    fn digit_2_switches_to_search() {
+        let (runtime, _rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        model.dispatch_key(key(KeyCode::Char('2')), &runtime);
+        assert_eq!(model.view, View::Search);
+        // search also activates input_mode (same as the `g s` path)
+        assert!(model.input_mode);
+    }
+
+    #[test]
+    fn digit_3_switches_to_library() {
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        model.dispatch_key(key(KeyCode::Char('3')), &runtime);
+        assert_eq!(model.view, View::Library);
+        // Switching to library always fires the three library fetches.
+        let cmds: Vec<AppCommand> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        assert!(
+            cmds.contains(&AppCommand::FetchLibraryPlaylists),
+            "library switch must fetch playlists"
+        );
+    }
+
+    #[test]
+    fn digit_4_switches_to_playlist() {
+        let (runtime, _rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        model.dispatch_key(key(KeyCode::Char('4')), &runtime);
+        assert_eq!(model.view, View::Playlist);
+    }
+
+    #[test]
+    fn digit_5_switches_to_queue() {
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        model.dispatch_key(key(KeyCode::Char('5')), &runtime);
+        assert_eq!(model.view, View::Queue);
+        // Switching to the queue view fires FetchQueue.
+        assert!(
+            rx.try_recv().ok() == Some(AppCommand::FetchQueue),
+            "queue switch must fetch the queue snapshot"
+        );
+    }
+
+    #[test]
+    fn digit_6_switches_to_album() {
+        let (runtime, _rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        model.dispatch_key(key(KeyCode::Char('6')), &runtime);
+        assert_eq!(model.view, View::Album);
+    }
+
+    #[test]
+    fn digit_7_switches_to_artist() {
+        let (runtime, _rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        model.dispatch_key(key(KeyCode::Char('7')), &runtime);
+        assert_eq!(model.view, View::Artist);
+    }
+
+    #[test]
+    fn digit_8_switches_to_lyrics() {
+        let (runtime, _rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        // No current track: lyrics shows "No track playing" and no fetch is fired.
+        model.dispatch_key(key(KeyCode::Char('8')), &runtime);
+        assert_eq!(model.view, View::Lyrics);
+    }
+
+    #[test]
+    fn digit_8_with_current_track_fetches_lyrics() {
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = model_with_current_track();
+        model.dispatch_key(key(KeyCode::Char('8')), &runtime);
+        assert_eq!(model.view, View::Lyrics);
+        // A FetchLyrics command for the current video_id must have been sent.
+        let cmds: Vec<AppCommand> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        assert!(
+            cmds.iter()
+                .any(|c| matches!(c, AppCommand::FetchLyrics(id) if id == "v1")),
+            "digit 8 must send FetchLyrics for the current track, got: {cmds:?}"
+        );
+    }
+
+    #[test]
+    fn digits_do_not_fire_while_search_input_is_active() {
+        // While the search input has focus (input_mode = true), digit keys must
+        // type into the input rather than switch views.
+        let (runtime, _rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        model.view = View::Search;
+        model.input_mode = true;
+        model.dispatch_key(key(KeyCode::Char('1')), &runtime);
+        // The '1' was consumed as text input; the view stays on Search.
+        assert_eq!(model.view, View::Search);
+        // The search query now contains '1'.
+        assert_eq!(model.search.input(), "1");
+    }
+
+    #[test]
+    fn digits_do_not_fire_while_popup_is_open() {
+        // While a popup is open, digit keys are routed to the popup (j/k
+        // navigation), not to the view-switch handler.
+        let (runtime, _rx) = RuntimeHandle::stub();
+        let mut model = model_on_history();
+        // Open the action popup via '.'.
+        model.dispatch_key(key(KeyCode::Char('.')), &runtime);
+        assert!(model.popups.is_open());
+        // Press '1' — this goes to the popup, not the digit view-switch.
+        model.dispatch_key(key(KeyCode::Char('1')), &runtime);
+        // The view has not changed (still History).
+        assert_eq!(model.view, View::History);
+        // The popup is still open (KeyCode::Char('1') is not j/k/Enter/Esc, so
+        // it is consumed by the popup's catch-all without closing it).
+        assert!(model.popups.is_open());
     }
 }
