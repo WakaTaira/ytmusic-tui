@@ -74,11 +74,13 @@ const EVENT_POLL_TIMEOUT: f64 = 0.25;
 const PROP_ID_TIME_POS: u64 = 1;
 const PROP_ID_DURATION: u64 = 2;
 const PROP_ID_VOLUME: u64 = 3;
+const PROP_ID_MUTE: u64 = 4;
 
 /// Property names observed for the player bar feed.
 const PROP_TIME_POS: &str = "time-pos";
 const PROP_DURATION: &str = "duration";
 const PROP_VOLUME: &str = "volume";
+const PROP_MUTE: &str = "mute";
 
 /// Default audio-quality level (mirrors `player.py`'s `audio_quality="high"`).
 pub const DEFAULT_AUDIO_QUALITY: &str = "high";
@@ -226,6 +228,11 @@ pub enum PlayerEvent {
     /// `i64`. Corrects the bar's optimistic volume after mpv applies a change
     /// (resolving the M5a "optimistic-only" volume drift).
     Volume(i64),
+    /// A `mute` observation (the `_` key toggles it). mpv reports `mute` as a
+    /// flag; the player bar shows `Vol: MUTE` while it is set. Fires once at
+    /// registration (the current state) and on every subsequent toggle, so the
+    /// bar's mute indicator stays correct without a poll.
+    Mute(bool),
     /// Playback of a new file started (mpv start-file). Optional now-playing
     /// transition for the UI.
     Started,
@@ -266,6 +273,13 @@ fn translate_event(raw: Option<Result<Event<'_>, libmpv2::Error>>) -> Option<Pla
             PROP_VOLUME => Some(PlayerEvent::Volume(v.round() as i64)),
             _ => None,
         },
+        // mpv reports `mute` as a flag; surface it so the bar's mute indicator
+        // tracks toggles without a poll (mirrors the volume observation).
+        Some(Ok(Event::PropertyChange {
+            name: PROP_MUTE,
+            change: PropertyData::Flag(muted),
+            ..
+        })) => Some(PlayerEvent::Mute(muted)),
         // Other events (Seek, AudioReconfig, other PropertyChange formats,
         // replies, ...) are not surfaced.
         Some(Ok(_)) => None,
@@ -419,6 +433,10 @@ impl Player {
         // mpv's actual (possibly clamped) value. Fires once at registration
         // (the current volume) and on every subsequent set.
         mpv.observe_property(PROP_VOLUME, Format::Double, PROP_ID_VOLUME)?;
+        // Observe mute so the bar's `Vol: MUTE` indicator tracks the `_` key
+        // (and any external change) without polling. Fires once at registration
+        // (the current state) and on every toggle.
+        mpv.observe_property(PROP_MUTE, Format::Flag, PROP_ID_MUTE)?;
 
         // Unbounded by design: ~8 events/sec at steady state (two 4 Hz-ish
         // property feeds); a stalled consumer drains quickly on resume, so a
@@ -944,6 +962,23 @@ mod tests {
         }
 
         #[test]
+        fn test_mute_translates_to_mute_event() {
+            // mpv reports `mute` as a flag; surface it for the bar indicator.
+            let raw = Some(Ok(Event::PropertyChange {
+                name: PROP_MUTE,
+                change: PropertyData::Flag(true),
+                reply_userdata: PROP_ID_MUTE,
+            }));
+            assert_eq!(translate_event(raw), Some(PlayerEvent::Mute(true)));
+            let raw = Some(Ok(Event::PropertyChange {
+                name: PROP_MUTE,
+                change: PropertyData::Flag(false),
+                reply_userdata: PROP_ID_MUTE,
+            }));
+            assert_eq!(translate_event(raw), Some(PlayerEvent::Mute(false)));
+        }
+
+        #[test]
         fn test_other_property_is_ignored() {
             let raw = Some(Ok(Event::PropertyChange {
                 name: "pause",
@@ -1009,6 +1044,8 @@ mod tests {
                 .expect("observe duration");
             mpv.observe_property(PROP_VOLUME, Format::Double, PROP_ID_VOLUME)
                 .expect("observe volume");
+            mpv.observe_property(PROP_MUTE, Format::Flag, PROP_ID_MUTE)
+                .expect("observe mute");
 
             let (tx, rx) = mpsc::channel();
             let stop = Arc::new(AtomicBool::new(false));
@@ -1284,6 +1321,16 @@ mod tests {
             player.set_volume(42).expect("set volume");
             let ev = wait_for(&player, |e| matches!(e, PlayerEvent::Volume(42)));
             assert_eq!(ev, Some(PlayerEvent::Volume(42)));
+        }
+
+        #[test]
+        fn test_mute_observation_feeds_mute_event() {
+            // Toggling mute must produce a Mute observation so the bar's
+            // `Vol: MUTE` indicator tracks the `_` key without polling.
+            let player = headless_player();
+            player.toggle_mute().expect("toggle mute");
+            let ev = wait_for(&player, |e| matches!(e, PlayerEvent::Mute(true)));
+            assert_eq!(ev, Some(PlayerEvent::Mute(true)));
         }
 
         #[test]

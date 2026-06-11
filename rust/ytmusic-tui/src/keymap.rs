@@ -62,6 +62,23 @@ pub enum Action {
     CycleRepeat,
     /// Cycle the audio quality (`cycle_audio_quality`, default `b`).
     CycleAudioQuality,
+    /// Seek forward (`seek_forward`, default `greater_than_sign` / `>`).
+    SeekForward,
+    /// Seek backward (`seek_backward`, default `less_than_sign` / `<`).
+    SeekBackward,
+    /// Seek to the start of the track (`seek_start`, default
+    /// `circumflex_accent` / `^`).
+    SeekToStart,
+    /// Toggle audio mute (`toggle_mute`, default `underscore` / `_`).
+    ToggleMute,
+    /// Toggle the like state of the current track (`toggle_like`, default `f`).
+    ToggleLike,
+    /// Start a radio seeded by the current track (`start_radio`, default `R`).
+    StartRadio,
+    /// Jump to the current track's artist (`open_current_artist`, default `a`).
+    OpenCurrentArtist,
+    /// Jump to the current track's album (`open_current_album`, default `A`).
+    OpenCurrentAlbum,
     /// Go back / pop the navigation stack (`go_back`, default `escape`).
     GoBack,
     /// Toggle the in-page filter bar (`search`, default `slash`).
@@ -280,6 +297,14 @@ fn action_for_name(name: &str) -> Option<Action> {
         "toggle_shuffle" => Action::ToggleShuffle,
         "cycle_repeat" => Action::CycleRepeat,
         "cycle_audio_quality" => Action::CycleAudioQuality,
+        "seek_forward" => Action::SeekForward,
+        "seek_backward" => Action::SeekBackward,
+        "seek_start" => Action::SeekToStart,
+        "toggle_mute" => Action::ToggleMute,
+        "toggle_like" => Action::ToggleLike,
+        "start_radio" => Action::StartRadio,
+        "open_current_artist" => Action::OpenCurrentArtist,
+        "open_current_album" => Action::OpenCurrentAlbum,
         "go_back" => Action::GoBack,
         "search" => Action::ToggleFilter,
         "switch_home" => Action::SwitchHome,
@@ -331,24 +356,50 @@ pub struct Keymap {
 // (see `Keymap::resolve`).
 impl Keymap {
     /// Build a dispatcher from a merged `action → key` map (the output of
-    /// [`crate::config::load_keymap`]).
+    /// [`crate::config::load_keymap`]), discarding any parse warnings.
+    ///
+    /// Convenience wrapper over [`Keymap::from_map_with_warnings`] for callers
+    /// (and tests) that do not surface the warnings.
+    #[must_use]
+    pub fn from_map(map: &HashMap<String, String>) -> Self {
+        Self::from_map_with_warnings(map).0
+    }
+
+    /// Build a dispatcher from a merged `action → key` map, also returning the
+    /// list of bindings that were dropped because their key string did not
+    /// parse.
     ///
     /// Later actions cannot clobber an earlier single binding silently: the map
     /// is keyed by `KeySpec`, so the *last* action to claim a given key wins
     /// (matching a `HashMap` insert). The digit shortcuts (`1`–`6`) are added
     /// last as always-on aliases regardless of the config, mirroring Python's
     /// hidden `Binding("1", ...)` entries.
+    ///
+    /// # Warnings
+    ///
+    /// A warning is collected only when the action name is one this UI handles
+    /// *and* its key string is unparseable (a typo like `quit = "notakey"`) — the
+    /// kind of mistake the user wants to know about. Each warning is
+    /// `"<action> = \"<value>\""`. An *unknown* action name is **not** warned: it
+    /// is intentional forward-compatibility (a future action a newer build will
+    /// understand), so reporting it would be noise. The returned vector is sorted
+    /// for a stable status-line order (the input `HashMap` iterates arbitrarily).
     #[must_use]
-    pub fn from_map(map: &HashMap<String, String>) -> Self {
+    pub fn from_map_with_warnings(map: &HashMap<String, String>) -> (Self, Vec<String>) {
         let mut singles: HashMap<KeySpec, Action> = HashMap::new();
         let mut prefixes: HashMap<KeySpec, HashMap<KeySpec, Action>> = HashMap::new();
+        let mut warnings: Vec<String> = Vec::new();
 
         for (name, value) in map {
             let Some(action) = action_for_name(name) else {
-                continue; // action this UI does not handle → skip
+                continue; // action this UI does not handle → forward-compat, no warning
             };
             let Some(binding) = parse_binding(value) else {
-                continue; // unparseable key string → drop this binding
+                // A known action with an unparseable key string is a real user
+                // typo worth surfacing (the binding is dropped — that action is
+                // left unbound).
+                warnings.push(format!("{name} = {value:?}"));
+                continue;
             };
             match binding {
                 Binding::Single(specs) => {
@@ -361,6 +412,7 @@ impl Keymap {
                 }
             }
         }
+        warnings.sort();
 
         // Always-on digit view-switch aliases (Python's hidden numeric
         // bindings). Inserted after config so they cannot be unbound, matching
@@ -382,11 +434,14 @@ impl Keymap {
                 .or_insert(action);
         }
 
-        Self {
-            singles,
-            prefixes,
-            pending: None,
-        }
+        (
+            Self {
+                singles,
+                prefixes,
+                pending: None,
+            },
+            warnings,
+        )
     }
 
     /// Build a dispatcher from the default keymap only (no *user* config read).
@@ -813,5 +868,62 @@ mod tests {
         let mut km = Keymap::from_map(&map);
         // quit's binding was dropped; next_track still parses.
         assert_eq!(km.resolve(ch('n')), Resolution::Action(Action::NextTrack));
+    }
+
+    // -- parse warnings (Stage 4) ------------------------------------------
+
+    #[test]
+    fn unparseable_known_action_binding_is_warned() {
+        // A known action with a bad key string is collected as a warning (a typo
+        // the user wants to know about) while the rest of the keymap still works.
+        let mut map: HashMap<String, String> = HashMap::new();
+        map.insert("quit".to_owned(), "notarealkey".to_owned());
+        map.insert("next_track".to_owned(), "n".to_owned());
+        let (km, warnings) = Keymap::from_map_with_warnings(&map);
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].contains("quit") && warnings[0].contains("notarealkey"),
+            "warning should name the action and value: {warnings:?}"
+        );
+        // next_track is unaffected.
+        let mut km = km;
+        assert_eq!(km.resolve(ch('n')), Resolution::Action(Action::NextTrack));
+    }
+
+    #[test]
+    fn unknown_action_name_is_not_warned() {
+        // Forward-compat: a novel action name is silently skipped, not warned —
+        // it is intentional, not a typo.
+        let mut map: HashMap<String, String> = HashMap::new();
+        map.insert("future_action".to_owned(), "z".to_owned());
+        map.insert("quit".to_owned(), "Q".to_owned());
+        let (_km, warnings) = Keymap::from_map_with_warnings(&map);
+        assert!(
+            warnings.is_empty(),
+            "unknown action names must not warn: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn valid_keymap_yields_no_warnings() {
+        let (_km, warnings) = Keymap::from_map_with_warnings(
+            &config::DEFAULT_KEYMAP
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect(),
+        );
+        assert!(warnings.is_empty(), "default keymap parses cleanly");
+    }
+
+    #[test]
+    fn multiple_warnings_are_sorted() {
+        let mut map: HashMap<String, String> = HashMap::new();
+        map.insert("quit".to_owned(), "??".to_owned());
+        map.insert("next_track".to_owned(), "@@".to_owned());
+        let (_km, warnings) = Keymap::from_map_with_warnings(&map);
+        assert_eq!(warnings.len(), 2);
+        // Sorted for a stable status-line order: "next_track" < "quit".
+        assert!(warnings[0].starts_with("next_track"));
+        assert!(warnings[1].starts_with("quit"));
     }
 }
