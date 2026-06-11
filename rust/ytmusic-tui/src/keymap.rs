@@ -39,9 +39,9 @@ use crate::config;
 /// A high-level UI action, the resolved target of a key binding.
 ///
 /// The variants correspond 1:1 to the action *names* in
-/// [`crate::config::DEFAULT_KEYMAP`] plus the digit view-switch shortcuts and a
-/// couple of selection/navigation actions that have no keymap entry (they are
-/// bound to the always-on arrow/`j`/`k`/Tab/Enter keys).
+/// [`crate::config::DEFAULT_KEYMAP`] plus a couple of selection/navigation
+/// actions that have no keymap entry (they are bound to the always-on
+/// arrow/`j`/`k`/Tab/Enter keys).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     /// Quit the app (`quit`, default `Q`; Ctrl+C also quits, handled directly).
@@ -83,18 +83,18 @@ pub enum Action {
     GoBack,
     /// Toggle the in-page filter bar (`search`, default `slash`).
     ToggleFilter,
-    /// Switch to the home view (`switch_home`, default `g`; also `1`).
+    /// Switch to the home view (`switch_home`, default `g`).
     SwitchHome,
     /// Switch to the search view + focus its input (`search_page`, default
-    /// `g s`; also `2`). Reclaimed from `/` in M5c (now the filter toggle).
+    /// `g s`). Reclaimed from `/` in M5c (now the filter toggle).
     SearchPage,
-    /// Switch to the library view (`switch_library`, default `l`; also `3`).
+    /// Switch to the library view (`switch_library`, default `l`).
     SwitchLibrary,
-    /// Switch to the queue view (`switch_queue`, default `q`; also `4`).
+    /// Switch to the queue view (`switch_queue`, default `q`).
     SwitchQueue,
-    /// Switch to the history view (`switch_history`, default `H`; also `5`).
+    /// Switch to the history view (`switch_history`, default `H`).
     SwitchHistory,
-    /// Open lyrics for the current track (`open_lyrics`, default `L`; also `6`).
+    /// Open lyrics for the current track (`open_lyrics`, default `L`).
     SwitchLyrics,
     /// Open the context-action popup for the selected item (`open_action_popup`,
     /// default `full_stop`).
@@ -336,8 +336,7 @@ pub enum Resolution {
 ///
 /// Built once at startup from the merged `action → key` map. Holds:
 ///
-/// * `singles`: a [`KeySpec`] → [`Action`] lookup for direct bindings, plus the
-///   always-on digit view-switches.
+/// * `singles`: a [`KeySpec`] → [`Action`] lookup for direct bindings.
 /// * `prefixes`: the set of [`KeySpec`]s that start a two-key sequence, each
 ///   mapping to a `(second_key → action)` table.
 /// * `pending`: the armed first key of a sequence, if any (mutated as keys come
@@ -371,9 +370,9 @@ impl Keymap {
     ///
     /// Later actions cannot clobber an earlier single binding silently: the map
     /// is keyed by `KeySpec`, so the *last* action to claim a given key wins
-    /// (matching a `HashMap` insert). The digit shortcuts (`1`–`6`) are added
-    /// last as always-on aliases regardless of the config, mirroring Python's
-    /// hidden `Binding("1", ...)` entries.
+    /// (matching a `HashMap` insert). Only configured bindings exist — no
+    /// hidden aliases (the invented digit shortcuts were removed for Python
+    /// parity in M7-fix-2).
     ///
     /// # Warnings
     ///
@@ -413,26 +412,6 @@ impl Keymap {
             }
         }
         warnings.sort();
-
-        // Always-on digit view-switch aliases (Python's hidden numeric
-        // bindings). Inserted after config so they cannot be unbound, matching
-        // the old hard-coded behavior; they never collided with the letter
-        // bindings.
-        for (digit, action) in [
-            ('1', Action::SwitchHome),
-            ('2', Action::SearchPage),
-            ('3', Action::SwitchLibrary),
-            ('4', Action::SwitchQueue),
-            ('5', Action::SwitchHistory),
-            ('6', Action::SwitchLyrics),
-        ] {
-            singles
-                .entry(KeySpec {
-                    code: KeyCode::Char(digit),
-                    modifiers: KeyModifiers::NONE,
-                })
-                .or_insert(action);
-        }
 
         (
             Self {
@@ -794,12 +773,6 @@ mod tests {
         assert_eq!(km.resolve(ch('x')), Resolution::Pending);
         assert_eq!(km.resolve(ch('z')), Resolution::None);
         assert!(km.pending().is_none());
-    }
-
-    #[test]
-    fn digit_two_also_reaches_search_page() {
-        let mut km = Keymap::defaults();
-        assert_eq!(km.resolve(ch('2')), Resolution::Action(Action::SearchPage));
     }
 
     #[test]

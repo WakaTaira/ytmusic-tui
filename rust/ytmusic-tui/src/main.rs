@@ -39,7 +39,7 @@ use crossterm::terminal::{
 use crossterm::{ExecutableCommand, cursor};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
@@ -1893,29 +1893,48 @@ impl AppModel {
 
     /// Number of header rows currently needed.
     ///
-    /// The header now carries only the pending key-sequence prefix hint (the one
-    /// genuinely persistent indicator Python kept on screen). Every transient
-    /// message — errors, confirmations, warnings — is a floating toast instead.
+    /// The title bar is always present (1 row), mirroring Textual's
+    /// widget. Every transient message — errors, confirmations, warnings — is a
+    /// floating toast instead.
     fn header_line_count(&self) -> u16 {
-        u16::from(self.keymap.pending().is_some())
+        1 // permanent title bar (textual Header parity)
     }
 
-    /// Render the pending key-sequence prefix line into the header (if armed).
+    /// Render the permanent 1-line title bar.
+    ///
+    /// Textual's `Header` widget: `background: $panel; color: $foreground;
+    /// height: 1`. The app title "ytmusic-tui" is centered; the armed
+    /// key-sequence prefix (e.g. `g…`) is right-aligned on the same bar so it
+    /// does not consume an extra row.
     fn render_header(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {
         if area.height == 0 {
             return;
         }
-        // The armed key-sequence prefix (e.g. `g…`), mirroring spotify_player's
-        // pending-key hint so the user knows a sequence is in progress. This is
-        // the only persistent header line; transient messages are toasts.
+
+        // Fill the bar with the panel background (textual `$panel`).
+        let bar_block = Block::default().style(Style::default().bg(self.theme.primary_background));
+        frame.render_widget(bar_block, area);
+
+        // Centered title.
+        let title_para = Paragraph::new(Line::from(Span::styled(
+            "ytmusic-tui",
+            Style::default()
+                .fg(self.theme.text)
+                .add_modifier(Modifier::BOLD),
+        )))
+        .alignment(Alignment::Center);
+        frame.render_widget(title_para, area);
+
+        // Right-aligned pending key-sequence hint (replaces the old extra row).
         if let Some(prefix) = self.keymap.pending_label() {
-            let line = Line::from(Span::styled(
-                format!("{prefix}…"),
+            let hint = Paragraph::new(Line::from(Span::styled(
+                format!(" {prefix}… "),
                 Style::default()
                     .fg(self.theme.accent)
                     .add_modifier(Modifier::BOLD),
-            ));
-            frame.render_widget(Paragraph::new(line), area);
+            )))
+            .alignment(Alignment::Right);
+            frame.render_widget(hint, area);
         }
     }
 
@@ -1934,7 +1953,7 @@ mod tests {
 
     // -- nav-key mapping ---------------------------------------------------
     //
-    // The keymap-bound actions (Q/space/n/p/s/r/g/l/q/H/L/.../digits) are
+    // The keymap-bound actions (Q/space/n/p/s/r/g/l/q/H/L/...) are
     // covered exhaustively in the `keymap` module's own tests. Here we cover the
     // always-on navigation keys (which bypass the dispatcher) and the
     // integration path (dispatch_key → view switch / command) that the keymap
@@ -2026,14 +2045,6 @@ mod tests {
         model.dispatch_key(key(KeyCode::Char('q')), &runtime);
         assert_eq!(model.view, View::Queue);
         assert!(!model.should_quit);
-    }
-
-    #[test]
-    fn digit_5_switches_to_history_via_dispatch() {
-        let (runtime, _rx) = RuntimeHandle::stub();
-        let mut model = AppModel::new(Theme::default());
-        model.dispatch_key(key(KeyCode::Char('5')), &runtime);
-        assert_eq!(model.view, View::History);
     }
 
     #[test]
@@ -2258,14 +2269,6 @@ mod tests {
         model.dispatch_key(key(KeyCode::Char('s')), &runtime);
         assert_eq!(model.view, View::Search);
         assert!(model.keymap.pending().is_none());
-    }
-
-    #[test]
-    fn digit_2_switches_to_search_via_dispatch() {
-        let (runtime, _rx) = RuntimeHandle::stub();
-        let mut model = AppModel::new(Theme::default());
-        model.dispatch_key(key(KeyCode::Char('2')), &runtime);
-        assert_eq!(model.view, View::Search);
     }
 
     #[test]
@@ -2858,19 +2861,27 @@ mod tests {
 
     #[test]
     fn render_fills_the_frame_with_the_theme_surface_background() {
-        // Fix 2: the whole frame is painted with the theme surface color first,
-        // so the terminal's default background never shows through. Sample the
-        // top-left corner (above any view content) — it must carry surface bg.
+        // The whole frame is painted with the theme surface color first, so the
+        // terminal's default background never shows through. Row 0 is the
+        // permanent title bar (primary_background), so sample row 1 which is
+        // inside the content area and must carry the surface bg.
         let model = AppModel::new(Theme::default());
         let backend = TestBackend::new(60, 12);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| model.render(frame)).unwrap();
         let theme = Theme::default();
         let buffer = terminal.backend().buffer();
+        // (0, 0) is the title bar row → primary_background.
         assert_eq!(
             buffer[(0, 0)].style().bg,
+            Some(theme.primary_background),
+            "title bar row should carry primary_background"
+        );
+        // (0, 1) is the first content row → surface.
+        assert_eq!(
+            buffer[(0, 1)].style().bg,
             Some(theme.surface),
-            "frame top-left is not painted with the theme surface background"
+            "content area (row 1) is not painted with the theme surface background"
         );
     }
 
@@ -2949,19 +2960,50 @@ mod tests {
     }
 
     #[test]
-    fn header_line_count_tracks_only_the_pending_key_sequence() {
-        // Transient messages are toasts now and never grow the header; only an
-        // armed key-sequence prefix takes a header row.
+    fn header_always_one_line() {
+        // The title bar is permanent: always exactly 1 row regardless of state.
         let mut model = AppModel::new(Theme::default());
-        assert_eq!(model.header_line_count(), 0);
+        assert_eq!(model.header_line_count(), 1);
         // Toasts do not affect the header height.
         fold(&mut model, AppEvent::SessionInvalid);
         fold(&mut model, AppEvent::TrackError("x".to_owned()));
-        assert_eq!(model.header_line_count(), 0);
-        // Arming a two-key sequence prefix (g …) takes one header row.
+        assert_eq!(model.header_line_count(), 1);
+        // Arming a two-key sequence prefix still 1 (hint is right-aligned on
+        // the same bar, not a separate row).
         let (runtime, _rx) = RuntimeHandle::stub();
         model.dispatch_key(key(KeyCode::Char('g')), &runtime);
         assert_eq!(model.header_line_count(), 1);
+    }
+
+    #[test]
+    fn render_shows_title_bar_text() {
+        let model = AppModel::new(Theme::default());
+        let text = render_model(&model, 70, 20);
+        assert!(
+            text.contains("ytmusic-tui"),
+            "title bar missing:
+{text}"
+        );
+    }
+
+    #[test]
+    fn render_shows_pending_key_on_title_bar() {
+        let (runtime, _rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        // Arm the `g` prefix.
+        model.dispatch_key(key(KeyCode::Char('g')), &runtime);
+        let text = render_model(&model, 70, 20);
+        // Both the title and the pending-key hint appear on the same bar.
+        assert!(
+            text.contains("ytmusic-tui"),
+            "title missing after arming g:
+{text}"
+        );
+        assert!(
+            text.contains('g'),
+            "pending key hint missing:
+{text}"
+        );
     }
 
     // -- view switching + navigation (M5b) ---------------------------------
