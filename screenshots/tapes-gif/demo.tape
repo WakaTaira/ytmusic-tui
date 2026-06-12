@@ -24,20 +24,24 @@ Sleep 400ms
 Enter
 Sleep 800ms
 
-# Go to search page (/ key — ToggleFilter would open filter bar, use g+s to reach search)
+# Go to search page: g then s (two-key sequence; / = ToggleFilter, not search page)
 Sleep 300ms
-Type "/"
-Sleep 300ms
+Type "g"
+Sleep 200ms
+Type "s"
+Sleep 600ms
 
-# Wait for search view with input focused, type a query
-Sleep 500ms
+# Search input is now focused (input_mode=true); type query directly
 Type "neon cascade"
 Sleep 400ms
 Enter
 Sleep 1200ms
 
-# Navigate to first search result
-Sleep 400ms
+# Leave input mode so j/k navigate the results list
+Escape
+Sleep 300ms
+
+# Navigate to a search result
 Type "j"
 Sleep 300ms
 Type "j"
@@ -52,23 +56,23 @@ Sleep 400ms
 Type "q"
 Sleep 800ms
 
-# Back to home
+# Pop back to search view, then pop back to home
+Escape
 Sleep 400ms
-Type "g"
-Sleep 600ms
+Escape
+Sleep 500ms
 
-# Open theme popup
-Sleep 400ms
+# Open theme popup (T = open_theme_popup; no g prefix needed)
 Type "T"
 Sleep 600ms
 
-# Move down in theme popup to next theme
-Type "j"
-Sleep 400ms
-Type "j"
+# Themes are sorted alphabetically: catppuccin(0) gruvbox(1) nord(2) synthwave(3)
+# Initial theme is synthwave → cursor starts at index 3 (the last entry).
+# Move UP once to land on nord (index 2).
+Type "k"
 Sleep 400ms
 
-# Apply selected theme
+# Apply selected theme (nord)
 Enter
 Sleep 1500ms
 
