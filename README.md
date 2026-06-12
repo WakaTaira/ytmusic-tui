@@ -5,6 +5,10 @@ A terminal music player for YouTube Music, built for keyboard-driven workflows.
 > **Status:** Beta. Playback, search, library, history, lyrics, radio, likes,
 > MPRIS, theming, and custom keymaps are functional.
 
+> **Maintenance:** This is a hobby project, developed in bursts. Once it does
+> what I need, it may go quiet for stretches — issues and PRs are still
+> welcome, and reviews are best-effort.
+
 ![ytmusic-tui home view (synthwave theme)](screenshots/out/home-synthwave.png)
 
 <sub>Home view, synthwave theme. All images are generated from a built-in demo
