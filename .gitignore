@@ -30,3 +30,8 @@ runner.sh
 .claude/
 DOCS_DIRECTIVE.md
 DOCS_PROGRESS.md
+GUIDE_AND_OUTREACH_DIRECTIVE.md
+GUIDE_OUTREACH_PROGRESS.md
+ARCHITECTURE_GUIDE.md
+docs_local/
+outreach_drafts/
