@@ -1,0 +1,11 @@
+Set FontSize 16
+Set Width 1200
+Set Height 1000
+Set Padding 20
+Env YTMUSIC_TUI_DEMO "1"
+Env YTMUSIC_TUI_DEMO_SCREEN "popup"
+Type "./target/release/ytmusic-tui"
+Enter
+Sleep 2s
+Screenshot screenshots/out/popup.png
+Sleep 1s

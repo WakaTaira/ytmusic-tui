@@ -123,10 +123,6 @@ pub enum AppCommand {
     /// Fetch the user's library artists (the library view's artists pane).
     /// Replies with [`AppEvent::LibraryArtistsLoaded`] or [`AppEvent::ApiError`].
     FetchLibraryArtists,
-    /// Fetch the user's liked songs (mirrors Python's library "Liked Songs"
-    /// pseudo-playlist). Replies with [`AppEvent::LikedSongsLoaded`] or
-    /// [`AppEvent::ApiError`].
-    FetchLikedSongs,
     /// Play a single track immediately: the queue is replaced with `[track]`
     /// (spotify_player "play this one" semantics). Emits [`AppEvent::NowPlaying`].
     Play(Track),
@@ -296,8 +292,6 @@ pub enum AppEvent {
     LibraryAlbumsLoaded(Vec<AlbumInfo>),
     /// The library artists finished loading (library view's artists pane).
     LibraryArtistsLoaded(Vec<ArtistInfo>),
-    /// The liked songs finished loading (library view's "Liked Songs" entry).
-    LikedSongsLoaded(Vec<Track>),
     /// An API call failed; the string is a user-facing, classified message.
     ApiError(String),
     /// The now-playing metadata changed (a new current track, or a mode toggle).
@@ -580,9 +574,6 @@ fn run_runtime(
                 }
                 AppCommand::FetchLibraryArtists => {
                     handle_fetch_library_artists(client.as_ref(), events).await;
-                }
-                AppCommand::FetchLikedSongs => {
-                    handle_fetch_liked_songs(client.as_ref(), events).await;
                 }
                 AppCommand::FetchAlbum(browse_id) => {
                     handle_fetch_album(client.as_ref(), &browse_id, events).await;
@@ -951,7 +942,7 @@ async fn handle_fetch_playlist_tracks(
 /// `search_all(query, limit=20, ...)` in `SearchView._run_search`.
 const SEARCH_LIMIT: usize = 20;
 
-/// Default page size for the library albums/artists/liked-songs fetches.
+/// Default page size for the library albums/artists fetches.
 /// Mirrors the Python view's `get_library_*` calls (ytmusicapi defaults to 25
 /// for these); a generous cap keeps the panes populated without paging.
 const LIBRARY_LIMIT: usize = 50;
@@ -1011,21 +1002,6 @@ async fn handle_fetch_library_artists(
     };
     let event = match client.get_library_artists(LIBRARY_LIMIT).await {
         Ok(artists) => AppEvent::LibraryArtistsLoaded(artists),
-        Err(err) => AppEvent::ApiError(ytmusic_api::classify_api_error(&err)),
-    };
-    let _ = events.send(event);
-}
-
-/// Fetch the user's liked songs and emit the result (or a classified error).
-async fn handle_fetch_liked_songs(client: Option<&InnerTubeClient>, events: &StdSender<AppEvent>) {
-    let Some(client) = client else {
-        let _ = events.send(AppEvent::ApiError(
-            "Not signed in — run: ytmusic-tui auth".to_owned(),
-        ));
-        return;
-    };
-    let event = match client.get_liked_songs(LIBRARY_LIMIT).await {
-        Ok(tracks) => AppEvent::LikedSongsLoaded(tracks),
         Err(err) => AppEvent::ApiError(ytmusic_api::classify_api_error(&err)),
     };
     let _ = events.send(event);
