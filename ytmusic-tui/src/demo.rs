@@ -880,6 +880,10 @@ mod tests {
         // Save and clear both vars so the assertion is unconditional.
         let saved_demo = std::env::var_os("YTMUSIC_TUI_DEMO");
         let saved_interactive = std::env::var_os("YTMUSIC_TUI_DEMO_INTERACTIVE");
+        // SAFETY: process-global env mutation is racy only against concurrent
+        // env access from other threads; ENV_LOCK serialises every test that
+        // mutates these vars, and this test is the sole env mutator in the
+        // workspace.
         unsafe {
             std::env::remove_var("YTMUSIC_TUI_DEMO");
             std::env::remove_var("YTMUSIC_TUI_DEMO_INTERACTIVE");
@@ -889,6 +893,7 @@ mod tests {
 
         // Restore original values before asserting so a failure doesn't leave
         // the environment dirty for other tests.
+        // SAFETY: same invariant as above — still inside the ENV_LOCK guard.
         unsafe {
             match saved_demo {
                 Some(v) => std::env::set_var("YTMUSIC_TUI_DEMO", v),
