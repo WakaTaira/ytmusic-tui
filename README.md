@@ -9,6 +9,8 @@ A terminal music player for YouTube Music, built for keyboard-driven workflows.
 > what I need, it may go quiet for stretches — issues and PRs are still
 > welcome, and reviews are best-effort.
 
+![Demo: home → play → search → queue → theme switcher](screenshots/out/demo.gif)
+
 ![ytmusic-tui home view (synthwave theme)](screenshots/out/home-synthwave.png)
 
 <sub>Home view, synthwave theme. All images are generated from a built-in demo

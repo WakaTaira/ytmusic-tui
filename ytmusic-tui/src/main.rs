@@ -96,7 +96,12 @@ fn run() -> i32 {
         }
     };
 
-    // Demo mode: skip all real I/O, inject fake data, draw once, wait for a key.
+    // Interactive demo: full key-dispatch loop with a stub runtime simulator.
+    if demo::is_interactive() {
+        return run_demo_interactive(&config);
+    }
+
+    // Static demo: skip all real I/O, inject fake data, draw once, wait for a key.
     if demo::is_demo() {
         return run_demo(&config);
     }
@@ -2121,6 +2126,135 @@ fn run_demo_in_alternate_screen(model: &mut AppModel) -> io::Result<()> {
             && let Event::Key(_) = event::read()?
         {
             break;
+        }
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Interactive demo mode
+// ---------------------------------------------------------------------------
+
+/// Run the TUI in interactive demo mode.
+///
+/// Activated when both `YTMUSIC_TUI_DEMO` and `YTMUSIC_TUI_DEMO_INTERACTIVE`
+/// are set. Uses a stub runtime (no real network calls, no mpv) combined with
+/// [`ytmusic_tui::demo::respond`] to synthesise realistic [`AppEvent`]s in
+/// response to every [`AppCommand`] the model sends.
+///
+/// The key-dispatch and render loop is structurally identical to [`run_loop`]
+/// so all keymap bindings, navigation, and popup flows work as in production.
+fn run_demo_interactive(config: &AppConfig) -> i32 {
+    let theme_name = std::env::var("YTMUSIC_TUI_DEMO_THEME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| config.ui.theme.clone());
+
+    let (keymap, keymap_warnings) = match config::load_keymap(None, None) {
+        Ok(mut map) => {
+            map.entry("search_page".to_owned())
+                .or_insert_with(|| "g s".to_owned());
+            ytmusic_tui::keymap::Keymap::from_map_with_warnings(&map)
+        }
+        Err(_) => (ytmusic_tui::keymap::Keymap::defaults(), Vec::new()),
+    };
+
+    let mut model =
+        AppModel::with_keymap(ytmusic_tui::views::Theme::from_name(&theme_name), keymap);
+    model.set_theme_name(&theme_name);
+    // Surface dropped keymap bindings once, on the status line — mirrors run_loop.
+    model.set_keymap_warnings(&keymap_warnings);
+
+    // Seed the home view with scripted data so the startup screen is populated.
+    let (stub_runtime, mut stub_rx) = ytmusic_tui::app::RuntimeHandle::stub();
+    for event in ytmusic_tui::demo::scripted_events(ytmusic_tui::demo::DemoScreen::Home) {
+        let _ = model.on_event(event);
+    }
+    // Drain any commands the fold above sent (FetchHome etc.) and respond with
+    // stub events so the model is fully primed before the first frame.
+    drain_demo_commands(&mut stub_rx, &mut model, &stub_runtime);
+
+    model.apply_filter_to_view();
+    model.prune_toasts();
+
+    install_panic_hook();
+    if let Err(e) = enable_raw_mode() {
+        eprintln!("ytmusic-tui demo: failed to enable raw mode: {e}");
+        return 1;
+    }
+
+    let result = run_demo_interactive_in_alternate_screen(&mut model, &stub_runtime, &mut stub_rx);
+    restore_terminal();
+
+    match result {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("ytmusic-tui demo: terminal error: {e}");
+            1
+        }
+    }
+}
+
+/// Drain all pending commands from the stub receiver, feed each one through
+/// [`demo::respond`], and fold the resulting events back into the model.
+///
+/// Commands that [`demo::respond`] maps to [`AppCommand::Quit`] are ignored —
+/// the interactive demo never auto-quits on a command; only the `Q` key does.
+/// The stub channel is unbounded but drained every tick; depth is bounded by
+/// commands-per-keypress (~1-3).
+fn drain_demo_commands(
+    stub_rx: &mut tokio::sync::mpsc::UnboundedReceiver<ytmusic_tui::app::AppCommand>,
+    model: &mut AppModel,
+    runtime: &ytmusic_tui::app::RuntimeHandle,
+) {
+    while let Ok(cmd) = stub_rx.try_recv() {
+        for event in ytmusic_tui::demo::respond(&cmd) {
+            // Follow-up commands from the fold (e.g. auto-advance NextTrack)
+            // are re-queued so they too get a stub response next drain pass.
+            if let Some(follow_up) = model.on_event(event) {
+                runtime.send(follow_up);
+            }
+        }
+    }
+}
+
+/// The interactive demo loop running inside an alternate screen.
+///
+/// Mirrors [`run_loop`]: poll for input → dispatch → drain stub commands →
+/// fold stub events → render. The loop exits on `Q` / Ctrl-C (same as the
+/// real app) or on I/O error.
+fn run_demo_interactive_in_alternate_screen(
+    model: &mut AppModel,
+    runtime: &ytmusic_tui::app::RuntimeHandle,
+    stub_rx: &mut tokio::sync::mpsc::UnboundedReceiver<ytmusic_tui::app::AppCommand>,
+) -> io::Result<()> {
+    let mut stdout = io::stdout();
+    stdout.execute(EnterAlternateScreen)?;
+    stdout.execute(cursor::Hide)?;
+
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    while !model.should_quit {
+        // Drain any stub events that arrived (commands sent by the model in the
+        // previous tick are replied to here so the UI reflects the response).
+        drain_demo_commands(stub_rx, model, runtime);
+
+        model.apply_filter_to_view();
+        model.prune_toasts();
+
+        terminal.draw(|frame| model.render(frame))?;
+
+        if event::poll(POLL_INTERVAL)?
+            && let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            model.dispatch_key(key, runtime);
+            // Immediately drain commands issued by this keypress so the
+            // model's state is as up-to-date as possible before the next
+            // render tick.
+            drain_demo_commands(stub_rx, model, runtime);
         }
     }
 
