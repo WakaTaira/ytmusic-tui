@@ -801,16 +801,46 @@ mod tests {
         );
     }
 
-    /// Unsupported commands return an empty event list.
+    /// Every no-op arm of respond() returns an empty event list.
+    ///
+    /// Table-driven: covers all variants listed in the no-op match arm so that
+    /// adding a new variant forces an explicit decision here.
     #[test]
     fn respond_unsupported_commands_return_empty() {
-        let cmds = [
+        let cmds: &[AppCommand] = &[
+            AppCommand::Quit,
             AppCommand::SeekForward,
             AppCommand::SeekBackward,
+            AppCommand::SeekToStart,
             AppCommand::ToggleMute,
+            AppCommand::CheckSession,
+            AppCommand::StartRadio("vid-001".to_owned()),
+            AppCommand::SetVolume(50),
+            AppCommand::FetchAlbum("browse-001".to_owned()),
+            AppCommand::FetchArtist("ch-001".to_owned()),
+            AppCommand::FetchLyrics("vid-001".to_owned()),
+            AppCommand::FetchHistory,
+            AppCommand::AddToPlaylist {
+                playlist_id: "pl-001".to_owned(),
+                video_id: "vid-001".to_owned(),
+            },
+            AppCommand::CreatePlaylistAndAdd {
+                title: "My Playlist".to_owned(),
+                video_id: "vid-001".to_owned(),
+            },
+            AppCommand::RemoveFromQueue("vid-001".to_owned()),
+            AppCommand::RemoveFromPlaylist {
+                playlist_id: "pl-001".to_owned(),
+                video_id: "vid-001".to_owned(),
+            },
+            AppCommand::SearchAndOpenArtist("Artist Name".to_owned()),
+            AppCommand::SearchAndOpenAlbum {
+                name: "Album Name".to_owned(),
+                artist: "Artist Name".to_owned(),
+            },
         ];
         for cmd in cmds {
-            let events = respond(&cmd);
+            let events = respond(cmd);
             assert!(
                 events.is_empty(),
                 "expected empty response for {cmd:?}, got {events:?}"
@@ -839,17 +869,41 @@ mod tests {
     }
 
     /// is_interactive returns false when the env vars are unset.
+    ///
+    /// Uses a process-wide mutex so parallel test threads cannot observe each
+    /// other's temporary env-var mutations.
     #[test]
     fn is_interactive_false_when_unset() {
-        // is_demo() is also false in a clean env, so is_interactive() is false.
-        // Use a dedicated check: both vars must be set for true.
-        // (We cannot set env vars in a test without a mutex; verify only the
-        //  false branch here — the true branch is covered by integration.)
-        // When neither YTMUSIC_TUI_DEMO nor _INTERACTIVE is set, result is false.
-        // This test may spuriously pass if CI exports the var, which is fine.
-        if std::env::var_os("YTMUSIC_TUI_DEMO").is_none() {
-            assert!(!is_interactive());
+        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        // Save and clear both vars so the assertion is unconditional.
+        let saved_demo = std::env::var_os("YTMUSIC_TUI_DEMO");
+        let saved_interactive = std::env::var_os("YTMUSIC_TUI_DEMO_INTERACTIVE");
+        unsafe {
+            std::env::remove_var("YTMUSIC_TUI_DEMO");
+            std::env::remove_var("YTMUSIC_TUI_DEMO_INTERACTIVE");
         }
+
+        let result = is_interactive();
+
+        // Restore original values before asserting so a failure doesn't leave
+        // the environment dirty for other tests.
+        unsafe {
+            match saved_demo {
+                Some(v) => std::env::set_var("YTMUSIC_TUI_DEMO", v),
+                None => std::env::remove_var("YTMUSIC_TUI_DEMO"),
+            }
+            match saved_interactive {
+                Some(v) => std::env::set_var("YTMUSIC_TUI_DEMO_INTERACTIVE", v),
+                None => std::env::remove_var("YTMUSIC_TUI_DEMO_INTERACTIVE"),
+            }
+        }
+
+        assert!(
+            !result,
+            "is_interactive() must be false when env vars are absent"
+        );
     }
 
     // -- scripted_events() tests -----------------------------------------------

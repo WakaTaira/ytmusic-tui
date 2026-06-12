@@ -2151,7 +2151,7 @@ fn run_demo_interactive(config: &AppConfig) -> i32 {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| config.ui.theme.clone());
 
-    let (keymap, _) = match config::load_keymap(None, None) {
+    let (keymap, keymap_warnings) = match config::load_keymap(None, None) {
         Ok(mut map) => {
             map.entry("search_page".to_owned())
                 .or_insert_with(|| "g s".to_owned());
@@ -2163,6 +2163,8 @@ fn run_demo_interactive(config: &AppConfig) -> i32 {
     let mut model =
         AppModel::with_keymap(ytmusic_tui::views::Theme::from_name(&theme_name), keymap);
     model.set_theme_name(&theme_name);
+    // Surface dropped keymap bindings once, on the status line — mirrors run_loop.
+    model.set_keymap_warnings(&keymap_warnings);
 
     // Seed the home view with scripted data so the startup screen is populated.
     let (stub_runtime, mut stub_rx) = ytmusic_tui::app::RuntimeHandle::stub();
@@ -2199,6 +2201,8 @@ fn run_demo_interactive(config: &AppConfig) -> i32 {
 ///
 /// Commands that [`demo::respond`] maps to [`AppCommand::Quit`] are ignored —
 /// the interactive demo never auto-quits on a command; only the `Q` key does.
+/// The stub channel is unbounded but drained every tick; depth is bounded by
+/// commands-per-keypress (~1-3).
 fn drain_demo_commands(
     stub_rx: &mut tokio::sync::mpsc::UnboundedReceiver<ytmusic_tui::app::AppCommand>,
     model: &mut AppModel,
