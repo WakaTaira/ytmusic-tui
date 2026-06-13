@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "YouTube Music InnerTube client (auth + transport core)"
+readme = "README.md"
+keywords = ["youtube-music", "innertube", "api", "music", "youtube"]
+categories = ["api-bindings", "multimedia::audio"]
 
 [lib]
 name = "ytmusic_api"
