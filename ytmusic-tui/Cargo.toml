@@ -1,6 +1,6 @@
 [package]
 name = "ytmusic-tui"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -23,7 +23,7 @@ path = "src/lib.rs"
 unicode-width = "0.2"
 # Domain models (Track, AlbumInfo, etc.) and parse helpers live in the api crate.
 # This makes the dependency flow app → api instead of api → app.
-ytmusic-api = { version = "0.1.0", path = "../ytmusic-api" }
+ytmusic-api = { version = "0.2.0", path = "../ytmusic-api" }
 
 rand = "0.9"
 
