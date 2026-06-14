@@ -76,10 +76,95 @@ use ytmusic_tui::views::toast::{Severity, ToastManager};
 const POLL_INTERVAL: Duration = Duration::from_millis(60);
 
 fn main() {
+    // The `auth` subcommand is the only one we recognise — it predates the TUI
+    // setup chain (config / player / terminal), so it is intercepted here before
+    // any of that work. Everything else falls through to the normal TUI launch.
+    let argv: Vec<String> = std::env::args().collect();
+    let mut out = io::stdout();
+    let mut err = io::stderr();
+    if let Some(code) = dispatch_auth(
+        &argv,
+        &mut out,
+        &mut err,
+        ytmusic_tui::auth_cli::run_auth_flow,
+        ytmusic_tui::auth_cli::run_from_browser,
+    ) {
+        std::process::exit(code);
+    }
     // Phase 1: everything that can fail with a clean message happens before the
     // terminal is touched. `run` returns an exit code; non-zero on a fatal
     // setup error (already reported to stderr).
     std::process::exit(run());
+}
+
+/// Resolve the `auth` subcommand off the argv vector.
+///
+/// Returns `Some(code)` when an `auth` subcommand path was matched (the caller
+/// should exit with that code); returns `None` to fall through to the regular
+/// TUI launch. Split out of [`main`] so the per-shape dispatch (no args,
+/// `--from-browser <name>`, `--help`, unknown flag) is unit-testable without
+/// touching `std::env::args` or running the real auth flows. The two handlers
+/// (`run_paste` for the no-arg path, `run_browser` for `--from-browser`) are
+/// injected so tests stub them with capturing closures.
+fn dispatch_auth<O, E, F, G>(
+    argv: &[String],
+    out: &mut O,
+    err: &mut E,
+    run_paste: F,
+    run_browser: G,
+) -> Option<i32>
+where
+    O: Write,
+    E: Write,
+    F: FnOnce() -> i32,
+    G: FnOnce(&str) -> i32,
+{
+    if argv.len() < 2 || argv[1] != "auth" {
+        return None;
+    }
+    match argv.get(2).map(String::as_str) {
+        // `ytmusic-tui auth` — the interactive paste flow.
+        None => Some(run_paste()),
+        Some("--help" | "-h") => {
+            print_auth_usage(out);
+            Some(0)
+        }
+        Some("--from-browser") => match argv.get(3) {
+            Some(name) if !name.is_empty() => Some(run_browser(name)),
+            _ => {
+                let _ = writeln!(err, "ytmusic-tui auth: --from-browser needs a browser name");
+                print_auth_usage(err);
+                Some(1)
+            }
+        },
+        Some(other) => {
+            let _ = writeln!(err, "ytmusic-tui auth: unknown option: {other}");
+            print_auth_usage(err);
+            Some(1)
+        }
+    }
+}
+
+/// Short, two-mode usage text shared by `--help` and the malformed-flag error
+/// paths. Writes to whatever stream the caller passes (stdout for `--help`,
+/// stderr for errors).
+fn print_auth_usage<W: Write>(out: &mut W) {
+    let _ = writeln!(out, "Usage:");
+    let _ = writeln!(out, "  ytmusic-tui auth");
+    let _ = writeln!(
+        out,
+        "      Paste request headers from your browser's DevTools Network tab."
+    );
+    let _ = writeln!(out, "  ytmusic-tui auth --from-browser <name>");
+    let _ = writeln!(
+        out,
+        "      Read cookies straight from the named browser's local store."
+    );
+    let _ = writeln!(
+        out,
+        "      <name>: firefox, librewolf, zen, chrome, chromium, brave, edge,"
+    );
+    let _ = writeln!(out, "              vivaldi, opera, opera_gx, arc, safari");
 }
 
 /// Load config + auth + player, spawn the runtime, run the UI, and tear down.
@@ -1223,8 +1308,153 @@ impl AppModel {
             (ActionKind::PlayAll | ActionKind::Open, PopupItem::Album(album)) => {
                 self.open_album(album.browse_id, runtime);
             }
+            (ActionKind::CopyLink, item) => self.action_copy_link(&item),
+            (ActionKind::FollowArtist, item) => self.action_follow_artist(&item, runtime),
+            (ActionKind::UnfollowArtist, item) => self.action_unfollow_artist(&item, runtime),
+            (ActionKind::SaveToLibrary, item) => self.action_save_to_library(&item, runtime),
+            (ActionKind::RemoveFromLibrary, item) => {
+                self.action_remove_from_library(&item, runtime)
+            }
             // Combinations that don't apply to the item type are no-ops.
             _ => {}
+        }
+    }
+
+    /// Handle the "Save to library" action (issue #12) — albums and playlists.
+    ///
+    /// Resolves the popup item to its playlist id (album `browse_id` or
+    /// playlist `playlist_id`), surfaces an in-flight toast, then dispatches
+    /// [`AppCommand::RatePlaylist`] with `"LIKE"`. A track row (not a valid
+    /// target for this action) reports the limitation rather than
+    /// dispatching a meaningless command.
+    fn action_save_to_library(&mut self, item: &PopupItem, runtime: &RuntimeHandle) {
+        let Some(playlist_id) = Self::library_playlist_id_for(item) else {
+            self.push_toast(
+                "Save to library: unavailable from this row",
+                Severity::Warning,
+            );
+            return;
+        };
+        self.push_toast("Saving to library…", Severity::Info);
+        runtime.send(AppCommand::RatePlaylist {
+            playlist_id,
+            status: "LIKE".to_owned(),
+        });
+    }
+
+    /// Handle the "Remove from library" action (issue #12). Same row-to-id
+    /// resolution as [`Self::action_save_to_library`]; the runtime then
+    /// dispatches `rate_playlist` with `"INDIFFERENT"`.
+    fn action_remove_from_library(&mut self, item: &PopupItem, runtime: &RuntimeHandle) {
+        let Some(playlist_id) = Self::library_playlist_id_for(item) else {
+            self.push_toast(
+                "Remove from library: unavailable from this row",
+                Severity::Warning,
+            );
+            return;
+        };
+        self.push_toast("Removing from library…", Severity::Info);
+        runtime.send(AppCommand::RatePlaylist {
+            playlist_id,
+            status: "INDIFFERENT".to_owned(),
+        });
+    }
+
+    /// Resolve the popup item to the playlist id used by `rate_playlist`.
+    ///
+    /// Returns `None` for items that cannot be saved to the library on their
+    /// own (tracks — the user should use "Add to playlist" / "Like" instead)
+    /// or rows that carry no id (defensive: the popup should never have
+    /// opened on an empty row).
+    fn library_playlist_id_for(item: &PopupItem) -> Option<String> {
+        match item {
+            PopupItem::Album(a) if !a.browse_id.is_empty() => Some(a.browse_id.clone()),
+            PopupItem::Playlist(p) if !p.playlist_id.is_empty() => Some(p.playlist_id.clone()),
+            _ => None,
+        }
+    }
+
+    /// Handle the "Follow artist" action (issue #11). The album popup is the
+    /// only caller surface today; the album's artist name is resolved
+    /// runtime-side via search and then subscribed to. A row with no artist
+    /// name reports the limitation rather than dispatching an empty search.
+    fn action_follow_artist(&mut self, item: &PopupItem, runtime: &RuntimeHandle) {
+        let name = Self::artist_name_from_popup_item(item);
+        if name.is_empty() {
+            self.push_toast(
+                "Follow artist: unavailable from this row",
+                Severity::Warning,
+            );
+            return;
+        }
+        self.push_toast(format!("Following {name}…"), Severity::Info);
+        runtime.send(AppCommand::FollowArtist(name));
+    }
+
+    /// Handle the "Unfollow artist" action (issue #11). Same row-to-name
+    /// resolution as [`Self::action_follow_artist`]; the runtime then
+    /// dispatches `unsubscribe_artists`.
+    fn action_unfollow_artist(&mut self, item: &PopupItem, runtime: &RuntimeHandle) {
+        let name = Self::artist_name_from_popup_item(item);
+        if name.is_empty() {
+            self.push_toast(
+                "Unfollow artist: unavailable from this row",
+                Severity::Warning,
+            );
+            return;
+        }
+        self.push_toast(format!("Unfollowing {name}…"), Severity::Info);
+        runtime.send(AppCommand::UnfollowArtist(name));
+    }
+
+    /// Resolve a [`PopupItem`] to its artist display name for the
+    /// follow / unfollow flow. An album row carries the artist name directly;
+    /// a track row carries it too. A playlist row has no single artist and
+    /// yields an empty string, which the caller surfaces as a Warning toast.
+    fn artist_name_from_popup_item(item: &PopupItem) -> String {
+        match item {
+            PopupItem::Track(t) => t.artist.clone(),
+            PopupItem::Album(a) => a.artist.clone(),
+            PopupItem::Playlist(_) => String::new(),
+        }
+    }
+
+    /// Resolve a [`PopupItem`] to its shareable YouTube Music URL (issue #14).
+    ///
+    /// Returns `None` for items whose required id field is empty — the popup
+    /// should never have been opened on such a row, but defending here keeps
+    /// the user out of a "Link copied: <nothing>" trap.
+    fn url_for_popup_item(item: &PopupItem) -> Option<String> {
+        match item {
+            PopupItem::Track(t) if !t.video_id.is_empty() => {
+                Some(ytmusic_tui::clipboard::track_url(t))
+            }
+            PopupItem::Album(a) if !a.browse_id.is_empty() => {
+                Some(ytmusic_tui::clipboard::album_url(a))
+            }
+            PopupItem::Playlist(p) if !p.playlist_id.is_empty() => {
+                Some(ytmusic_tui::clipboard::playlist_url(p))
+            }
+            // A row with no id has no shareable target — fall through so the
+            // caller surfaces a Warning toast instead of copying an empty URL.
+            _ => None,
+        }
+    }
+
+    /// Handle the "Copy link" action: write an OSC52 escape to stdout and toast
+    /// the outcome. Both success and failure produce a toast so the user always
+    /// gets feedback (the terminal does not ack OSC52, so success is "the write
+    /// to stdout did not error").
+    fn action_copy_link(&mut self, item: &PopupItem) {
+        let Some(url) = Self::url_for_popup_item(item) else {
+            self.push_toast("Copy link: no shareable id on this row", Severity::Warning);
+            return;
+        };
+        match ytmusic_tui::clipboard::copy_to_clipboard(&url) {
+            Ok(()) => self.push_toast("Link copied", Severity::Info),
+            Err(detail) => {
+                self.push_toast(format!("Failed to copy link: {detail}"), Severity::Error)
+            }
         }
     }
 
@@ -2266,7 +2496,7 @@ mod tests {
     use super::*;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
-    use ytmusic_api::{HomeSection, HomeSectionItem, PlaylistInfo, Track};
+    use ytmusic_api::{AlbumInfo, HomeSection, HomeSectionItem, PlaylistInfo, Track};
 
     // -- nav-key mapping ---------------------------------------------------
     //
@@ -2295,6 +2525,144 @@ mod tests {
             .toasts()
             .iter()
             .any(|t| t.message.contains(needle))
+    }
+
+    // -- auth subcommand argv dispatch (issue #18) ------------------------
+    //
+    // `dispatch_auth` is the pure argv-shape router; the real auth handlers
+    // are injected so these tests assert ONLY on the dispatch, not on the
+    // interactive paste flow or the network canary.
+
+    fn argv(args: &[&str]) -> Vec<String> {
+        args.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn dispatch_auth_returns_none_when_no_auth_subcommand() {
+        let mut out: Vec<u8> = Vec::new();
+        let mut err: Vec<u8> = Vec::new();
+        let av = argv(&["ytmusic-tui"]);
+        let code = dispatch_auth(
+            &av,
+            &mut out,
+            &mut err,
+            || panic!("paste handler must not run"),
+            |_| panic!("from-browser handler must not run"),
+        );
+        assert_eq!(code, None, "TUI launch must fall through");
+        let av2 = argv(&["ytmusic-tui", "play"]);
+        let code2 = dispatch_auth(
+            &av2,
+            &mut out,
+            &mut err,
+            || panic!("paste handler must not run"),
+            |_| panic!("from-browser handler must not run"),
+        );
+        assert_eq!(code2, None, "unknown subcommand must fall through");
+    }
+
+    #[test]
+    fn dispatch_auth_no_flags_calls_paste_flow() {
+        let mut out: Vec<u8> = Vec::new();
+        let mut err: Vec<u8> = Vec::new();
+        let av = argv(&["ytmusic-tui", "auth"]);
+        let mut called = false;
+        let code = dispatch_auth(
+            &av,
+            &mut out,
+            &mut err,
+            || {
+                called = true;
+                7
+            },
+            |_| panic!("from-browser handler must not run"),
+        );
+        assert_eq!(code, Some(7), "paste handler's exit code must propagate");
+        assert!(
+            called,
+            "paste handler must be called for `auth` with no flags"
+        );
+    }
+
+    #[test]
+    fn dispatch_auth_from_browser_calls_browser_flow_with_name() {
+        let mut out: Vec<u8> = Vec::new();
+        let mut err: Vec<u8> = Vec::new();
+        let av = argv(&["ytmusic-tui", "auth", "--from-browser", "firefox"]);
+        let mut seen: Option<String> = None;
+        let code = dispatch_auth(
+            &av,
+            &mut out,
+            &mut err,
+            || panic!("paste handler must not run"),
+            |name| {
+                seen = Some(name.to_owned());
+                0
+            },
+        );
+        assert_eq!(code, Some(0));
+        assert_eq!(seen.as_deref(), Some("firefox"));
+    }
+
+    #[test]
+    fn dispatch_auth_from_browser_missing_name_errors_with_usage() {
+        let mut out: Vec<u8> = Vec::new();
+        let mut err: Vec<u8> = Vec::new();
+        let av = argv(&["ytmusic-tui", "auth", "--from-browser"]);
+        let code = dispatch_auth(
+            &av,
+            &mut out,
+            &mut err,
+            || panic!("paste handler must not run"),
+            |_| panic!("from-browser handler must not run without a name"),
+        );
+        assert_eq!(code, Some(1));
+        let stderr = String::from_utf8(err).expect("utf8");
+        assert!(stderr.contains("needs a browser name"));
+        assert!(
+            stderr.contains("Usage:"),
+            "usage text must follow the error"
+        );
+    }
+
+    #[test]
+    fn dispatch_auth_help_flag_prints_usage_and_exits_zero() {
+        for help in ["--help", "-h"] {
+            let mut out: Vec<u8> = Vec::new();
+            let mut err: Vec<u8> = Vec::new();
+            let av = argv(&["ytmusic-tui", "auth", help]);
+            let code = dispatch_auth(
+                &av,
+                &mut out,
+                &mut err,
+                || panic!("paste handler must not run for `auth {help}`"),
+                |_| panic!("from-browser handler must not run for `auth {help}`"),
+            );
+            assert_eq!(code, Some(0), "`auth {help}` must exit 0");
+            let stdout = String::from_utf8(out).expect("utf8");
+            assert!(
+                stdout.contains("--from-browser"),
+                "`auth {help}` must mention --from-browser in stdout"
+            );
+        }
+    }
+
+    #[test]
+    fn dispatch_auth_unknown_flag_reports_error_with_usage() {
+        let mut out: Vec<u8> = Vec::new();
+        let mut err: Vec<u8> = Vec::new();
+        let av = argv(&["ytmusic-tui", "auth", "--bogus"]);
+        let code = dispatch_auth(
+            &av,
+            &mut out,
+            &mut err,
+            || panic!("paste handler must not run for an unknown flag"),
+            |_| panic!("from-browser handler must not run for an unknown flag"),
+        );
+        assert_eq!(code, Some(1));
+        let stderr = String::from_utf8(err).expect("utf8");
+        assert!(stderr.contains("--bogus"));
+        assert!(stderr.contains("Usage:"));
     }
 
     #[test]
@@ -2601,6 +2969,335 @@ mod tests {
                 name: "Greatest Hits".into(),
                 artist: "Band".into(),
             })
+        );
+    }
+
+    // -- issue #14: Copy link (OSC52) --------------------------------------
+    //
+    // The clipboard write itself goes to stdout — these tests do not assert on
+    // the escape sequence (that contract is locked in `clipboard::tests`).
+    // What they DO assert is the URL the action resolves to (via the
+    // `url_for_popup_item` helper, the test seam) and the toast surfaced after
+    // the copy completes.
+
+    #[test]
+    fn copylink_url_for_track_is_watch_url() {
+        let item = PopupItem::Track(Track::new(
+            "dQw4w9WgXcQ",
+            "Song",
+            "Band",
+            "Album",
+            100.0,
+            "",
+        ));
+        assert_eq!(
+            AppModel::url_for_popup_item(&item).as_deref(),
+            Some("https://music.youtube.com/watch?v=dQw4w9WgXcQ")
+        );
+    }
+
+    #[test]
+    fn copylink_url_for_album_is_browse_url() {
+        let item = PopupItem::Album(AlbumInfo::new_without_tracks(
+            "MPREb_xyz",
+            "LP",
+            "Band",
+            "2020",
+            "",
+        ));
+        assert_eq!(
+            AppModel::url_for_popup_item(&item).as_deref(),
+            Some("https://music.youtube.com/browse/MPREb_xyz")
+        );
+    }
+
+    #[test]
+    fn copylink_url_for_playlist_is_playlist_url() {
+        let item = PopupItem::Playlist(PlaylistInfo::new("PLabc", "Mix", "", 10, ""));
+        assert_eq!(
+            AppModel::url_for_popup_item(&item).as_deref(),
+            Some("https://music.youtube.com/playlist?list=PLabc")
+        );
+    }
+
+    #[test]
+    fn copylink_url_is_none_for_empty_id() {
+        // A row with no shareable id (e.g. an unidentified track) yields None
+        // so the caller can surface a Warning toast instead of a broken link.
+        let item = PopupItem::Track(Track::new("", "Song", "Band", "Album", 100.0, ""));
+        assert!(AppModel::url_for_popup_item(&item).is_none());
+    }
+
+    #[test]
+    fn copylink_action_pushes_info_toast_on_track() {
+        // Successful copy path (stdout is the TestBackend's parent stdout under
+        // cargo test — the write succeeds and the toast lands as Info).
+        let mut model = AppModel::new(Theme::default());
+        let item = PopupItem::Track(Track::new("v1", "Song", "Band", "Album", 100.0, ""));
+        model.action_copy_link(&item);
+        assert!(
+            has_toast_containing(&model, "Link copied"),
+            "missing success toast"
+        );
+    }
+
+    #[test]
+    fn copylink_action_pushes_warning_for_empty_id() {
+        // No shareable id → Warning toast, no clipboard write attempt.
+        let mut model = AppModel::new(Theme::default());
+        let item = PopupItem::Track(Track::new("", "Song", "Band", "Album", 100.0, ""));
+        model.action_copy_link(&item);
+        assert!(
+            has_toast_containing(&model, "no shareable id"),
+            "missing warning toast: {:?}",
+            latest_toast(&model)
+        );
+    }
+
+    #[test]
+    fn copylink_dispatched_through_handle_action_for_album() {
+        // End-to-end through the action dispatcher: ActionKind::CopyLink on an
+        // album item lands on action_copy_link and pushes the Info toast.
+        let (runtime, _rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        let item = PopupItem::Album(AlbumInfo::new_without_tracks(
+            "MPREb_xyz",
+            "LP",
+            "Band",
+            "2020",
+            "",
+        ));
+        model.handle_action(ActionKind::CopyLink, item, &runtime);
+        assert!(
+            has_toast_containing(&model, "Link copied"),
+            "missing success toast for album"
+        );
+    }
+
+    #[test]
+    fn copylink_dispatched_through_handle_action_for_playlist() {
+        let (runtime, _rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        let item = PopupItem::Playlist(PlaylistInfo::new("PLabc", "Mix", "", 10, ""));
+        model.handle_action(ActionKind::CopyLink, item, &runtime);
+        assert!(
+            has_toast_containing(&model, "Link copied"),
+            "missing success toast for playlist"
+        );
+    }
+
+    // -- Follow / unfollow artist (issue #11) -----------------------------
+
+    #[test]
+    fn follow_artist_action_on_album_dispatches_follow_command_with_artist_name() {
+        // Issue #11: the album popup's "Follow artist" action takes the
+        // album's artist name and sends AppCommand::FollowArtist(name) — the
+        // runtime resolves the name to a channel id via search.
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        let item = PopupItem::Album(AlbumInfo::new_without_tracks(
+            "MPREb_xyz",
+            "LP",
+            "Daft Punk",
+            "2013",
+            "",
+        ));
+        model.handle_action(ActionKind::FollowArtist, item, &runtime);
+        // A pending toast surfaces the in-flight intent.
+        assert!(
+            has_toast_containing(&model, "Following"),
+            "missing pending follow toast"
+        );
+        // The runtime received exactly one FollowArtist command carrying the name.
+        match rx.try_recv() {
+            Ok(AppCommand::FollowArtist(name)) => assert_eq!(name, "Daft Punk"),
+            other => panic!("expected FollowArtist, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unfollow_artist_action_on_album_dispatches_unfollow_command() {
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        let item = PopupItem::Album(AlbumInfo::new_without_tracks(
+            "MPREb_xyz",
+            "LP",
+            "Daft Punk",
+            "2013",
+            "",
+        ));
+        model.handle_action(ActionKind::UnfollowArtist, item, &runtime);
+        assert!(
+            has_toast_containing(&model, "Unfollowing"),
+            "missing pending unfollow toast"
+        );
+        match rx.try_recv() {
+            Ok(AppCommand::UnfollowArtist(name)) => assert_eq!(name, "Daft Punk"),
+            other => panic!("expected UnfollowArtist, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn follow_artist_action_on_playlist_warns_unavailable() {
+        // A playlist row has no single artist; the action surfaces a Warning
+        // toast and does NOT dispatch any runtime command.
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        let item = PopupItem::Playlist(PlaylistInfo::new("PLabc", "Mix", "", 10, ""));
+        model.handle_action(ActionKind::FollowArtist, item, &runtime);
+        assert!(
+            has_toast_containing(&model, "unavailable"),
+            "missing unavailable warning: {:?}",
+            latest_toast(&model)
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "no runtime command should be dispatched"
+        );
+    }
+
+    // -- Save / remove album or playlist from library (issue #12) ---------
+
+    #[test]
+    fn save_to_library_action_on_album_dispatches_rate_playlist_like() {
+        // Issue #12: the album popup's "Save to library" action takes the
+        // album's `browse_id` and sends AppCommand::RatePlaylist with
+        // status="LIKE" so the runtime hits `like/like` with the playlist-id
+        // target.
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        let item = PopupItem::Album(AlbumInfo::new_without_tracks(
+            "MPREb_xyz",
+            "LP",
+            "Daft Punk",
+            "2013",
+            "",
+        ));
+        model.handle_action(ActionKind::SaveToLibrary, item, &runtime);
+        assert!(
+            has_toast_containing(&model, "Saving to library"),
+            "missing pending save toast"
+        );
+        match rx.try_recv() {
+            Ok(AppCommand::RatePlaylist {
+                playlist_id,
+                status,
+            }) => {
+                assert_eq!(playlist_id, "MPREb_xyz");
+                assert_eq!(status, "LIKE");
+            }
+            other => panic!("expected RatePlaylist{{LIKE}}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn save_to_library_action_on_playlist_dispatches_rate_playlist_like() {
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        let item = PopupItem::Playlist(PlaylistInfo::new("PLabc", "Mix", "", 10, ""));
+        model.handle_action(ActionKind::SaveToLibrary, item, &runtime);
+        assert!(
+            has_toast_containing(&model, "Saving to library"),
+            "missing pending save toast"
+        );
+        match rx.try_recv() {
+            Ok(AppCommand::RatePlaylist {
+                playlist_id,
+                status,
+            }) => {
+                assert_eq!(playlist_id, "PLabc");
+                assert_eq!(status, "LIKE");
+            }
+            other => panic!("expected RatePlaylist{{LIKE}}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn remove_from_library_action_on_album_dispatches_rate_playlist_indifferent() {
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        let item = PopupItem::Album(AlbumInfo::new_without_tracks(
+            "MPREb_xyz",
+            "LP",
+            "Daft Punk",
+            "2013",
+            "",
+        ));
+        model.handle_action(ActionKind::RemoveFromLibrary, item, &runtime);
+        assert!(
+            has_toast_containing(&model, "Removing from library"),
+            "missing pending remove toast"
+        );
+        match rx.try_recv() {
+            Ok(AppCommand::RatePlaylist {
+                playlist_id,
+                status,
+            }) => {
+                assert_eq!(playlist_id, "MPREb_xyz");
+                assert_eq!(status, "INDIFFERENT");
+            }
+            other => panic!("expected RatePlaylist{{INDIFFERENT}}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn remove_from_library_action_on_playlist_dispatches_rate_playlist_indifferent() {
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        let item = PopupItem::Playlist(PlaylistInfo::new("PLabc", "Mix", "", 10, ""));
+        model.handle_action(ActionKind::RemoveFromLibrary, item, &runtime);
+        assert!(
+            has_toast_containing(&model, "Removing from library"),
+            "missing pending remove toast"
+        );
+        match rx.try_recv() {
+            Ok(AppCommand::RatePlaylist {
+                playlist_id,
+                status,
+            }) => {
+                assert_eq!(playlist_id, "PLabc");
+                assert_eq!(status, "INDIFFERENT");
+            }
+            other => panic!("expected RatePlaylist{{INDIFFERENT}}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn save_to_library_action_on_track_warns_unavailable() {
+        // A track row is not a valid library-save target; the action surfaces
+        // a Warning toast and does NOT dispatch any runtime command. Tracks
+        // are saved by liking individual videos via "Like / Unlike" instead.
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        let item = PopupItem::Track(Track::new("v1", "Song", "Band", "Album", 100.0, ""));
+        model.handle_action(ActionKind::SaveToLibrary, item, &runtime);
+        assert!(
+            has_toast_containing(&model, "unavailable"),
+            "missing unavailable warning: {:?}",
+            latest_toast(&model)
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "no runtime command should be dispatched"
+        );
+    }
+
+    #[test]
+    fn save_to_library_action_on_album_with_empty_browse_id_warns() {
+        // Defensive: an album row with no browse_id (should never happen)
+        // surfaces a Warning rather than dispatching an empty playlist id.
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        let item = PopupItem::Album(AlbumInfo::new_without_tracks("", "LP", "Band", "2020", ""));
+        model.handle_action(ActionKind::SaveToLibrary, item, &runtime);
+        assert!(
+            has_toast_containing(&model, "unavailable"),
+            "missing unavailable warning: {:?}",
+            latest_toast(&model)
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "no runtime command should be dispatched"
         );
     }
 

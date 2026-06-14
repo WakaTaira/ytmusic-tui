@@ -8,13 +8,23 @@
 //!
 //! | Endpoint              | Body keys                                        |
 //! |-----------------------|--------------------------------------------------|
-//! | `like/like`           | `{target: {videoId}}`                            |
+//! | `like/like`           | `{target: {videoId}}` or `{target: {playlistId}}`|
 //! | `like/dislike`        | `{target: {videoId}}`                            |
-//! | `like/removelike`     | `{target: {videoId}}`                            |
+//! | `like/removelike`     | `{target: {videoId}}` or `{target: {playlistId}}`|
 //! | `playlist/create`     | `{title, description, privacyStatus}`            |
 //! | `browse/edit_playlist`| `{playlistId, actions:[...]}`                    |
 //!   — add items:        `actions: [{action:"ACTION_ADD_VIDEO", addedVideoId}]` |
 //!   — remove items:     `actions: [{action:"ACTION_REMOVE_VIDEO", setVideoId, removedVideoId}]` |
+//!
+//! `like/like` and `like/removelike` accept either `{videoId}` (track-level
+//! ratings) or `{playlistId}` (album / playlist library save / remove). The
+//! playlist-id form mirrors ytmusicapi's `mixins/library.py::rate_playlist`,
+//! which is what the TUI calls when saving an album or playlist to the
+//! library. Albums are addressed by their `audioPlaylistId` (the regular
+//! `OLAK5uy_...` playlist id YouTube Music issues per album, NOT the `MPREb_`
+//! browse id used to *fetch* the album page); playlists pass their bare
+//! `playlistId` (`PL...` / `RD...`), with any leading `VL` stripped to mirror
+//! `add_playlist_items` / `remove_playlist_items`.
 //!
 //! # Success predicates (from api.py)
 //!
@@ -79,6 +89,43 @@ fn like_endpoint(status: &str) -> Option<&'static str> {
         "INDIFFERENT" => Some("like/removelike"),
         _ => None,
     }
+}
+
+// ---------------------------------------------------------------------------
+// rate_playlist
+// ---------------------------------------------------------------------------
+
+/// Save (or remove) an album / playlist from the user's library.
+///
+/// Mirrors `ytmusicapi::mixins/library.py::rate_playlist`: same
+/// `like/{like,removelike}` endpoint family as [`rate_track`], but the body
+/// targets a `playlistId` instead of a `videoId`. YouTube Music addresses
+/// albums by their `audioPlaylistId` (the `OLAK5uy_...` id generated per
+/// album), and playlists by their bare `PL...` / `RD...` id (any leading
+/// `VL` prefix is stripped, mirroring the edit-playlist endpoints).
+///
+/// `status` accepts the same set as [`rate_track`] — `"LIKE"` saves to the
+/// library, `"INDIFFERENT"` removes it. `"DISLIKE"` is accepted by the
+/// endpoint mapper but is not part of the save / remove contract surfaced to
+/// callers; the TUI never sends it for playlists. An unrecognised `status`
+/// string is rejected with `ApiError::Parse`.
+///
+/// There is no logical-failure dimension: transport, auth, and HTTP errors
+/// propagate as `ApiError` for the caller to classify (same contract as
+/// [`rate_track`]).
+pub(crate) async fn rate_playlist(
+    client: &impl PostRequest,
+    audio_playlist_id: &str,
+    status: &str,
+) -> Result<(), ApiError> {
+    let endpoint = like_endpoint(status).ok_or_else(|| {
+        ApiError::Parse(format!(
+            "invalid rating '{status}'; expected LIKE, INDIFFERENT, or DISLIKE"
+        ))
+    })?;
+    let body = json!({ "target": { "playlistId": strip_vl(audio_playlist_id) } });
+    client.post_request(endpoint, body).await?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -240,9 +287,18 @@ pub(crate) async fn remove_playlist_items(
     playlist_id: &str,
     video_ids: &[String],
 ) -> Result<(), ApiError> {
-    use super::playlist::parse_playlist_tracks;
+    use super::playlist::{
+        parse_continuation_next_token, parse_continuation_token, parse_continuation_tracks,
+        parse_playlist_tracks,
+    };
 
-    // Step 1: fetch playlist and resolve videoId → setVideoId.
+    // Step 1: fetch the playlist and walk its continuation chain until each
+    // target videoId is resolved to a setVideoId (or the chain is exhausted).
+    //
+    // Issue #6 follow-up: large playlists need continuation paging here too,
+    // otherwise removing a track that sits on page 2+ would silently fail
+    // with "Track was not found in the playlist". Early-exits as soon as
+    // every target is resolved to keep the happy path (small playlists) fast.
     let browse_id = if playlist_id.starts_with("VL") {
         playlist_id.to_owned()
     } else {
@@ -252,29 +308,42 @@ pub(crate) async fn remove_playlist_items(
         .post_request("browse", json!({ "browseId": browse_id }))
         .await?;
 
-    let raw_tracks = parse_playlist_tracks(&playlist_response);
     let target_set: std::collections::HashSet<&str> =
         video_ids.iter().map(|s| s.as_str()).collect();
-
     let mut to_remove: Vec<Value> = Vec::new();
-    let mut resolved: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut resolved: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    for raw in &raw_tracks {
-        let vid = raw.get("videoId").and_then(Value::as_str).unwrap_or("");
-        if target_set.contains(vid)
-            && !resolved.contains(vid)
-            && let Some(set_vid) = raw.get("setVideoId").and_then(Value::as_str)
-        {
-            to_remove.push(json!({
-                "setVideoId": set_vid,
-                "removedVideoId": vid,
-                "action": "ACTION_REMOVE_VIDEO",
-            }));
-            resolved.insert(vid);
+    collect_remove_actions(
+        &parse_playlist_tracks(&playlist_response),
+        &target_set,
+        &mut resolved,
+        &mut to_remove,
+    );
+
+    let mut next_token = if resolved.len() == target_set.len() {
+        None
+    } else {
+        parse_continuation_token(&playlist_response)
+    };
+    let mut pages_loaded = 0usize;
+    while let Some(token) = next_token {
+        if pages_loaded >= super::MAX_PLAYLIST_CONTINUATION_PAGES {
+            break;
         }
+        let continuation_response = client
+            .post_request("browse", json!({ "continuation": token }))
+            .await?;
+        collect_remove_actions(
+            &parse_continuation_tracks(&continuation_response),
+            &target_set,
+            &mut resolved,
+            &mut to_remove,
+        );
         if resolved.len() == target_set.len() {
             break;
         }
+        next_token = parse_continuation_next_token(&continuation_response);
+        pages_loaded += 1;
     }
 
     if to_remove.is_empty() {
@@ -297,6 +366,74 @@ pub(crate) async fn remove_playlist_items(
     ))
 }
 
+/// Scan one page of raw track dicts, appending an `ACTION_REMOVE_VIDEO` entry
+/// for each target videoId encountered (de-duplicating via `resolved`).
+fn collect_remove_actions(
+    raw_tracks: &[Value],
+    target_set: &std::collections::HashSet<&str>,
+    resolved: &mut std::collections::HashSet<String>,
+    to_remove: &mut Vec<Value>,
+) {
+    for raw in raw_tracks {
+        let vid = raw.get("videoId").and_then(Value::as_str).unwrap_or("");
+        if target_set.contains(vid)
+            && !resolved.contains(vid)
+            && let Some(set_vid) = raw.get("setVideoId").and_then(Value::as_str)
+        {
+            to_remove.push(json!({
+                "setVideoId": set_vid,
+                "removedVideoId": vid,
+                "action": "ACTION_REMOVE_VIDEO",
+            }));
+            resolved.insert(vid.to_owned());
+        }
+        if resolved.len() == target_set.len() {
+            break;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// subscribe_artists / unsubscribe_artists
+// ---------------------------------------------------------------------------
+
+/// Subscribe to (follow) one or more artist channels.
+///
+/// Mirrors ytmusicapi `mixins/library.py::subscribe_artists`: POST
+/// `subscription/subscribe` with `{channelIds: [...]}`. The `MPLA` prefix that
+/// ytmusicapi exposes on library-artist channel ids is stripped before the
+/// request (ytmusicapi calls into `subscription/subscribe` with the bare
+/// `UC...` id; the `MPLA` prefix is a presentation-layer artifact).
+///
+/// There is no logical-failure dimension: transport, auth, and HTTP errors
+/// propagate as `ApiError` for the caller to classify.
+pub(crate) async fn subscribe_artists(
+    client: &impl PostRequest,
+    channel_ids: &[String],
+) -> Result<(), ApiError> {
+    let stripped: Vec<&str> = channel_ids.iter().map(|id| strip_mpla(id)).collect();
+    let body = json!({ "channelIds": stripped });
+    client.post_request("subscription/subscribe", body).await?;
+    Ok(())
+}
+
+/// Unsubscribe from (unfollow) one or more artist channels.
+///
+/// Mirrors ytmusicapi `mixins/library.py::unsubscribe_artists`: POST
+/// `subscription/unsubscribe` with `{channelIds: [...]}`. Same `MPLA` stripping
+/// rule as [`subscribe_artists`].
+pub(crate) async fn unsubscribe_artists(
+    client: &impl PostRequest,
+    channel_ids: &[String],
+) -> Result<(), ApiError> {
+    let stripped: Vec<&str> = channel_ids.iter().map(|id| strip_mpla(id)).collect();
+    let body = json!({ "channelIds": stripped });
+    client
+        .post_request("subscription/unsubscribe", body)
+        .await?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -305,6 +442,14 @@ pub(crate) async fn remove_playlist_items(
 /// `validate_playlist_id`): `browse/edit_playlist` wants the bare ID.
 fn strip_vl(playlist_id: &str) -> &str {
     playlist_id.strip_prefix("VL").unwrap_or(playlist_id)
+}
+
+/// Strip a leading `"MPLA"` prefix from a channel ID. The subscription endpoint
+/// expects the bare `UC...` channel id; ytmusicapi exposes library-artist
+/// channel ids with the `MPLA` prefix as a UI artifact, so the prefix is
+/// dropped before the request.
+fn strip_mpla(channel_id: &str) -> &str {
+    channel_id.strip_prefix("MPLA").unwrap_or(channel_id)
 }
 
 /// Success predicate for playlist edit responses.

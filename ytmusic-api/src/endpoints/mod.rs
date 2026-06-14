@@ -117,11 +117,29 @@ fn truncate_results(results: &mut SearchResults, limit: usize) {
     results.playlists.truncate(limit);
 }
 
+/// Defensive upper bound on continuation pages for a single playlist load.
+///
+/// At ~100 tracks per page this caps a single call at ~5000 tracks, which
+/// covers every realistic YouTube Music playlist while preventing a runaway
+/// loop if the server ever returns a continuation token that does not advance.
+/// If a user genuinely needs more, paging this up is one constant edit away.
+pub(super) const MAX_PLAYLIST_CONTINUATION_PAGES: usize = 50;
+
 /// Get all tracks in a playlist.
 ///
 /// Mirrors `api.py::get_playlist_tracks`: prefix the id with `VL` (unless
 /// already prefixed), POST `browse`, walk the track shelf (stage 1), and
 /// convert each via stage 2's `dict_to_track`, skipping unavailable items.
+///
+/// Playlists with more than one shelf-page (~100 tracks per page on YTM)
+/// expose a continuation token at
+/// `musicPlaylistShelfRenderer.continuations[0].nextContinuationData
+///  .continuation`; this flow walks those tokens — each as an additional
+/// `browse` POST carrying `{continuation: <token>}` — until the chain is
+/// exhausted or [`MAX_PLAYLIST_CONTINUATION_PAGES`] is reached.
+///
+/// Issue #6: previously this returned only the first ~100 tracks because the
+/// continuation chain was never followed.
 pub(crate) async fn get_playlist_tracks(
     client: &impl PostRequest,
     playlist_id: &str,
@@ -131,10 +149,30 @@ pub(crate) async fn get_playlist_tracks(
     } else {
         format!("VL{playlist_id}")
     };
+
+    // Page 1: the initial browse response carries the first ~100 tracks and
+    // (for large playlists) the first continuation token.
     let response = client
         .post_request("browse", json!({ "browseId": browse_id }))
         .await?;
-    let raw_tracks = playlist::parse_playlist_tracks(&response);
+    let mut raw_tracks = playlist::parse_playlist_tracks(&response);
+    let mut next_token = playlist::parse_continuation_token(&response);
+
+    // Pages 2..N: each carries the next shelf chunk + (optionally) the next
+    // token. Stop when no token is returned or the defensive bound is hit.
+    let mut pages_loaded = 0usize;
+    while let Some(token) = next_token {
+        if pages_loaded >= MAX_PLAYLIST_CONTINUATION_PAGES {
+            break;
+        }
+        let continuation_response = client
+            .post_request("browse", json!({ "continuation": token }))
+            .await?;
+        raw_tracks.extend(playlist::parse_continuation_tracks(&continuation_response));
+        next_token = playlist::parse_continuation_next_token(&continuation_response);
+        pages_loaded += 1;
+    }
+
     Ok(raw_tracks.iter().filter_map(parse::dict_to_track).collect())
 }
 
@@ -368,6 +406,19 @@ pub(crate) async fn get_like_status(
     mutations::get_like_status(client, video_id).await
 }
 
+/// Save / remove an album or playlist from the user's library.
+///
+/// Mirrors `ytmusicapi.mixins.library.rate_playlist`. `status` is `"LIKE"`
+/// to save or `"INDIFFERENT"` to remove. Transport / auth errors propagate
+/// as [`ApiError`].
+pub(crate) async fn rate_playlist(
+    client: &impl PostRequest,
+    audio_playlist_id: &str,
+    status: &str,
+) -> Result<(), ApiError> {
+    mutations::rate_playlist(client, audio_playlist_id, status).await
+}
+
 /// Create a new playlist and return its ID.
 ///
 /// Mirrors `api.py::create_playlist`. `privacy` is one of `"PUBLIC"`,
@@ -407,6 +458,28 @@ pub(crate) async fn remove_playlist_items(
     video_ids: &[String],
 ) -> Result<(), ApiError> {
     mutations::remove_playlist_items(client, playlist_id, video_ids).await
+}
+
+/// Subscribe to (follow) one or more artist channels.
+///
+/// Mirrors `ytmusicapi.mixins.library.subscribe_artists`. Channel IDs may
+/// carry the `MPLA` library prefix; it is stripped before the request.
+pub(crate) async fn subscribe_artists(
+    client: &impl PostRequest,
+    channel_ids: &[String],
+) -> Result<(), ApiError> {
+    mutations::subscribe_artists(client, channel_ids).await
+}
+
+/// Unsubscribe from (unfollow) one or more artist channels.
+///
+/// Mirrors `ytmusicapi.mixins.library.unsubscribe_artists`. Same `MPLA`
+/// stripping rule as [`subscribe_artists`].
+pub(crate) async fn unsubscribe_artists(
+    client: &impl PostRequest,
+    channel_ids: &[String],
+) -> Result<(), ApiError> {
+    mutations::unsubscribe_artists(client, channel_ids).await
 }
 
 /// Delete a playlist.
@@ -549,6 +622,16 @@ impl InnerTubeClient {
         get_like_status(self, video_id).await
     }
 
+    /// Save / remove an album or playlist from the library. See
+    /// [`rate_playlist`].
+    pub async fn rate_playlist(
+        &self,
+        audio_playlist_id: &str,
+        status: &str,
+    ) -> Result<(), ApiError> {
+        rate_playlist(self, audio_playlist_id, status).await
+    }
+
     /// Create a playlist and return its ID. See [`create_playlist`].
     pub async fn create_playlist(
         &self,
@@ -580,5 +663,15 @@ impl InnerTubeClient {
     /// Delete a playlist. See [`delete_playlist`].
     pub async fn delete_playlist(&self, playlist_id: &str) -> Result<(), ApiError> {
         delete_playlist(self, playlist_id).await
+    }
+
+    /// Subscribe to (follow) one or more artist channels. See [`subscribe_artists`].
+    pub async fn subscribe_artists(&self, channel_ids: &[String]) -> Result<(), ApiError> {
+        subscribe_artists(self, channel_ids).await
+    }
+
+    /// Unsubscribe from (unfollow) one or more artist channels. See [`unsubscribe_artists`].
+    pub async fn unsubscribe_artists(&self, channel_ids: &[String]) -> Result<(), ApiError> {
+        unsubscribe_artists(self, channel_ids).await
     }
 }

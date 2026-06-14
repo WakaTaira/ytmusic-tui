@@ -1,4 +1,6 @@
 pub mod app;
+pub mod auth_cli;
+pub mod clipboard;
 pub mod config;
 pub mod demo;
 pub mod formatting;

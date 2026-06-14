@@ -36,6 +36,12 @@ toml = { version = "0.8", default-features = false, features = ["parse"] }
 # transitively, but we declare serde directly so the feature is stable.
 serde = { version = "1", features = ["derive"] }
 
+# JSON emission for the `ytmusic-tui auth` subcommand (writes browser.json in
+# the same ytmusicapi shape ytmusic-api's BrowserAuth loader expects).
+# Already in the lock via ytmusic-api — declaring it here keeps the dependency
+# explicit for the binary's own use.
+serde_json = "1"
+
 # libmpv binding for the audio player (M2). 6.0.0 builds against system
 # libmpv >= 2.x and exposes the end-file reason as a discriminable value,
 # which is the non-negotiable selection criterion (see spikes/mpv_spike).
@@ -101,6 +107,16 @@ zbus = { version = "5.16", default-features = false, features = ["tokio"] }
 # MessageStream. zbus already pulls futures-util transitively; declared directly
 # so the `StreamExt` import is stable.
 futures-util = { version = "0.3", default-features = false }
+
+# OSC52 clipboard payload encoding (issue #14: "Copy link to selected item").
+# Already in the lock via zbus and other transitive deps — zero new lock entries.
+base64 = { version = "0.22", default-features = false, features = ["std"] }
+
+# Browser cookie-jar reader for `ytmusic-tui auth --from-browser <name>` (issue
+# #18). Pure-Rust cross-platform store reader: Firefox SQLite, Chromium-family
+# encrypted SQLite (with keyring decryption), Safari, etc. Pulls the YTM cookies
+# directly so the user does not have to paste DevTools headers by hand.
+rookie = "0.5.6"
 
 [dev-dependencies]
 # Temporary directory support for config-loading tests.

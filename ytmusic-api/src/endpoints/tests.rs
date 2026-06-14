@@ -14,8 +14,8 @@ use serde_json::Value;
 use super::{
     PostRequest, add_playlist_items, create_playlist, get_album, get_artist, get_history, get_home,
     get_library_albums, get_library_artists, get_library_playlists, get_like_status,
-    get_liked_songs, get_lyrics, get_playlist_tracks, get_radio, rate_track, remove_playlist_items,
-    search_all,
+    get_liked_songs, get_lyrics, get_playlist_tracks, get_radio, rate_playlist, rate_track,
+    remove_playlist_items, search_all, subscribe_artists, unsubscribe_artists,
 };
 use crate::error::ApiError;
 use crate::models::HomeSectionItem;
@@ -97,6 +97,40 @@ impl PostRequest for MapPost {
             None => Err(ApiError::Http {
                 status: 404,
                 message: format!("no fixture for endpoint {endpoint}"),
+            }),
+        }
+    }
+}
+
+/// A fake transport that returns a queued sequence of responses for repeated
+/// calls to the same endpoint — used by the continuation-paging tests where
+/// each `browse` POST resolves a different page of the same playlist.
+struct SequencePost {
+    responses: Mutex<std::collections::VecDeque<Value>>,
+    calls: Mutex<Vec<(String, Value)>>,
+}
+
+impl SequencePost {
+    fn new(responses: Vec<Value>) -> Self {
+        Self {
+            responses: Mutex::new(responses.into_iter().collect()),
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn calls(&self) -> Vec<(String, Value)> {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
+impl PostRequest for SequencePost {
+    async fn post_request(&self, endpoint: &str, body: Value) -> Result<Value, ApiError> {
+        self.calls.lock().unwrap().push((endpoint.to_owned(), body));
+        match self.responses.lock().unwrap().pop_front() {
+            Some(v) => Ok(v),
+            None => Err(ApiError::Http {
+                status: 500,
+                message: "SequencePost: response queue exhausted".to_owned(),
             }),
         }
     }
@@ -262,6 +296,228 @@ fn playlist_tracks_keeps_existing_vl_prefix() {
     let _ = block_on(get_playlist_tracks(&client, "VLPL_already")).expect("ok");
     let (_, body) = client.last();
     assert_eq!(body["browseId"], "VLPL_already", "VL prefix not doubled");
+}
+
+// ---------------------------------------------------------------------------
+// playlist tracks — continuation paging (issue #6)
+// ---------------------------------------------------------------------------
+
+/// Build a minimal initial playlist response with `videoIds` as rows, optionally
+/// carrying a `continuations[0].nextContinuationData.continuation` token.
+fn make_initial_playlist_page(video_ids: &[&str], next_token: Option<&str>) -> Value {
+    let contents: Vec<Value> = video_ids.iter().map(|v| playlist_row(v)).collect();
+    let mut shelf = serde_json::json!({
+        "musicPlaylistShelfRenderer": { "contents": contents },
+    });
+    if let Some(token) = next_token {
+        shelf["musicPlaylistShelfRenderer"]["continuations"] = serde_json::json!([
+            { "nextContinuationData": { "continuation": token, "clickTrackingParams": "ctp" } }
+        ]);
+    }
+    serde_json::json!({
+        "contents": {
+            "twoColumnBrowseResultsRenderer": {
+                "secondaryContents": {
+                    "sectionListRenderer": { "contents": [shelf] }
+                }
+            }
+        }
+    })
+}
+
+/// Build a minimal continuation playlist response with `videoIds` as rows,
+/// optionally carrying the next-page token.
+fn make_continuation_playlist_page(video_ids: &[&str], next_token: Option<&str>) -> Value {
+    let contents: Vec<Value> = video_ids.iter().map(|v| playlist_row(v)).collect();
+    let mut shelf = serde_json::json!({
+        "musicPlaylistShelfContinuation": { "contents": contents },
+    });
+    if let Some(token) = next_token {
+        shelf["musicPlaylistShelfContinuation"]["continuations"] = serde_json::json!([
+            { "nextContinuationData": { "continuation": token, "clickTrackingParams": "ctp" } }
+        ]);
+    }
+    serde_json::json!({ "continuationContents": shelf })
+}
+
+/// Build a minimal MRLIR row carrying just the fields stage-2 `dict_to_track`
+/// needs (videoId + a title flex column with the play-button overlay).
+fn playlist_row(video_id: &str) -> Value {
+    serde_json::json!({
+        "musicResponsiveListItemRenderer": {
+            "flexColumns": [
+                { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [
+                    { "text": format!("Track {video_id}"),
+                      "navigationEndpoint": {
+                        "watchEndpoint": { "videoId": video_id }
+                      }
+                    }
+                ] } } }
+            ],
+            "fixedColumns": [
+                { "musicResponsiveListItemFixedColumnRenderer": {
+                    "text": { "runs": [{ "text": "3:00" }] }
+                } }
+            ],
+            "overlay": {
+                "musicItemThumbnailOverlayRenderer": {
+                    "content": {
+                        "musicPlayButtonRenderer": {
+                            "playNavigationEndpoint": {
+                                "watchEndpoint": { "videoId": video_id }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
+#[test]
+fn playlist_tracks_walks_continuations_across_pages() {
+    // Two-page playlist: page 1 has 2 tracks + a continuation token; page 2 has
+    // 2 more tracks + no token. The flow should load all 4 tracks.
+    let page1 = make_initial_playlist_page(&["v1", "v2"], Some("TOKEN_PAGE_2"));
+    let page2 = make_continuation_playlist_page(&["v3", "v4"], None);
+    let client = SequencePost::new(vec![page1, page2]);
+
+    let tracks = block_on(get_playlist_tracks(&client, "PL_multi")).expect("ok");
+    assert_eq!(tracks.len(), 4, "all pages loaded");
+    let ids: Vec<&str> = tracks.iter().map(|t| t.video_id.as_str()).collect();
+    assert_eq!(ids, vec!["v1", "v2", "v3", "v4"]);
+
+    // The second call must carry the continuation token in the body, not a
+    // browseId — that is the distinguishing wire shape vs. the initial fetch.
+    let calls = client.calls();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].0, "browse");
+    assert_eq!(calls[0].1["browseId"], "VLPL_multi");
+    assert!(
+        calls[0].1.get("continuation").is_none(),
+        "initial call sends no continuation key"
+    );
+    assert_eq!(calls[1].0, "browse");
+    assert_eq!(calls[1].1["continuation"], "TOKEN_PAGE_2");
+    assert!(
+        calls[1].1.get("browseId").is_none(),
+        "continuation call sends no browseId"
+    );
+}
+
+#[test]
+fn playlist_tracks_walks_three_pages() {
+    // Three-page chain: page 1 → token A → page 2 → token B → page 3 (no token).
+    let page1 = make_initial_playlist_page(&["a1", "a2"], Some("TOKEN_A"));
+    let page2 = make_continuation_playlist_page(&["b1", "b2"], Some("TOKEN_B"));
+    let page3 = make_continuation_playlist_page(&["c1"], None);
+    let client = SequencePost::new(vec![page1, page2, page3]);
+
+    let tracks = block_on(get_playlist_tracks(&client, "PL_three")).expect("ok");
+    assert_eq!(tracks.len(), 5, "three pages flattened");
+    let ids: Vec<&str> = tracks.iter().map(|t| t.video_id.as_str()).collect();
+    assert_eq!(ids, vec!["a1", "a2", "b1", "b2", "c1"]);
+
+    let calls = client.calls();
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[1].1["continuation"], "TOKEN_A");
+    assert_eq!(calls[2].1["continuation"], "TOKEN_B");
+}
+
+#[test]
+fn playlist_tracks_single_page_makes_one_call() {
+    // The existing single-page fixture has no continuations; the flow must
+    // exit after one call (no extra browse posts).
+    let client = FakePost::new(fixture("playlist.json"));
+    let tracks = block_on(get_playlist_tracks(&client, "PL_test")).expect("ok");
+    assert_eq!(tracks.len(), 3, "single-page fixture unchanged");
+    // FakePost only remembers the last call; we rely on the SequencePost test
+    // above for ordering. Here we just confirm the call shape: no continuation.
+    let (_, body) = client.last();
+    assert!(
+        body.get("continuation").is_none(),
+        "single-page flow sends no continuation key"
+    );
+}
+
+#[test]
+fn playlist_tracks_respects_50_page_bound() {
+    // A pathological server that never stops returning continuation tokens:
+    // build 60 continuation pages, all with the same "next" token. The flow
+    // must terminate at MAX_PLAYLIST_CONTINUATION_PAGES (50) total
+    // continuation calls + 1 initial = 51 calls.
+    let mut pages: Vec<Value> = Vec::new();
+    pages.push(make_initial_playlist_page(&["v0"], Some("LOOP")));
+    for i in 0..60 {
+        // Each page carries one unique videoId so we can count rows; the
+        // continuation token always points to another loop page.
+        pages.push(make_continuation_playlist_page(
+            &[&format!("v{}", i + 1)],
+            Some("LOOP"),
+        ));
+    }
+    let client = SequencePost::new(pages);
+
+    let tracks = block_on(get_playlist_tracks(&client, "PL_runaway")).expect("ok");
+    // 1 initial page (1 track) + 50 continuation pages (1 track each) = 51.
+    assert_eq!(tracks.len(), 51, "bound caps continuation walking at 50");
+    assert_eq!(
+        client.calls().len(),
+        51,
+        "exactly 1 initial + 50 continuation calls"
+    );
+}
+
+#[test]
+fn playlist_tracks_continuation_propagates_transport_error() {
+    // Page 1 succeeds and carries a continuation token; page 2 fails. The
+    // error must propagate — partial tracks must NOT be returned silently.
+    struct FailOnContinuation {
+        first_response: Value,
+        calls: Mutex<usize>,
+    }
+    impl PostRequest for FailOnContinuation {
+        async fn post_request(&self, _endpoint: &str, _body: Value) -> Result<Value, ApiError> {
+            let mut n = self.calls.lock().unwrap();
+            *n += 1;
+            if *n == 1 {
+                Ok(self.first_response.clone())
+            } else {
+                Err(ApiError::Http {
+                    status: 502,
+                    message: "boom".to_owned(),
+                })
+            }
+        }
+    }
+
+    let client = FailOnContinuation {
+        first_response: make_initial_playlist_page(&["v1"], Some("TOKEN")),
+        calls: Mutex::new(0),
+    };
+    let err = block_on(get_playlist_tracks(&client, "PL")).expect_err("should fail");
+    assert!(
+        matches!(err, ApiError::Http { status: 502, .. }),
+        "got: {err:?}"
+    );
+}
+
+#[test]
+fn playlist_tracks_empty_continuation_response_terminates() {
+    // Page 1 carries a token but page 2 has no shelf at all (e.g. server
+    // returned an empty `continuationContents`). The flow must stop cleanly
+    // and return whatever it has so far — no panic, no extra calls.
+    let page1 = make_initial_playlist_page(&["v1"], Some("TOKEN"));
+    let empty_page = serde_json::json!({ "continuationContents": {} });
+    let client = SequencePost::new(vec![page1, empty_page]);
+
+    let tracks = block_on(get_playlist_tracks(&client, "PL")).expect("ok");
+    assert_eq!(tracks.len(), 1, "only page 1 contributed");
+    assert_eq!(
+        client.calls().len(),
+        2,
+        "one initial + one continuation call"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -801,6 +1057,64 @@ fn rate_track_propagates_transport_error() {
 }
 
 // ---------------------------------------------------------------------------
+// rate_playlist (save / remove album or playlist from the library — issue #12)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rate_playlist_like_posts_correct_endpoint_and_body() {
+    // The save path targets `like/like` with `{target: {playlistId}}` — the
+    // playlist-id form of the same endpoint `rate_track` uses for video ids.
+    let client = FakePost::new(serde_json::json!({}));
+    block_on(rate_playlist(&client, "OLAK5uy_album_audio_id", "LIKE")).expect("rate ok");
+    let (endpoint, body) = client.last();
+    assert_eq!(endpoint, "like/like");
+    assert_eq!(body["target"]["playlistId"], "OLAK5uy_album_audio_id");
+    assert!(
+        body["target"].get("videoId").is_none(),
+        "playlist-rate body must not carry a videoId"
+    );
+}
+
+#[test]
+fn rate_playlist_unlike_posts_removelike() {
+    let client = FakePost::new(serde_json::json!({}));
+    block_on(rate_playlist(&client, "PL_user_playlist", "INDIFFERENT")).expect("ok");
+    let (endpoint, body) = client.last();
+    assert_eq!(endpoint, "like/removelike");
+    assert_eq!(body["target"]["playlistId"], "PL_user_playlist");
+}
+
+#[test]
+fn rate_playlist_strips_vl_prefix() {
+    // ytmusicapi's playlist mutations strip the leading `VL` (a browse-id
+    // artifact); the like endpoints want the bare id. Mirror that here so a
+    // caller wiring a raw browse id straight through still hits the right row.
+    let client = FakePost::new(serde_json::json!({}));
+    block_on(rate_playlist(&client, "VLPL_with_prefix", "LIKE")).expect("ok");
+    let (_, body) = client.last();
+    assert_eq!(body["target"]["playlistId"], "PL_with_prefix");
+}
+
+#[test]
+fn rate_playlist_invalid_status_returns_parse_error() {
+    let client = FakePost::new(serde_json::json!({}));
+    let err = block_on(rate_playlist(&client, "PL_test", "SAVE")).expect_err("should fail");
+    assert!(
+        matches!(err, ApiError::Parse(_)),
+        "invalid status → Parse error, got {err:?}"
+    );
+}
+
+#[test]
+fn rate_playlist_propagates_transport_error() {
+    let err = block_on(rate_playlist(&FailingPost, "PL_test", "LIKE")).expect_err("should fail");
+    assert!(
+        matches!(err, ApiError::Http { status: 500, .. }),
+        "got: {err:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // create_playlist
 // ---------------------------------------------------------------------------
 
@@ -1057,6 +1371,158 @@ fn remove_playlist_items_mutation_failed_on_edit_failure() {
     );
 }
 
+/// Build a multi-page playlist row with embedded setVideoId, for the
+/// continuation-aware remove flow test.
+fn make_playlist_row_with_set_video_id(video_id: &str, set_video_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "musicResponsiveListItemRenderer": {
+            "flexColumns": [
+                { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [
+                    { "text": "Track Title",
+                      "navigationEndpoint": {
+                        "watchEndpoint": { "videoId": video_id }
+                      }
+                    }
+                ] } } }
+            ],
+            "fixedColumns": [
+                { "musicResponsiveListItemFixedColumnRenderer": {
+                    "text": { "runs": [{ "text": "3:00" }] }
+                }}
+            ],
+            "overlay": {
+                "musicItemThumbnailOverlayRenderer": {
+                    "content": {
+                        "musicPlayButtonRenderer": {
+                            "playNavigationEndpoint": {
+                                "watchEndpoint": { "videoId": video_id }
+                            }
+                        }
+                    }
+                }
+            },
+            "menu": {
+                "menuRenderer": {
+                    "items": [
+                        {
+                            "menuServiceItemRenderer": {
+                                "serviceEndpoint": {
+                                    "playlistEditEndpoint": {
+                                        "actions": [
+                                            {
+                                                "action": "ACTION_REMOVE_VIDEO",
+                                                "removedVideoId": video_id,
+                                                "setVideoId": set_video_id
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    })
+}
+
+#[test]
+fn remove_playlist_items_finds_track_on_second_page() {
+    // Target track sits on the continuation page, not the initial page. The
+    // remove flow must walk the continuation chain to resolve setVideoId
+    // before posting the edit, otherwise it would falsely report "not found".
+    let page1_rows = vec![make_playlist_row_with_set_video_id(
+        "vid_first",
+        "setVid_FF",
+    )];
+    let page2_rows = vec![make_playlist_row_with_set_video_id(
+        "vid_target",
+        "setVid_TT",
+    )];
+
+    let mut page1 = serde_json::json!({
+        "contents": {
+            "twoColumnBrowseResultsRenderer": {
+                "secondaryContents": {
+                    "sectionListRenderer": {
+                        "contents": [{
+                            "musicPlaylistShelfRenderer": {
+                                "contents": page1_rows,
+                                "continuations": [
+                                    { "nextContinuationData": {
+                                        "continuation": "TOKEN_PAGE_2",
+                                        "clickTrackingParams": "ctp"
+                                    }}
+                                ]
+                            }
+                        }]
+                    }
+                }
+            }
+        }
+    });
+    // Drop the placeholder None so the type checker keeps the same shape as
+    // make_initial_playlist_page when continuations are present.
+    let _ = page1["contents"].as_object_mut();
+    let page2 = serde_json::json!({
+        "continuationContents": {
+            "musicPlaylistShelfContinuation": { "contents": page2_rows }
+        }
+    });
+    let edit_response = serde_json::json!({ "status": "STATUS_SUCCEEDED" });
+    let client = SequencePost::new(vec![page1, page2, edit_response]);
+
+    let ids = vec!["vid_target".to_owned()];
+    block_on(remove_playlist_items(&client, "PLmulti", &ids)).expect("remove ok");
+
+    let calls = client.calls();
+    assert_eq!(calls.len(), 3, "initial + continuation + edit");
+
+    // Call 1: initial browse for the playlist.
+    assert_eq!(calls[0].0, "browse");
+    assert_eq!(calls[0].1["browseId"], "VLPLmulti");
+
+    // Call 2: continuation browse carrying the page-2 token.
+    assert_eq!(calls[1].0, "browse");
+    assert_eq!(calls[1].1["continuation"], "TOKEN_PAGE_2");
+
+    // Call 3: the edit, with the setVideoId resolved from page 2.
+    assert_eq!(calls[2].0, "browse/edit_playlist");
+    let actions = calls[2].1["actions"].as_array().expect("actions");
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0]["removedVideoId"], "vid_target");
+    assert_eq!(actions[0]["setVideoId"], "setVid_TT");
+}
+
+#[test]
+fn remove_playlist_items_skips_continuation_when_target_on_page_one() {
+    // Optimisation guarantee: when every target videoId is resolved on the
+    // initial page, no continuation call is issued — the happy path for small
+    // playlists must stay fast.
+    let page1_response = make_playlist_with_set_video_ids();
+    // Add a continuation token so the loader *would* page if it did not
+    // early-exit.
+    let mut page1_with_token = page1_response;
+    page1_with_token["contents"]["twoColumnBrowseResultsRenderer"]["secondaryContents"]["sectionListRenderer"]
+        ["contents"][0]["musicPlaylistShelfRenderer"]["continuations"] = serde_json::json!([
+        { "nextContinuationData": { "continuation": "WOULD_BE_FETCHED", "clickTrackingParams": "x" } }
+    ]);
+    let edit_response = serde_json::json!({ "status": "STATUS_SUCCEEDED" });
+    let client = SequencePost::new(vec![page1_with_token, edit_response]);
+
+    let ids = vec!["vid_A".to_owned()];
+    block_on(remove_playlist_items(&client, "PLtest", &ids)).expect("ok");
+
+    let calls = client.calls();
+    assert_eq!(
+        calls.len(),
+        2,
+        "initial + edit only — no continuation fetched"
+    );
+    assert_eq!(calls[0].0, "browse");
+    assert_eq!(calls[1].0, "browse/edit_playlist");
+}
+
 #[test]
 fn remove_playlist_items_strips_vl_from_edit_body() {
     let playlist_response = make_playlist_with_set_video_ids();
@@ -1073,4 +1539,88 @@ fn remove_playlist_items_strips_vl_from_edit_body() {
     assert_eq!(calls[0].1["browseId"], "VLPLtest");
     // Edit body has VL stripped.
     assert_eq!(calls[1].1["playlistId"], "PLtest");
+}
+
+// ---------------------------------------------------------------------------
+// subscribe_artists / unsubscribe_artists
+// ---------------------------------------------------------------------------
+
+#[test]
+fn subscribe_artists_posts_correct_endpoint_and_body() {
+    let client = FakePost::new(serde_json::json!({}));
+    let ids = vec!["UCRB-a6u9flpg0xuBqCf9QlQ".to_owned()];
+    block_on(subscribe_artists(&client, &ids)).expect("subscribe ok");
+    let (endpoint, body) = client.last();
+    assert_eq!(endpoint, "subscription/subscribe");
+    let channel_ids = body["channelIds"].as_array().expect("channelIds array");
+    assert_eq!(channel_ids.len(), 1);
+    assert_eq!(channel_ids[0], "UCRB-a6u9flpg0xuBqCf9QlQ");
+}
+
+#[test]
+fn subscribe_artists_strips_mpla_prefix() {
+    let client = FakePost::new(serde_json::json!({}));
+    // Library-artist channel ids carry the MPLA prefix; the request must use
+    // the bare UC... form.
+    let ids = vec!["MPLAUCRB-a6u9flpg0xuBqCf9QlQ".to_owned()];
+    block_on(subscribe_artists(&client, &ids)).expect("subscribe ok");
+    let (_, body) = client.last();
+    assert_eq!(
+        body["channelIds"][0], "UCRB-a6u9flpg0xuBqCf9QlQ",
+        "MPLA prefix must be stripped"
+    );
+}
+
+#[test]
+fn subscribe_artists_supports_multiple_channels() {
+    let client = FakePost::new(serde_json::json!({}));
+    let ids = vec![
+        "UCRB-a6u9flpg0xuBqCf9QlQ".to_owned(),
+        "MPLAUCf_gP4AMRSgAfyzbkeS9k4g".to_owned(),
+    ];
+    block_on(subscribe_artists(&client, &ids)).expect("subscribe ok");
+    let (_, body) = client.last();
+    let channel_ids = body["channelIds"].as_array().expect("channelIds array");
+    assert_eq!(channel_ids.len(), 2);
+    assert_eq!(channel_ids[0], "UCRB-a6u9flpg0xuBqCf9QlQ");
+    // The second id had its MPLA prefix stripped.
+    assert_eq!(channel_ids[1], "UCf_gP4AMRSgAfyzbkeS9k4g");
+}
+
+#[test]
+fn subscribe_artists_propagates_transport_error() {
+    let ids = vec!["UC123".to_owned()];
+    let err = block_on(subscribe_artists(&FailingPost, &ids)).expect_err("should fail");
+    assert!(
+        matches!(err, ApiError::Http { status: 500, .. }),
+        "got: {err:?}"
+    );
+}
+
+#[test]
+fn unsubscribe_artists_posts_correct_endpoint_and_body() {
+    let client = FakePost::new(serde_json::json!({}));
+    let ids = vec!["UCRB-a6u9flpg0xuBqCf9QlQ".to_owned()];
+    block_on(unsubscribe_artists(&client, &ids)).expect("unsubscribe ok");
+    let (endpoint, body) = client.last();
+    assert_eq!(endpoint, "subscription/unsubscribe");
+    let channel_ids = body["channelIds"].as_array().expect("channelIds array");
+    assert_eq!(channel_ids.len(), 1);
+    assert_eq!(channel_ids[0], "UCRB-a6u9flpg0xuBqCf9QlQ");
+}
+
+#[test]
+fn unsubscribe_artists_strips_mpla_prefix() {
+    let client = FakePost::new(serde_json::json!({}));
+    let ids = vec!["MPLAUCRB-a6u9flpg0xuBqCf9QlQ".to_owned()];
+    block_on(unsubscribe_artists(&client, &ids)).expect("unsubscribe ok");
+    let (_, body) = client.last();
+    assert_eq!(body["channelIds"][0], "UCRB-a6u9flpg0xuBqCf9QlQ");
+}
+
+#[test]
+fn unsubscribe_artists_propagates_transport_error() {
+    let ids = vec!["UC123".to_owned()];
+    let err = block_on(unsubscribe_artists(&FailingPost, &ids)).expect_err("should fail");
+    assert!(matches!(err, ApiError::Http { status: 500, .. }));
 }

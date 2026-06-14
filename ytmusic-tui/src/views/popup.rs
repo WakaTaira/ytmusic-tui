@@ -55,6 +55,24 @@ pub enum ActionKind {
     PlayAll,
     /// Open a playlist/album's detail view.
     Open,
+    /// Copy a shareable YouTube Music link for the item to the system clipboard
+    /// (OSC52). Available on every item type the popup surfaces.
+    CopyLink,
+    /// Subscribe to (follow) an artist. Offered on artist-bearing rows where
+    /// the channel id can be resolved.
+    FollowArtist,
+    /// Unsubscribe from (unfollow) an artist. Offered alongside [`FollowArtist`]
+    /// because the API does not expose the current subscription state on the
+    /// artist browse response, so both actions are listed and the user picks.
+    UnfollowArtist,
+    /// Save an album / playlist to the user's library (issue #12). The save
+    /// endpoint does not expose the current state on the browse response, so
+    /// both [`SaveToLibrary`] and [`RemoveFromLibrary`] are listed alongside
+    /// each other and the user picks the matching action.
+    SaveToLibrary,
+    /// Remove an album / playlist from the user's library (issue #12). See
+    /// [`SaveToLibrary`] for why both directions are always offered.
+    RemoveFromLibrary,
 }
 
 /// The context an action popup was opened in, discriminating the track action
@@ -137,11 +155,29 @@ pub fn build_actions(item: &PopupItem, context: PopupContext) -> Vec<PopupAction
         PopupItem::Playlist(_) => vec![
             PopupAction::new(ActionKind::PlayAll, "Play all"),
             PopupAction::new(ActionKind::Open, "Open"),
+            // Issue #12: save / remove the playlist from the user's library.
+            // The API does not expose the current saved state on the browse
+            // response, so both directions are listed and the user picks.
+            PopupAction::new(ActionKind::SaveToLibrary, "Save to library"),
+            PopupAction::new(ActionKind::RemoveFromLibrary, "Remove from library"),
+            PopupAction::new(ActionKind::CopyLink, "Copy link"),
         ],
         PopupItem::Album(_) => vec![
             PopupAction::new(ActionKind::PlayAll, "Play all"),
             PopupAction::new(ActionKind::Open, "Open"),
             PopupAction::new(ActionKind::GoToArtist, "Go to artist"),
+            // Issue #11: follow / unfollow the album's artist. The API does not
+            // expose the current subscription state on the artist browse
+            // response, so both actions are listed and the user picks the
+            // appropriate one.
+            PopupAction::new(ActionKind::FollowArtist, "Follow artist"),
+            PopupAction::new(ActionKind::UnfollowArtist, "Unfollow artist"),
+            // Issue #12: save / remove the album from the user's library.
+            // Same "both directions always listed" reasoning as the artist
+            // follow / unfollow pair above.
+            PopupAction::new(ActionKind::SaveToLibrary, "Save to library"),
+            PopupAction::new(ActionKind::RemoveFromLibrary, "Remove from library"),
+            PopupAction::new(ActionKind::CopyLink, "Copy link"),
         ],
     }
 }
@@ -159,6 +195,7 @@ fn track_actions(context: PopupContext) -> Vec<PopupAction> {
             PopupAction::new(ActionKind::GoToAlbum, "Go to album"),
             PopupAction::new(ActionKind::AddToPlaylist, "Add to playlist"),
             PopupAction::new(ActionKind::ToggleLike, "Like / Unlike"),
+            PopupAction::new(ActionKind::CopyLink, "Copy link"),
         ],
         PopupContext::Queue => vec![
             PopupAction::new(ActionKind::Play, "Play"),
@@ -166,6 +203,7 @@ fn track_actions(context: PopupContext) -> Vec<PopupAction> {
             PopupAction::new(ActionKind::GoToArtist, "Go to artist"),
             PopupAction::new(ActionKind::GoToAlbum, "Go to album"),
             PopupAction::new(ActionKind::AddToPlaylist, "Add to playlist"),
+            PopupAction::new(ActionKind::CopyLink, "Copy link"),
         ],
         PopupContext::PlaylistTracks => vec![
             PopupAction::new(ActionKind::Play, "Play"),
@@ -173,6 +211,7 @@ fn track_actions(context: PopupContext) -> Vec<PopupAction> {
             PopupAction::new(ActionKind::RemoveFromPlaylist, "Remove from playlist"),
             PopupAction::new(ActionKind::GoToArtist, "Go to artist"),
             PopupAction::new(ActionKind::GoToAlbum, "Go to album"),
+            PopupAction::new(ActionKind::CopyLink, "Copy link"),
         ],
     }
 }
@@ -739,6 +778,10 @@ mod tests {
 
     #[test]
     fn track_action_list_matches_python() {
+        // Issue #14 appends `CopyLink` to every track action list (Plain/Queue/
+        // PlaylistTracks) and to the playlist/album lists. The earlier kinds
+        // remain unchanged so the keyboard muscle memory still hits the same
+        // entries.
         let actions = build_actions(
             &PopupItem::Track(track("v1", "Song", "Band")),
             PopupContext::Plain,
@@ -754,6 +797,7 @@ mod tests {
                 ActionKind::GoToAlbum,
                 ActionKind::AddToPlaylist,
                 ActionKind::ToggleLike,
+                ActionKind::CopyLink,
             ]
         );
     }
@@ -773,6 +817,7 @@ mod tests {
                 ActionKind::GoToArtist,
                 ActionKind::GoToAlbum,
                 ActionKind::AddToPlaylist,
+                ActionKind::CopyLink,
             ]
         );
     }
@@ -792,6 +837,7 @@ mod tests {
                 ActionKind::RemoveFromPlaylist,
                 ActionKind::GoToArtist,
                 ActionKind::GoToAlbum,
+                ActionKind::CopyLink,
             ]
         );
     }
@@ -801,7 +847,19 @@ mod tests {
         let pl = PlaylistInfo::new("PL1", "Mix", "", 10, "");
         let actions = build_actions(&PopupItem::Playlist(pl), PopupContext::Plain);
         let kinds: Vec<ActionKind> = actions.iter().map(|a| a.kind).collect();
-        assert_eq!(kinds, vec![ActionKind::PlayAll, ActionKind::Open]);
+        // Issue #12 inserts SaveToLibrary + RemoveFromLibrary between Open and
+        // CopyLink (both shown — the API does not expose the current saved
+        // state on the playlist browse response).
+        assert_eq!(
+            kinds,
+            vec![
+                ActionKind::PlayAll,
+                ActionKind::Open,
+                ActionKind::SaveToLibrary,
+                ActionKind::RemoveFromLibrary,
+                ActionKind::CopyLink,
+            ]
+        );
     }
 
     #[test]
@@ -809,14 +867,110 @@ mod tests {
         let al = AlbumInfo::new_without_tracks("b1", "LP", "Band", "2020", "");
         let actions = build_actions(&PopupItem::Album(al), PopupContext::Plain);
         let kinds: Vec<ActionKind> = actions.iter().map(|a| a.kind).collect();
+        // Issue #11 inserts FollowArtist + UnfollowArtist between GoToArtist
+        // and CopyLink (both shown — the API does not expose the current
+        // subscription state on the artist browse response). Issue #12 appends
+        // SaveToLibrary + RemoveFromLibrary just before CopyLink for the same
+        // "both directions always listed" reason.
         assert_eq!(
             kinds,
             vec![
                 ActionKind::PlayAll,
                 ActionKind::Open,
-                ActionKind::GoToArtist
+                ActionKind::GoToArtist,
+                ActionKind::FollowArtist,
+                ActionKind::UnfollowArtist,
+                ActionKind::SaveToLibrary,
+                ActionKind::RemoveFromLibrary,
+                ActionKind::CopyLink,
             ]
         );
+    }
+
+    #[test]
+    fn album_action_list_includes_save_and_remove_from_library() {
+        // Issue #12 acceptance: every album action popup surfaces both Save
+        // and Remove so the user can act regardless of the unknown current
+        // saved state.
+        let al = AlbumInfo::new_without_tracks("b1", "LP", "Band", "2020", "");
+        let actions = build_actions(&PopupItem::Album(al), PopupContext::Plain);
+        assert!(
+            actions.iter().any(|a| a.kind == ActionKind::SaveToLibrary),
+            "album popup missing SaveToLibrary"
+        );
+        assert!(
+            actions
+                .iter()
+                .any(|a| a.kind == ActionKind::RemoveFromLibrary),
+            "album popup missing RemoveFromLibrary"
+        );
+    }
+
+    #[test]
+    fn playlist_action_list_includes_save_and_remove_from_library() {
+        // Issue #12 acceptance: every playlist action popup surfaces both
+        // Save and Remove for the same "unknown current saved state" reason.
+        let pl = PlaylistInfo::new("PL1", "Mix", "", 10, "");
+        let actions = build_actions(&PopupItem::Playlist(pl), PopupContext::Plain);
+        assert!(
+            actions.iter().any(|a| a.kind == ActionKind::SaveToLibrary),
+            "playlist popup missing SaveToLibrary"
+        );
+        assert!(
+            actions
+                .iter()
+                .any(|a| a.kind == ActionKind::RemoveFromLibrary),
+            "playlist popup missing RemoveFromLibrary"
+        );
+    }
+
+    #[test]
+    fn album_action_list_includes_follow_and_unfollow_artist() {
+        // Issue #11 acceptance: every album action popup surfaces both Follow
+        // and Unfollow so the user can act regardless of the unknown current
+        // subscription state.
+        let al = AlbumInfo::new_without_tracks("b1", "LP", "Band", "2020", "");
+        let actions = build_actions(&PopupItem::Album(al), PopupContext::Plain);
+        assert!(
+            actions.iter().any(|a| a.kind == ActionKind::FollowArtist),
+            "album popup missing FollowArtist"
+        );
+        assert!(
+            actions.iter().any(|a| a.kind == ActionKind::UnfollowArtist),
+            "album popup missing UnfollowArtist"
+        );
+    }
+
+    #[test]
+    fn copylink_is_present_in_every_action_list() {
+        // Issue #14 acceptance: every popup that opens on a track, playlist, or
+        // album surfaces "Copy link". The Plain track list has it last (after
+        // ToggleLike); the playlist and album lists have it last. This locks
+        // the contract so regressions in build_actions are caught in one test.
+        let track_item = PopupItem::Track(track("v1", "Song", "Band"));
+        for ctx in [
+            PopupContext::Plain,
+            PopupContext::Queue,
+            PopupContext::PlaylistTracks,
+        ] {
+            let actions = build_actions(&track_item, ctx);
+            assert!(
+                actions.iter().any(|a| a.kind == ActionKind::CopyLink),
+                "{ctx:?} track list missing CopyLink"
+            );
+        }
+        let pl_actions = build_actions(
+            &PopupItem::Playlist(PlaylistInfo::new("PL1", "Mix", "", 10, "")),
+            PopupContext::Plain,
+        );
+        assert!(pl_actions.iter().any(|a| a.kind == ActionKind::CopyLink));
+        let al_actions = build_actions(
+            &PopupItem::Album(AlbumInfo::new_without_tracks(
+                "b1", "LP", "Band", "2020", "",
+            )),
+            PopupContext::Plain,
+        );
+        assert!(al_actions.iter().any(|a| a.kind == ActionKind::CopyLink));
     }
 
     // -- action popup navigation + selection -------------------------------
