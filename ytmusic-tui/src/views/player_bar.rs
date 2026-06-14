@@ -259,8 +259,16 @@ impl PlayerBarState {
 // Display string builders (pure — unit-tested without a terminal)
 // ---------------------------------------------------------------------------
 
-/// Play / pause icon (Python: `"⏸" if is_playing else "▶"`).
-const ICON_PLAYING: &str = "⏸";
+/// Play / pause icon.
+///
+/// Uses single-cell glyphs from the same display block: U+2016 DOUBLE VERTICAL
+/// LINE for the playing-state pause indicator, and U+25B6 BLACK RIGHT-POINTING
+/// TRIANGLE for the paused-state play indicator. Both render at narrow 1-cell
+/// text width in common monospace fonts (HackGen, JetBrains Mono, Hack), so the
+/// icon does not flip cell width when pause is toggled — keeping the surrounding
+/// title text stable. Replaces the earlier ⏸/▶ pair, where ⏸ (U+23F8) routinely
+/// fell back to an emoji-style wide glyph and forced a visible title shift.
+const ICON_PLAYING: &str = "‖";
 const ICON_PAUSED: &str = "▶";
 
 /// The shuffle indicator letter; styling (bold/dim) is applied by the renderer.
@@ -850,7 +858,7 @@ mod tests {
 
     #[test]
     fn render_playing_shows_pause_icon_with_two_space_gap() {
-        // While playing the bar shows ⏸ followed by two spaces before the title.
+        // While playing the bar shows ‖ followed by two spaces before the title.
         // Python's icon widget is 4 cols wide (width:4; padding-right:1; centered),
         // which produces ~2 spaces between the glyph and the track info.
         let state = PlayerBarState {
@@ -861,10 +869,9 @@ mod tests {
             ..Default::default()
         };
         let text = render_bar(&state, 60);
-        // The rendered line must contain the pause glyph followed by two spaces.
         assert!(
-            text.contains("⏸  Song"),
-            "expected '⏸  Song' (two spaces) in:\n{text}"
+            text.contains("‖  Song"),
+            "expected '‖  Song' (two spaces) in:\n{text}"
         );
     }
 
@@ -894,17 +901,17 @@ mod tests {
             title: "Song".to_owned(),
             ..Default::default()
         };
-        // Before pause: ⏸
+        // Before pause: ‖ (playing-state pause indicator)
         let before = render_bar(&state, 60);
-        assert!(before.contains('⏸'), "expected ⏸ before pause:\n{before}");
+        assert!(before.contains('‖'), "expected ‖ before pause:\n{before}");
         // Fold the pause observation.
         state.on_pause(true);
-        // After pause: ▶
+        // After pause: ▶ (paused-state play indicator)
         let after = render_bar(&state, 60);
         assert!(after.contains('▶'), "expected ▶ after pause:\n{after}");
         assert!(
-            !after.contains('⏸'),
-            "must not show ⏸ after pause:\n{after}"
+            !after.contains('‖'),
+            "must not show ‖ after pause:\n{after}"
         );
     }
 
@@ -929,7 +936,7 @@ mod tests {
         assert!(text.contains("1:23 / 3:45"), "missing time:\n{text}");
         // Pause icon shows while playing.
         assert!(
-            text.contains('⏸'),
+            text.contains('‖'),
             "missing pause icon while playing:\n{text}"
         );
     }

@@ -199,6 +199,15 @@ pub fn respond(cmd: &AppCommand) -> Vec<AppEvent> {
             vec![AppEvent::ActionResult("Liked!".to_owned())]
         }
 
+        AppCommand::RatePlaylist { status, .. } => {
+            let toast = if status == "LIKE" {
+                "Saved to library"
+            } else {
+                "Removed from library"
+            };
+            vec![AppEvent::ActionResult(toast.to_owned())]
+        }
+
         AppCommand::CycleAudioQuality => {
             vec![AppEvent::AudioQualityChanged("high".to_owned())]
         }
@@ -221,7 +230,9 @@ pub fn respond(cmd: &AppCommand) -> Vec<AppEvent> {
         | AppCommand::RemoveFromQueue(_)
         | AppCommand::RemoveFromPlaylist { .. }
         | AppCommand::SearchAndOpenArtist(_)
-        | AppCommand::SearchAndOpenAlbum { .. } => vec![],
+        | AppCommand::SearchAndOpenAlbum { .. }
+        | AppCommand::FollowArtist(_)
+        | AppCommand::UnfollowArtist(_) => vec![],
     }
 }
 

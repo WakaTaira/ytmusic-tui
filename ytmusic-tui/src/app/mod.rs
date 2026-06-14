@@ -214,6 +214,20 @@ pub enum AppCommand {
     /// the current status then flips it. Replies with [`AppEvent::ActionResult`]
     /// (a toast) or [`AppEvent::ApiError`].
     ToggleLike(String),
+    /// Save / remove an album or playlist from the user's library (issue #12,
+    /// the album / playlist popup's "Save to library" / "Remove from library"
+    /// actions). Mirrors [`AppCommand::ToggleLike`] but targets a
+    /// `playlistId` instead of a `videoId`: `status` is `"LIKE"` to save or
+    /// `"INDIFFERENT"` to remove. Replies with [`AppEvent::ActionResult`] on
+    /// success or [`AppEvent::ApiError`] on failure.
+    RatePlaylist {
+        /// The album's `audioPlaylistId` (`OLAK5uy_...`) or the playlist's
+        /// id (`PL...` / `RD...`). Any leading `VL` prefix is stripped
+        /// runtime-side by the API layer.
+        playlist_id: String,
+        /// `"LIKE"` to save or `"INDIFFERENT"` to remove.
+        status: String,
+    },
     /// Add `video_id` to the playlist `playlist_id` (the "Add to playlist"
     /// action after picking an existing playlist). Replies with
     /// [`AppEvent::ActionResult`] or [`AppEvent::ApiError`].
@@ -239,6 +253,17 @@ pub enum AppCommand {
         playlist_id: String,
         video_id: String,
     },
+    /// Subscribe to (follow) an artist (issue #11 / "Follow artist" action).
+    /// The string is the artist's display name — the album popup is the only
+    /// caller today and `AlbumInfo` carries only the artist name, not a
+    /// channel id, so the runtime first resolves the name via the search
+    /// endpoint (mirroring `SearchAndOpenArtist`) and then subscribes to the
+    /// resolved channel id. Replies with [`AppEvent::ActionResult`] on success
+    /// or [`AppEvent::ApiError`] on failure (including "artist not found").
+    FollowArtist(String),
+    /// Unsubscribe from (unfollow) an artist (issue #11 / "Unfollow artist"
+    /// action). Same name-based resolution as [`AppCommand::FollowArtist`].
+    UnfollowArtist(String),
     /// Shut the runtime down cleanly; the command loop exits after this.
     Quit,
 }
@@ -651,6 +676,12 @@ fn run_runtime(
                 AppCommand::ToggleLike(video_id) => {
                     handle_toggle_like(client.as_ref(), &video_id, events).await;
                 }
+                AppCommand::RatePlaylist {
+                    playlist_id,
+                    status,
+                } => {
+                    handle_rate_playlist(client.as_ref(), &playlist_id, &status, events).await;
+                }
                 AppCommand::AddToPlaylist {
                     playlist_id,
                     video_id,
@@ -670,6 +701,12 @@ fn run_runtime(
                 } => {
                     handle_remove_from_playlist(client.as_ref(), &playlist_id, &video_id, events)
                         .await;
+                }
+                AppCommand::FollowArtist(name) => {
+                    handle_follow_artist(client.as_ref(), &name, events).await;
+                }
+                AppCommand::UnfollowArtist(name) => {
+                    handle_unfollow_artist(client.as_ref(), &name, events).await;
                 }
             }
             // After every command, push a fresh MPRIS snapshot built from the
@@ -1298,6 +1335,41 @@ async fn handle_toggle_like(
     }
 }
 
+/// Save / remove `playlist_id` from the user's library (issue #12).
+///
+/// Mirrors [`handle_toggle_like`] but for albums / playlists: the same
+/// `like/{like,removelike}` endpoint family, with `{target: {playlistId}}`
+/// instead of `{target: {videoId}}`. Unlike the track toggle there is no
+/// `get_like_status` equivalent for playlists, so `status` is passed in by
+/// the caller (the popup surfaces both "Save" and "Remove" so the user
+/// picks the direction).
+async fn handle_rate_playlist(
+    client: Option<&InnerTubeClient>,
+    playlist_id: &str,
+    status: &str,
+    events: &StdSender<AppEvent>,
+) {
+    let Some(client) = client else {
+        let _ = events.send(AppEvent::ApiError(
+            "Not signed in — run: ytmusic-tui auth".to_owned(),
+        ));
+        return;
+    };
+    match client.rate_playlist(playlist_id, status).await {
+        Ok(()) => {
+            let toast = if status == "LIKE" {
+                "Saved to library"
+            } else {
+                "Removed from library"
+            };
+            let _ = events.send(AppEvent::ActionResult(toast.to_owned()));
+        }
+        Err(err) => {
+            let _ = events.send(AppEvent::ApiError(ytmusic_api::classify_api_error(&err)));
+        }
+    }
+}
+
 /// Add `video_id` to the playlist `playlist_id`. Mirrors Python's
 /// `add_playlist_items(playlist_id, [video_id])`.
 async fn handle_add_to_playlist(
@@ -1350,6 +1422,113 @@ async fn handle_remove_from_playlist(
             let _ = events.send(AppEvent::ApiError(ytmusic_api::classify_api_error(&err)));
         }
     }
+}
+
+/// Whether [`resolve_artist_for_subscription`] should follow or unfollow.
+enum SubscriptionOp {
+    Follow,
+    Unfollow,
+}
+
+/// Resolve an artist by display `name` to a channel id via search.
+///
+/// Mirrors the resolution half of [`handle_search_and_open_artist`]: search
+/// `name` with the `artists` filter, take the first result that carries a
+/// non-empty `channel_id`. Returns `None` after emitting the appropriate
+/// [`AppEvent::ApiError`] toast on any failure path (missing client, empty
+/// result, transport error).
+async fn resolve_artist_channel_id(
+    client: Option<&InnerTubeClient>,
+    name: &str,
+    events: &StdSender<AppEvent>,
+) -> Option<String> {
+    let client = match client {
+        Some(c) => c,
+        None => {
+            let _ = events.send(AppEvent::ApiError(
+                "Not signed in — run: ytmusic-tui auth".to_owned(),
+            ));
+            return None;
+        }
+    };
+    match client
+        .search_all(name, LOOKUP_SEARCH_LIMIT, Some("artists"))
+        .await
+    {
+        Ok(results) => match results
+            .artists
+            .into_iter()
+            .find(|a| !a.channel_id.is_empty())
+        {
+            Some(artist) => Some(artist.channel_id),
+            None => {
+                let _ = events.send(AppEvent::ApiError(format!("Artist not found: {name}")));
+                None
+            }
+        },
+        Err(err) => {
+            let _ = events.send(AppEvent::ApiError(ytmusic_api::classify_api_error(&err)));
+            None
+        }
+    }
+}
+
+/// Resolve `name` to a channel id and run the requested subscription op,
+/// emitting an [`AppEvent::ActionResult`] toast on success or an
+/// [`AppEvent::ApiError`] on failure.
+async fn resolve_artist_for_subscription(
+    client: Option<&InnerTubeClient>,
+    name: &str,
+    op: SubscriptionOp,
+    events: &StdSender<AppEvent>,
+) {
+    let Some(channel_id) = resolve_artist_channel_id(client, name, events).await else {
+        return;
+    };
+    // `resolve_artist_channel_id` returns Some only when `client` was Some, so
+    // the next unwrap-via-guard cannot fail.
+    let Some(client) = client else {
+        return;
+    };
+    let ids = [channel_id];
+    let result = match op {
+        SubscriptionOp::Follow => client.subscribe_artists(&ids).await,
+        SubscriptionOp::Unfollow => client.unsubscribe_artists(&ids).await,
+    };
+    match result {
+        Ok(()) => {
+            let toast = match op {
+                SubscriptionOp::Follow => format!("Following {name}"),
+                SubscriptionOp::Unfollow => format!("Unfollowed {name}"),
+            };
+            let _ = events.send(AppEvent::ActionResult(toast));
+        }
+        Err(err) => {
+            let _ = events.send(AppEvent::ApiError(ytmusic_api::classify_api_error(&err)));
+        }
+    }
+}
+
+/// Follow (subscribe to) an artist by display `name`. Mirrors issue #11's
+/// "Follow artist" action: resolve the name to a channel id via search, then
+/// call `subscribe_artists`.
+async fn handle_follow_artist(
+    client: Option<&InnerTubeClient>,
+    name: &str,
+    events: &StdSender<AppEvent>,
+) {
+    resolve_artist_for_subscription(client, name, SubscriptionOp::Follow, events).await;
+}
+
+/// Unfollow (unsubscribe from) an artist by display `name`. Mirrors issue
+/// #11's "Unfollow artist" action: resolve the name to a channel id via
+/// search, then call `unsubscribe_artists`.
+async fn handle_unfollow_artist(
+    client: Option<&InnerTubeClient>,
+    name: &str,
+    events: &StdSender<AppEvent>,
+) {
+    resolve_artist_for_subscription(client, name, SubscriptionOp::Unfollow, events).await;
 }
 
 /// Privacy level for playlists created from the picker's "New playlist…" choice,
