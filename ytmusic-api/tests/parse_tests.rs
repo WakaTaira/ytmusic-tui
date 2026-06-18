@@ -573,20 +573,28 @@ mod test_home_parse {
     /// not on `Some("")`. Opening such a card seeded the nav stack with an
     /// empty `playlist_id` and broke every downstream action with a misleading
     /// "no playlist context" toast.
+    ///
+    /// Fix: `.filter(|s| !s.is_empty())` so `Some("")` is treated like `None`
+    /// and the `album.browse_id` fallback engages — the card stays visible,
+    /// opens correctly, downstream actions get a real id. Dropping the card
+    /// (an earlier attempted fix) was wrong because real YT Music home shelves
+    /// commonly carry album cards with `audioPlaylistId: ""`, and removing
+    /// them all visibly shrank Home.
     #[test]
-    fn test_drops_album_like_card_with_empty_audio_playlist_id() {
+    fn test_album_like_card_with_empty_audio_playlist_id_falls_back_to_browse_id() {
         let section = json!({
             "title": "Mixed for you",
             "contents": [
-                // Malformed: real browseId but audioPlaylistId is an empty string.
+                // Was-malformed: real browseId but audioPlaylistId is "".
+                // Must fall back to browseId, NOT drop.
                 {
                     "browseId": "MPREb_real_album",
                     "audioPlaylistId": "",
-                    "title": "Broken card",
+                    "title": "Recovered card",
                     "artists": [{ "name": "Artist X" }],
                 },
-                // Valid sibling: same branch, audioPlaylistId absent so the
-                // browseId fallback supplies a non-empty playlist id.
+                // Sibling with audioPlaylistId absent — same fallback path,
+                // long-standing behavior.
                 {
                     "browseId": "MPREb_good_album",
                     "title": "Good card",
@@ -598,29 +606,38 @@ mod test_home_parse {
         let sections = parse_home_sections(&[section]);
         assert_eq!(sections.len(), 1);
         let items = &sections[0].items;
-        assert_eq!(items.len(), 1, "malformed card dropped, valid sibling kept");
-        match &items[0] {
-            HomeSectionItem::Playlist(p) => {
-                assert_eq!(p.playlist_id, "MPREb_good_album");
-                assert!(!p.playlist_id.is_empty(), "no empty id ever escapes");
-            }
-            other => panic!("expected Playlist, got {other:?}"),
-        }
+        assert_eq!(items.len(), 2, "both cards kept; neither has an empty id");
+
+        let ids: Vec<&str> = items
+            .iter()
+            .map(|i| match i {
+                HomeSectionItem::Playlist(p) => p.playlist_id.as_str(),
+                other => panic!("expected Playlist, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(ids, vec!["MPREb_real_album", "MPREb_good_album"]);
+        assert!(
+            items.iter().all(|i| matches!(
+                i,
+                HomeSectionItem::Playlist(p) if !p.playlist_id.is_empty()
+            )),
+            "no empty playlist_id should ever escape"
+        );
     }
 
-    /// Defensive companion to the above: even when the only card in a section
-    /// is malformed, the section is still emitted with an empty `items` vec
-    /// (the existing parity invariant — only the broken item is dropped, not
-    /// the whole section).
+    /// Defense-in-depth: `dict_to_album_info` already rejects an empty
+    /// `browseId`, so a card with empty `browseId` + empty `audioPlaylistId`
+    /// never reaches the fallback. The section is still emitted with an
+    /// empty `items` vec — the broken item drops, parity invariant holds.
     #[test]
-    fn test_section_with_only_malformed_album_card_yields_empty_items() {
+    fn test_album_like_card_with_empty_browse_id_drops_via_dict_to_album_info() {
         let section = json!({
             "title": "Mystery section",
             "contents": [
                 {
-                    "browseId": "MPREb_solo",
+                    "browseId": "",
                     "audioPlaylistId": "",
-                    "title": "Lone broken card",
+                    "title": "Truly broken",
                     "artists": [{ "name": "?" }],
                 },
             ],
