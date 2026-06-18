@@ -1723,7 +1723,16 @@ impl AppModel {
                     self.lyrics.start_loading("No track playing");
                 }
             }
-            View::Home | View::Playlist | View::Album | View::Artist => {}
+            View::Playlist => {
+                // Issue #31: the Playlist view's level-1 list is fed by the
+                // shared `LibraryPlaylistsLoaded` fold. If the user opens the
+                // Playlist view directly (e.g. via the 4-key) without first
+                // visiting Library, that fold never fires and the list shows
+                // empty. Kick off the fetch here so the level-1 list always
+                // populates on switch-in.
+                runtime.send(AppCommand::FetchLibraryPlaylists);
+            }
+            View::Home | View::Album | View::Artist => {}
         }
     }
 
@@ -1806,7 +1815,26 @@ impl AppModel {
     fn activate_playlist(&mut self, runtime: &RuntimeHandle) {
         match self.playlist.activate_selected() {
             Some(PlaylistAction::OpenPlaylist(info)) => {
-                // Drill into the selected playlist's tracks (level 2).
+                // Drill into the selected playlist's tracks (level 2). Push
+                // the playlist id onto the nav stack so downstream actions
+                // (Remove from playlist, Save to library, etc.) can resolve
+                // the current playlist's context from `nav.current()`.
+                //
+                // Issue #31: without this push, entering the Playlist view
+                // directly via the 4-key (which only pushes a context-less
+                // "playlist" page) and then opening any playlist with Enter
+                // left the nav context empty — Remove from playlist surfaced
+                // a misleading "no playlist context" toast even though the
+                // user was clearly looking at a real playlist.
+                //
+                // `open_playlist` (the home/search entry point) already does
+                // the same push but also flips the view; here we are already
+                // in the Playlist view, so we only update the nav.
+                self.nav.push(NavPage::with_context(
+                    "playlist",
+                    "playlist_id",
+                    &info.playlist_id,
+                ));
                 self.playlist.show_track_list_loading(&info.title);
                 self.pending_tracks = PendingTracksFetch::Playlist;
                 runtime.send(AppCommand::FetchPlaylistTracks {
@@ -3614,6 +3642,112 @@ mod tests {
             vec![Track::new("v1", "First", "A", "Al", 100.0, "")],
         );
         model
+    }
+
+    #[test]
+    fn switch_view_to_playlist_kicks_off_library_playlists_fetch() {
+        // Issue #31: opening the Playlist view directly (e.g. via the 4-key)
+        // before the user has ever visited Library left the level-1 list
+        // empty because the data is filled by the shared
+        // `LibraryPlaylistsLoaded` fold. The switch-in must now prime that
+        // fetch unconditionally.
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        // Start on Home so the switch is a real transition.
+        assert_eq!(model.view, View::Home);
+
+        model.switch_view(View::Playlist, &runtime);
+
+        assert_eq!(model.view, View::Playlist);
+        let mut saw_fetch = false;
+        while let Ok(cmd) = rx.try_recv() {
+            if matches!(cmd, AppCommand::FetchLibraryPlaylists) {
+                saw_fetch = true;
+            }
+        }
+        assert!(
+            saw_fetch,
+            "switch_view(View::Playlist) must dispatch FetchLibraryPlaylists \
+             so the level-1 list populates even when Library was never visited"
+        );
+    }
+
+    #[test]
+    fn activate_playlist_pushes_playlist_id_onto_nav_context() {
+        // Issue #31: drilling into a playlist via Enter on the level-1 list
+        // must push the playlist id onto the nav stack so downstream actions
+        // (Remove from playlist, Save to library) can resolve it from
+        // `nav.current()`. Previously only the home/search `open_playlist`
+        // path pushed, so entering through the 4-key + Enter sequence left
+        // the nav at a context-less "playlist" page and Remove from playlist
+        // surfaced a misleading "no playlist context" toast.
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        model.view = View::Playlist;
+        model.playlist.set_playlists(vec![
+            PlaylistInfo::new("PL_pick_me", "Alpha", "", 3, ""),
+            PlaylistInfo::new("PL_other", "Beta", "", 9, ""),
+        ]);
+        // Drain anything from the model setup; we only care about what
+        // activate_playlist itself dispatches.
+        while rx.try_recv().is_ok() {}
+
+        model.activate_playlist(&runtime);
+
+        // Nav context now carries the picked playlist's id.
+        assert_eq!(
+            model
+                .nav
+                .current()
+                .context
+                .get("playlist_id")
+                .map(String::as_str),
+            Some("PL_pick_me"),
+            "activate_playlist must push the playlist id so Remove/Save \
+             actions can resolve it from nav.current().context"
+        );
+        // And the drill-in fetch still goes out.
+        let mut saw_tracks_fetch = false;
+        while let Ok(cmd) = rx.try_recv() {
+            if let AppCommand::FetchPlaylistTracks { playlist_id, .. } = cmd
+                && playlist_id == "PL_pick_me"
+            {
+                saw_tracks_fetch = true;
+            }
+        }
+        assert!(
+            saw_tracks_fetch,
+            "FetchPlaylistTracks must fire on drill-in"
+        );
+    }
+
+    #[test]
+    fn library_set_playlists_skips_when_viewing_tracks() {
+        // Issue #31: `open_action_popup` primes `FetchLibraryPlaylists` so
+        // "Add to playlist" has data. If the user is drilled into a track
+        // list in the Library view when that fetch returns, the response must
+        // NOT yank them back to the playlists list — that was the visible
+        // "ドットでメニュー開くとプレイリスト閉じる" symptom.
+        let mut model = AppModel::new(Theme::default());
+        model.library.show_track_list_loading("Drilled-in Mix");
+        assert!(
+            model.library.is_viewing_tracks(),
+            "precondition: drilled in"
+        );
+
+        // Fold what would normally arrive in response to FetchLibraryPlaylists.
+        let _ = model.on_event(AppEvent::LibraryPlaylistsLoaded(vec![PlaylistInfo::new(
+            "PL_refreshed",
+            "Refreshed",
+            "",
+            0,
+            "",
+        )]));
+
+        assert!(
+            model.library.is_viewing_tracks(),
+            "drill-in must survive a background FetchLibraryPlaylists refresh"
+        );
     }
 
     #[test]
