@@ -13,6 +13,24 @@
 //!   keys directly and builds `ArtistInfo::new_minimal`; it does NOT route
 //!   through `dict_to_related_artist` (gotcha M3d-2/4), so [`parse_library_artists`]
 //!   returns the typed [`ArtistInfo`] list rather than a ytmusicapi-shaped dict.
+//!
+//! # Continuations (issue #26)
+//!
+//! Each list endpoint paginates: the initial response carries the first ~25–50
+//! items plus a continuation marker, and the flow walks the chain until the
+//! caller's `limit` is reached. Two shapes are tolerated:
+//!
+//! * **Modern**: a `continuationItemRenderer` sits at the tail of the items
+//!   array (`gridRenderer.items` for playlists/albums, `musicShelfRenderer.contents`
+//!   for artists). Continuation responses arrive under
+//!   `onResponseReceivedActions[0].appendContinuationItemsAction.continuationItems`.
+//! * **Legacy**: the token lives on the renderer itself at
+//!   `…continuations[0].nextContinuationData.continuation`; continuation
+//!   responses use `continuationContents.{gridContinuation,musicShelfContinuation}`.
+//!
+//! Both initial-page parsers and both continuation walkers try modern first
+//! and fall back to legacy. Previously `get_library_*` ignored continuations
+//! entirely, capping users with >25–50 saved items at the first page.
 
 use serde_json::{Value, json};
 
@@ -212,3 +230,192 @@ const TITLE_RUN0_BROWSE_ID: &[Step] = &[
     Step::Key("browseEndpoint"),
     Step::Key("browseId"),
 ];
+
+// ---------------------------------------------------------------------------
+// Continuations (issue #26)
+//
+// All three list endpoints share the same modern-first / legacy-fallback
+// strategy. The grid- and shelf-flavoured helpers below are exported to
+// `mod.rs` so the wrapper flows can drive a uniform paging loop.
+// ---------------------------------------------------------------------------
+
+/// Extract the initial-response next-page token from a `FEmusic_liked_*` GRID
+/// playlist/album response.
+///
+/// Prefers the modern `continuationItemRenderer` sitting at the tail of
+/// `gridRenderer.items`; falls back to the legacy
+/// `gridRenderer.continuations[0].nextContinuationData.continuation` path.
+pub(crate) fn parse_grid_initial_continuation_token(response: &Value) -> Option<String> {
+    if let Some(items) = library_grid_items(response)
+        && let Some(token) = continuation_marker_token(items)
+    {
+        return Some(token);
+    }
+    let section = library_first_section(response)?;
+    nav_str(section, GRID_RENDERER_LEGACY_TOKEN).map(str::to_owned)
+}
+
+/// Extract the next-page token from a GRID continuation response.
+pub(crate) fn parse_grid_continuation_next_token(response: &Value) -> Option<String> {
+    if let Some(items) = nav_array(response, MODERN_CONTINUATION_ITEMS)
+        && let Some(token) = continuation_marker_token(items)
+    {
+        return Some(token);
+    }
+    nav_str(response, GRID_CONTINUATION_LEGACY_NEXT_TOKEN).map(str::to_owned)
+}
+
+/// Parse a GRID continuation response into [`PlaylistInfo`]s (no `skip(1)` —
+/// the "New playlist" pseudo-item only ships on the initial page).
+pub(crate) fn parse_library_continuation_playlists(response: &Value) -> Vec<PlaylistInfo> {
+    grid_continuation_items(response)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.get(MTRIR))
+        .map(parse_playlist_card)
+        .filter_map(|dict| dict_to_playlist_info(&dict))
+        .collect()
+}
+
+/// Parse a GRID continuation response into [`AlbumInfo`]s.
+pub(crate) fn parse_library_continuation_albums(response: &Value) -> Vec<AlbumInfo> {
+    grid_continuation_items(response)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.get(MTRIR))
+        .map(parse_album_card)
+        .filter_map(|dict| dict_to_album_info(&dict))
+        .collect()
+}
+
+/// Extract the initial-response next-page token from a
+/// `FEmusic_library_corpus_track_artists` MUSIC_SHELF response.
+pub(crate) fn parse_shelf_initial_continuation_token(response: &Value) -> Option<String> {
+    if let Some(rows) = library_shelf_contents(response)
+        && let Some(token) = continuation_marker_token(rows)
+    {
+        return Some(token);
+    }
+    let section = library_first_section(response)?;
+    nav_str(section, MUSIC_SHELF_LEGACY_TOKEN).map(str::to_owned)
+}
+
+/// Extract the next-page token from a MUSIC_SHELF continuation response.
+pub(crate) fn parse_shelf_continuation_next_token(response: &Value) -> Option<String> {
+    if let Some(rows) = nav_array(response, MODERN_CONTINUATION_ITEMS)
+        && let Some(token) = continuation_marker_token(rows)
+    {
+        return Some(token);
+    }
+    nav_str(response, SHELF_CONTINUATION_LEGACY_NEXT_TOKEN).map(str::to_owned)
+}
+
+/// Parse a MUSIC_SHELF continuation response into [`ArtistInfo`]s.
+pub(crate) fn parse_library_continuation_artists(response: &Value) -> Vec<ArtistInfo> {
+    shelf_continuation_rows(response)
+        .into_iter()
+        .flatten()
+        .filter_map(|row| row.get(MRLIR))
+        .filter_map(parse_library_artist_row)
+        .collect()
+}
+
+/// Resolve the items array on a GRID continuation response, preferring the
+/// modern `appendContinuationItemsAction` shape.
+fn grid_continuation_items(response: &Value) -> Option<&Vec<Value>> {
+    nav_array(response, MODERN_CONTINUATION_ITEMS)
+        .or_else(|| nav_array(response, GRID_LEGACY_CONTINUATION_ITEMS))
+}
+
+/// Resolve the rows array on a MUSIC_SHELF continuation response, preferring
+/// the modern `appendContinuationItemsAction` shape.
+fn shelf_continuation_rows(response: &Value) -> Option<&Vec<Value>> {
+    nav_array(response, MODERN_CONTINUATION_ITEMS)
+        .or_else(|| nav_array(response, SHELF_LEGACY_CONTINUATION_CONTENTS))
+}
+
+/// When the last element of `items` is a `continuationItemRenderer`, return
+/// its `continuationEndpoint.continuationCommand.token`; otherwise `None`.
+fn continuation_marker_token(items: &[Value]) -> Option<String> {
+    let last = items.last()?;
+    nav_str(last, CONTINUATION_ITEM_TOKEN).map(str::to_owned)
+}
+
+/// Modern continuation response items — same path as for playlists.
+const MODERN_CONTINUATION_ITEMS: &[Step] = &[
+    Step::Key("onResponseReceivedActions"),
+    Step::Index(0),
+    Step::Key("appendContinuationItemsAction"),
+    Step::Key("continuationItems"),
+];
+
+/// Token extraction on a `continuationItemRenderer` row.
+const CONTINUATION_ITEM_TOKEN: &[Step] = &[
+    Step::Key("continuationItemRenderer"),
+    Step::Key("continuationEndpoint"),
+    Step::Key("continuationCommand"),
+    Step::Key("token"),
+];
+
+/// Legacy initial-response token on the GRID renderer:
+/// `gridRenderer.continuations[0].nextContinuationData.continuation` (rooted
+/// at the section returned by [`library_first_section`]).
+const GRID_RENDERER_LEGACY_TOKEN: &[Step] = &[
+    Step::Key("gridRenderer"),
+    Step::Key("continuations"),
+    Step::Index(0),
+    Step::Key("nextContinuationData"),
+    Step::Key("continuation"),
+];
+
+/// Legacy GRID continuation response items.
+const GRID_LEGACY_CONTINUATION_ITEMS: &[Step] = &[
+    Step::Key("continuationContents"),
+    Step::Key("gridContinuation"),
+    Step::Key("items"),
+];
+
+/// Legacy GRID continuation response next-page token.
+const GRID_CONTINUATION_LEGACY_NEXT_TOKEN: &[Step] = &[
+    Step::Key("continuationContents"),
+    Step::Key("gridContinuation"),
+    Step::Key("continuations"),
+    Step::Index(0),
+    Step::Key("nextContinuationData"),
+    Step::Key("continuation"),
+];
+
+/// Legacy initial-response token on the MUSIC_SHELF renderer (rooted at the
+/// section returned by [`library_first_section`]).
+const MUSIC_SHELF_LEGACY_TOKEN: &[Step] = &[
+    Step::Key("musicShelfRenderer"),
+    Step::Key("continuations"),
+    Step::Index(0),
+    Step::Key("nextContinuationData"),
+    Step::Key("continuation"),
+];
+
+/// Legacy MUSIC_SHELF continuation response rows.
+const SHELF_LEGACY_CONTINUATION_CONTENTS: &[Step] = &[
+    Step::Key("continuationContents"),
+    Step::Key("musicShelfContinuation"),
+    Step::Key("contents"),
+];
+
+/// Legacy MUSIC_SHELF continuation response next-page token.
+const SHELF_CONTINUATION_LEGACY_NEXT_TOKEN: &[Step] = &[
+    Step::Key("continuationContents"),
+    Step::Key("musicShelfContinuation"),
+    Step::Key("continuations"),
+    Step::Index(0),
+    Step::Key("nextContinuationData"),
+    Step::Key("continuation"),
+];
+
+/// Defensive upper bound on continuation pages for a single library load.
+///
+/// Library pages run ~25–50 items each; capping at 50 covers ~2500 items per
+/// list — well past any realistic user — while preventing a runaway loop if
+/// the server returns a continuation token that does not advance. If a user
+/// genuinely needs more, paging this up is one constant edit away.
+pub(super) const MAX_LIBRARY_CONTINUATION_PAGES: usize = 50;

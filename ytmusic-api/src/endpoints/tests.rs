@@ -521,6 +521,150 @@ fn playlist_tracks_empty_continuation_response_terminates() {
 }
 
 // ---------------------------------------------------------------------------
+// playlist tracks — modern continuation shape (issue #26)
+//
+// YouTube Music moved the next-page token out of
+// `musicPlaylistShelfRenderer.continuations[0].nextContinuationData` and into
+// a `continuationItemRenderer` sitting at the tail of the same
+// `contents` array; continuation responses now arrive under
+// `onResponseReceivedActions[0].appendContinuationItemsAction.continuationItems`.
+// The legacy-only parser silently capped playlists at one page (~96 visible
+// tracks after the unavailable-track filter). These tests lock the modern
+// shape and the modern↔legacy fallback chain.
+// ---------------------------------------------------------------------------
+
+/// A `continuationItemRenderer` carrying the next-page token under the modern
+/// `continuationEndpoint.continuationCommand` wrapper.
+fn continuation_item_renderer(token: &str) -> Value {
+    serde_json::json!({
+        "continuationItemRenderer": {
+            "continuationEndpoint": {
+                "continuationCommand": {
+                    "token": token,
+                    "request": "CONTINUATION_REQUEST_TYPE_BROWSE",
+                }
+            }
+        }
+    })
+}
+
+/// Build a minimal modern initial playlist response: track rows live in
+/// `musicPlaylistShelfRenderer.contents` and the continuation marker (if any)
+/// is appended as the trailing element.
+fn make_modern_initial_playlist_page(video_ids: &[&str], next_token: Option<&str>) -> Value {
+    let mut contents: Vec<Value> = video_ids.iter().map(|v| playlist_row(v)).collect();
+    if let Some(token) = next_token {
+        contents.push(continuation_item_renderer(token));
+    }
+    serde_json::json!({
+        "contents": {
+            "twoColumnBrowseResultsRenderer": {
+                "secondaryContents": {
+                    "sectionListRenderer": {
+                        "contents": [{
+                            "musicPlaylistShelfRenderer": { "contents": contents }
+                        }]
+                    }
+                }
+            }
+        }
+    })
+}
+
+/// Build a minimal modern continuation playlist response: rows + trailing
+/// `continuationItemRenderer` live in
+/// `onResponseReceivedActions[0].appendContinuationItemsAction.continuationItems`.
+fn make_modern_continuation_playlist_page(video_ids: &[&str], next_token: Option<&str>) -> Value {
+    let mut items: Vec<Value> = video_ids.iter().map(|v| playlist_row(v)).collect();
+    if let Some(token) = next_token {
+        items.push(continuation_item_renderer(token));
+    }
+    serde_json::json!({
+        "onResponseReceivedActions": [{
+            "appendContinuationItemsAction": { "continuationItems": items }
+        }]
+    })
+}
+
+#[test]
+fn playlist_tracks_walks_modern_continuation_shape() {
+    let page1 = make_modern_initial_playlist_page(&["m1", "m2"], Some("MODERN_TOKEN_A"));
+    let page2 = make_modern_continuation_playlist_page(&["m3", "m4"], None);
+    let client = SequencePost::new(vec![page1, page2]);
+
+    let tracks = block_on(get_playlist_tracks(&client, "PL_modern")).expect("ok");
+    assert_eq!(tracks.len(), 4, "modern shape paged through both pages");
+    let ids: Vec<&str> = tracks.iter().map(|t| t.video_id.as_str()).collect();
+    assert_eq!(ids, vec!["m1", "m2", "m3", "m4"]);
+
+    let calls = client.calls();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[1].0, "browse");
+    assert_eq!(calls[1].1["continuation"], "MODERN_TOKEN_A");
+    assert!(
+        calls[1].1.get("browseId").is_none(),
+        "modern continuation call still sends no browseId"
+    );
+}
+
+#[test]
+fn playlist_tracks_walks_modern_three_pages() {
+    let page1 = make_modern_initial_playlist_page(&["a1"], Some("TOK_A"));
+    let page2 = make_modern_continuation_playlist_page(&["b1"], Some("TOK_B"));
+    let page3 = make_modern_continuation_playlist_page(&["c1"], None);
+    let client = SequencePost::new(vec![page1, page2, page3]);
+
+    let tracks = block_on(get_playlist_tracks(&client, "PL_modern3")).expect("ok");
+    assert_eq!(tracks.len(), 3, "three modern pages flattened");
+    let ids: Vec<&str> = tracks.iter().map(|t| t.video_id.as_str()).collect();
+    assert_eq!(ids, vec!["a1", "b1", "c1"]);
+
+    let calls = client.calls();
+    assert_eq!(calls[1].1["continuation"], "TOK_A");
+    assert_eq!(calls[2].1["continuation"], "TOK_B");
+}
+
+#[test]
+fn playlist_tracks_modern_trailing_marker_not_returned_as_track() {
+    // The continuationItemRenderer sits in the same contents array as real
+    // rows. parse_playlist_tracks must filter it out via the MRLIR check —
+    // otherwise a junk "track" would surface on every page.
+    let page1 = make_modern_initial_playlist_page(&["only_one"], Some("X"));
+    let page2 = make_modern_continuation_playlist_page(&[], None);
+    let client = SequencePost::new(vec![page1, page2]);
+
+    let tracks = block_on(get_playlist_tracks(&client, "PL_marker")).expect("ok");
+    assert_eq!(tracks.len(), 1, "trailing continuation marker filtered");
+    assert_eq!(tracks[0].video_id, "only_one");
+}
+
+#[test]
+fn playlist_tracks_mixed_modern_initial_legacy_continuation() {
+    // YT cohorts may serve a modern initial response followed by a legacy
+    // continuation (or vice versa). The fallback chain absorbs either.
+    let page1 = make_modern_initial_playlist_page(&["x1"], Some("MIX_TOK"));
+    let page2 = make_continuation_playlist_page(&["x2"], None); // legacy continuation shape
+    let client = SequencePost::new(vec![page1, page2]);
+
+    let tracks = block_on(get_playlist_tracks(&client, "PL_mix")).expect("ok");
+    assert_eq!(tracks.len(), 2, "modern→legacy chain still walks");
+    let ids: Vec<&str> = tracks.iter().map(|t| t.video_id.as_str()).collect();
+    assert_eq!(ids, vec!["x1", "x2"]);
+}
+
+#[test]
+fn playlist_tracks_mixed_legacy_initial_modern_continuation() {
+    let page1 = make_initial_playlist_page(&["y1"], Some("MIX2_TOK")); // legacy initial
+    let page2 = make_modern_continuation_playlist_page(&["y2"], None); // modern continuation
+    let client = SequencePost::new(vec![page1, page2]);
+
+    let tracks = block_on(get_playlist_tracks(&client, "PL_mix2")).expect("ok");
+    assert_eq!(tracks.len(), 2, "legacy→modern chain still walks");
+    let ids: Vec<&str> = tracks.iter().map(|t| t.video_id.as_str()).collect();
+    assert_eq!(ids, vec!["y1", "y2"]);
+}
+
+// ---------------------------------------------------------------------------
 // liked songs (get_playlist("LM"))
 // ---------------------------------------------------------------------------
 
@@ -661,6 +805,318 @@ fn library_artists_returns_expected() {
     let (endpoint, body) = client.last();
     assert_eq!(endpoint, "browse");
     assert_eq!(body["browseId"], "FEmusic_library_corpus_track_artists");
+}
+
+// ---------------------------------------------------------------------------
+// library continuations (issue #26)
+//
+// All three list endpoints (playlists / albums / artists) now walk
+// continuation chains, both shapes:
+// * modern — `continuationItemRenderer` at the tail + `appendContinuationItemsAction`
+// * legacy — `…continuations[0].nextContinuationData.continuation` + `gridContinuation`
+//            / `musicShelfContinuation` wrappers
+// These tests lock both shapes against synthetic fixtures (no live YTM
+// dependency); the limit / page-bound behavior is covered by the playlist
+// tests since the loop topology is identical.
+// ---------------------------------------------------------------------------
+
+/// Build a minimal MTRIR playlist card (the keys `parse_playlist_card` reads).
+fn library_playlist_card(playlist_id: &str, title: &str, track_count: usize) -> Value {
+    serde_json::json!({
+        "musicTwoRowItemRenderer": {
+            "title": { "runs": [{
+                "text": title,
+                "navigationEndpoint": {
+                    "browseEndpoint": { "browseId": format!("VL{playlist_id}") }
+                }
+            }]},
+            "subtitle": { "runs": [
+                { "text": "Owner" },
+                { "text": " • " },
+                { "text": format!("{track_count} tracks") },
+            ]}
+        }
+    })
+}
+
+/// Build a minimal MTRIR album card (the keys `parse_album_card` reads).
+fn library_album_card(browse_id: &str, title: &str, artist: &str, year: &str) -> Value {
+    serde_json::json!({
+        "musicTwoRowItemRenderer": {
+            "title": { "runs": [{
+                "text": title,
+                "navigationEndpoint": {
+                    "browseEndpoint": { "browseId": browse_id }
+                }
+            }]},
+            "subtitle": { "runs": [
+                { "text": "Album" },
+                { "text": " • " },
+                { "text": artist },
+                { "text": " • " },
+                { "text": year },
+            ]}
+        }
+    })
+}
+
+/// Build a minimal MRLIR artist row (the keys `parse_library_artist_row` reads).
+fn library_artist_row(channel_id: &str, name: &str) -> Value {
+    serde_json::json!({
+        "musicResponsiveListItemRenderer": {
+            "navigationEndpoint": {
+                "browseEndpoint": { "browseId": channel_id }
+            },
+            "flexColumns": [{
+                "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": { "runs": [{ "text": name }] }
+                }
+            }]
+        }
+    })
+}
+
+/// Same continuation marker shape as the playlist tests use.
+fn library_continuation_marker(token: &str) -> Value {
+    serde_json::json!({
+        "continuationItemRenderer": {
+            "continuationEndpoint": {
+                "continuationCommand": {
+                    "token": token,
+                    "request": "CONTINUATION_REQUEST_TYPE_BROWSE",
+                }
+            }
+        }
+    })
+}
+
+/// Wrap GRID items into the library `singleColumnBrowseResultsRenderer` shell
+/// `parse_library_*` walks. `items[0]` is the "New playlist" pseudo-item that
+/// the parser skips — caller supplies real items only.
+fn library_grid_response(real_items: Vec<Value>, tail_marker: Option<Value>) -> Value {
+    let mut items = vec![
+        serde_json::json!({ "musicTwoRowItemRenderer": { "title": { "runs": [
+            { "text": "New playlist" }
+        ]}}}),
+    ];
+    items.extend(real_items);
+    if let Some(marker) = tail_marker {
+        items.push(marker);
+    }
+    serde_json::json!({
+        "contents": {
+            "singleColumnBrowseResultsRenderer": {
+                "tabs": [{ "tabRenderer": { "content": {
+                    "sectionListRenderer": { "contents": [
+                        { "gridRenderer": { "items": items } }
+                    ]}
+                }}}]
+            }
+        }
+    })
+}
+
+/// Same as [`library_grid_response`] but for the MUSIC_SHELF (artists) layout.
+fn library_shelf_response(rows: Vec<Value>, tail_marker: Option<Value>) -> Value {
+    let mut contents = rows;
+    if let Some(marker) = tail_marker {
+        contents.push(marker);
+    }
+    serde_json::json!({
+        "contents": {
+            "singleColumnBrowseResultsRenderer": {
+                "tabs": [{ "tabRenderer": { "content": {
+                    "sectionListRenderer": { "contents": [
+                        { "musicShelfRenderer": { "contents": contents } }
+                    ]}
+                }}}]
+            }
+        }
+    })
+}
+
+/// Build a modern continuation response carrying `items` (plus an optional
+/// trailing marker). Shape matches both grid- and shelf-flavoured continuations
+/// because the modern envelope is universal.
+fn library_modern_continuation_response(items: Vec<Value>, tail_marker: Option<Value>) -> Value {
+    let mut all = items;
+    if let Some(marker) = tail_marker {
+        all.push(marker);
+    }
+    serde_json::json!({
+        "onResponseReceivedActions": [{
+            "appendContinuationItemsAction": { "continuationItems": all }
+        }]
+    })
+}
+
+#[test]
+fn library_playlists_walks_modern_continuation() {
+    // Page 1: 2 playlist cards + continuation marker.
+    let page1 = library_grid_response(
+        vec![
+            library_playlist_card("PL_a", "Alpha", 10),
+            library_playlist_card("PL_b", "Beta", 20),
+        ],
+        Some(library_continuation_marker("LIB_TOK_A")),
+    );
+    // Page 2: 2 more playlist cards, no marker (chain ends).
+    let page2 = library_modern_continuation_response(
+        vec![
+            library_playlist_card("PL_c", "Gamma", 30),
+            library_playlist_card("PL_d", "Delta", 40),
+        ],
+        None,
+    );
+    let client = SequencePost::new(vec![page1, page2]);
+
+    let playlists = block_on(get_library_playlists(&client, 25)).expect("ok");
+    assert_eq!(
+        playlists.len(),
+        4,
+        "all pages flattened past the legacy 1-page cap"
+    );
+    let titles: Vec<&str> = playlists.iter().map(|p| p.title.as_str()).collect();
+    assert_eq!(titles, vec!["Alpha", "Beta", "Gamma", "Delta"]);
+
+    let calls = client.calls();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[1].1["continuation"], "LIB_TOK_A");
+}
+
+#[test]
+fn library_playlists_respects_limit_with_continuation() {
+    // limit=3 with 2 cards/page: page 1 fills 2, page 2 fills the rest; loop
+    // exits after the second call. Limit truncates the final 1 extra.
+    let page1 = library_grid_response(
+        vec![
+            library_playlist_card("PL_a", "A", 1),
+            library_playlist_card("PL_b", "B", 1),
+        ],
+        Some(library_continuation_marker("X")),
+    );
+    let page2 = library_modern_continuation_response(
+        vec![
+            library_playlist_card("PL_c", "C", 1),
+            library_playlist_card("PL_d", "D", 1),
+        ],
+        Some(library_continuation_marker("Y")), // unused — loop stops on limit
+    );
+    let client = SequencePost::new(vec![page1, page2]);
+
+    let playlists = block_on(get_library_playlists(&client, 3)).expect("ok");
+    assert_eq!(playlists.len(), 3, "limit honored");
+    let calls = client.calls();
+    assert_eq!(calls.len(), 2, "no third fetch once limit reached");
+}
+
+#[test]
+fn library_playlists_walks_legacy_continuation() {
+    // Legacy initial shape: gridRenderer.continuations[0].nextContinuationData
+    // sits on the grid renderer itself (no tail marker).
+    let page1 = serde_json::json!({
+        "contents": { "singleColumnBrowseResultsRenderer": {
+            "tabs": [{ "tabRenderer": { "content": { "sectionListRenderer": { "contents": [{
+                "gridRenderer": {
+                    "items": [
+                        serde_json::json!({ "musicTwoRowItemRenderer": { "title": { "runs": [{ "text": "New playlist" }]}}}),
+                        library_playlist_card("PL_legacy_a", "L_A", 3)
+                    ],
+                    "continuations": [{
+                        "nextContinuationData": { "continuation": "LEGACY_TOK", "clickTrackingParams": "ctp" }
+                    }]
+                }
+            }]}}}}]
+        }}
+    });
+    // Legacy continuation response: continuationContents.gridContinuation
+    let page2 = serde_json::json!({
+        "continuationContents": {
+            "gridContinuation": {
+                "items": [library_playlist_card("PL_legacy_b", "L_B", 5)]
+            }
+        }
+    });
+    let client = SequencePost::new(vec![page1, page2]);
+
+    let playlists = block_on(get_library_playlists(&client, 25)).expect("ok");
+    assert_eq!(playlists.len(), 2);
+    let titles: Vec<&str> = playlists.iter().map(|p| p.title.as_str()).collect();
+    assert_eq!(titles, vec!["L_A", "L_B"]);
+    assert_eq!(client.calls()[1].1["continuation"], "LEGACY_TOK");
+}
+
+#[test]
+fn library_albums_walks_modern_continuation() {
+    let page1 = library_grid_response(
+        vec![library_album_card("MPRE_a", "Album A", "Artist A", "2020")],
+        Some(library_continuation_marker("ALB_TOK")),
+    );
+    let page2 = library_modern_continuation_response(
+        vec![library_album_card("MPRE_b", "Album B", "Artist B", "2021")],
+        None,
+    );
+    let client = SequencePost::new(vec![page1, page2]);
+
+    let albums = block_on(get_library_albums(&client, 25)).expect("ok");
+    assert_eq!(albums.len(), 2, "modern continuation walked for albums");
+    let titles: Vec<&str> = albums.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(titles, vec!["Album A", "Album B"]);
+    assert_eq!(client.calls()[1].1["continuation"], "ALB_TOK");
+}
+
+#[test]
+fn library_artists_walks_modern_continuation() {
+    let page1 = library_shelf_response(
+        vec![library_artist_row("MPLAUC_a", "Artist A")],
+        Some(library_continuation_marker("ART_TOK")),
+    );
+    let page2 = library_modern_continuation_response(
+        vec![library_artist_row("MPLAUC_b", "Artist B")],
+        None,
+    );
+    let client = SequencePost::new(vec![page1, page2]);
+
+    let artists = block_on(get_library_artists(&client, 25)).expect("ok");
+    assert_eq!(
+        artists.len(),
+        2,
+        "musicShelfContinuation walked for artists"
+    );
+    let names: Vec<&str> = artists.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(names, vec!["Artist A", "Artist B"]);
+    assert_eq!(client.calls()[1].1["continuation"], "ART_TOK");
+}
+
+#[test]
+fn library_artists_walks_legacy_continuation() {
+    // Legacy shape: musicShelfRenderer.continuations + musicShelfContinuation.
+    let page1 = serde_json::json!({
+        "contents": { "singleColumnBrowseResultsRenderer": {
+            "tabs": [{ "tabRenderer": { "content": { "sectionListRenderer": { "contents": [{
+                "musicShelfRenderer": {
+                    "contents": [library_artist_row("MPLAUC_la", "Legacy A")],
+                    "continuations": [{
+                        "nextContinuationData": { "continuation": "LEGACY_ART_TOK", "clickTrackingParams": "ctp" }
+                    }]
+                }
+            }]}}}}]
+        }}
+    });
+    let page2 = serde_json::json!({
+        "continuationContents": {
+            "musicShelfContinuation": {
+                "contents": [library_artist_row("MPLAUC_lb", "Legacy B")]
+            }
+        }
+    });
+    let client = SequencePost::new(vec![page1, page2]);
+
+    let artists = block_on(get_library_artists(&client, 25)).expect("ok");
+    assert_eq!(artists.len(), 2);
+    let names: Vec<&str> = artists.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(names, vec!["Legacy A", "Legacy B"]);
+    assert_eq!(client.calls()[1].1["continuation"], "LEGACY_ART_TOK");
 }
 
 // ---------------------------------------------------------------------------
