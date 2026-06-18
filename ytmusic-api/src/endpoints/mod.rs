@@ -198,7 +198,13 @@ pub(crate) async fn get_liked_songs(
 ///
 /// Mirrors `api.py::get_library_playlists`: POST `browse FEmusic_liked_playlists`,
 /// run the stage-1 GRID parser (skipping the "New playlist" pseudo-item), then
-/// convert via `dict_to_playlist_info`. `limit` caps the trimmed single page.
+/// convert via `dict_to_playlist_info`.
+///
+/// Issue #26: previously single-page only; library pages cap at ~25–50 items
+/// so users with many saved playlists silently lost the rest. The flow now
+/// walks continuation tokens (modern + legacy shapes — see
+/// [`library`] docs) until `limit` is reached or the chain is exhausted (bound
+/// by [`library::MAX_LIBRARY_CONTINUATION_PAGES`]).
 pub(crate) async fn get_library_playlists(
     client: &impl PostRequest,
     limit: usize,
@@ -207,6 +213,21 @@ pub(crate) async fn get_library_playlists(
         .post_request("browse", json!({ "browseId": "FEmusic_liked_playlists" }))
         .await?;
     let mut playlists = library::parse_library_playlists(&response);
+    let mut next_token = library::parse_grid_initial_continuation_token(&response);
+    let mut pages_loaded = 0usize;
+    while playlists.len() < limit
+        && pages_loaded < library::MAX_LIBRARY_CONTINUATION_PAGES
+        && let Some(token) = next_token
+    {
+        let continuation_response = client
+            .post_request("browse", json!({ "continuation": token }))
+            .await?;
+        playlists.extend(library::parse_library_continuation_playlists(
+            &continuation_response,
+        ));
+        next_token = library::parse_grid_continuation_next_token(&continuation_response);
+        pages_loaded += 1;
+    }
     playlists.truncate(limit);
     Ok(playlists)
 }
@@ -215,6 +236,8 @@ pub(crate) async fn get_library_playlists(
 ///
 /// Mirrors `api.py::get_library_albums`: POST `browse FEmusic_liked_albums`, run
 /// the stage-1 GRID album parser, then convert via `dict_to_album_info`.
+///
+/// Issue #26: same continuation chain as [`get_library_playlists`].
 pub(crate) async fn get_library_albums(
     client: &impl PostRequest,
     limit: usize,
@@ -223,6 +246,21 @@ pub(crate) async fn get_library_albums(
         .post_request("browse", json!({ "browseId": "FEmusic_liked_albums" }))
         .await?;
     let mut albums = library::parse_library_albums(&response);
+    let mut next_token = library::parse_grid_initial_continuation_token(&response);
+    let mut pages_loaded = 0usize;
+    while albums.len() < limit
+        && pages_loaded < library::MAX_LIBRARY_CONTINUATION_PAGES
+        && let Some(token) = next_token
+    {
+        let continuation_response = client
+            .post_request("browse", json!({ "continuation": token }))
+            .await?;
+        albums.extend(library::parse_library_continuation_albums(
+            &continuation_response,
+        ));
+        next_token = library::parse_grid_continuation_next_token(&continuation_response);
+        pages_loaded += 1;
+    }
     albums.truncate(limit);
     Ok(albums)
 }
@@ -233,6 +271,9 @@ pub(crate) async fn get_library_albums(
 /// `browse FEmusic_library_corpus_track_artists`, run the stage-1 MUSIC_SHELF
 /// parser, building [`ArtistInfo`]s straight from the `artist`/`browseId` row
 /// keys (no `dict_to_related_artist` — gotcha M3d-2/4).
+///
+/// Issue #26: walks `musicShelfContinuation` chain (modern + legacy shapes)
+/// until `limit` is reached, mirroring the GRID flow above.
 pub(crate) async fn get_library_artists(
     client: &impl PostRequest,
     limit: usize,
@@ -244,6 +285,21 @@ pub(crate) async fn get_library_artists(
         )
         .await?;
     let mut artists = library::parse_library_artists(&response);
+    let mut next_token = library::parse_shelf_initial_continuation_token(&response);
+    let mut pages_loaded = 0usize;
+    while artists.len() < limit
+        && pages_loaded < library::MAX_LIBRARY_CONTINUATION_PAGES
+        && let Some(token) = next_token
+    {
+        let continuation_response = client
+            .post_request("browse", json!({ "continuation": token }))
+            .await?;
+        artists.extend(library::parse_library_continuation_artists(
+            &continuation_response,
+        ));
+        next_token = library::parse_shelf_continuation_next_token(&continuation_response);
+        pages_loaded += 1;
+    }
     artists.truncate(limit);
     Ok(artists)
 }
