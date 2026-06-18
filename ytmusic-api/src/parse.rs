@@ -417,9 +417,22 @@ pub fn parse_home_sections(raw: &[Value]) -> Vec<HomeSection> {
                     } else if has_browse_id && !has_video_id {
                         // Album-like item: browseId + audioPlaylistId, no videoId
                         let album = dict_to_album_info(item)?;
+                        // Issue #29: many home album cards arrive with
+                        // `audioPlaylistId: ""` (empty string, not absent).
+                        // `Option::unwrap_or` only falls back on `None`, so
+                        // `Some("")` slipped through and produced
+                        // `PlaylistInfo { playlist_id: "" }`, which seeded the
+                        // nav stack with an empty id and broke every downstream
+                        // action ("no playlist context" on Remove from playlist
+                        // was the visible symptom). Treat `Some("")` like
+                        // `None` so the `album.browse_id` fallback engages —
+                        // `dict_to_album_info` already rejects empty
+                        // `browse_id` upstream, so the resolved id is always
+                        // non-empty by the time we get here.
                         let playlist_id = item
                             .get("audioPlaylistId")
                             .and_then(Value::as_str)
+                            .filter(|s| !s.is_empty())
                             .unwrap_or(&album.browse_id)
                             .to_owned();
                         Some(HomeSectionItem::Playlist(PlaylistInfo::new(

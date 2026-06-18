@@ -195,7 +195,19 @@ impl LibraryView {
 
     /// Load the Playlists pane list (`LibraryPlaylistsLoaded`). Returns to the
     /// list level and resets the playlists cursor.
+    ///
+    /// Drill-in guard (issue #31): `open_action_popup` primes
+    /// `FetchLibraryPlaylists` to populate the "Add to playlist" picker cache.
+    /// When the user is already drilled into a track list inside the Library
+    /// view, that refresh must NOT yank them back to the list level — the
+    /// sibling `playlist.set_playlists` handler in `main.rs` has the same
+    /// guard. Skip the level override here too; the cached data still flows
+    /// to `self.library_playlists` upstream of this call, so the picker
+    /// stays fresh.
     pub fn set_playlists(&mut self, playlists: Vec<PlaylistInfo>) {
+        if self.is_viewing_tracks() {
+            return;
+        }
         self.playlists_level = PlaylistsLevel::List(PageState::Loaded(playlists));
         self.cursors[LibraryPane::Playlists.index()] = 0;
     }
