@@ -422,6 +422,18 @@ pub fn parse_home_sections(raw: &[Value]) -> Vec<HomeSection> {
                             .and_then(Value::as_str)
                             .unwrap_or(&album.browse_id)
                             .to_owned();
+                        // Issue #29: home cards whose `browseId` value is an
+                        // empty string (and which carry no `audioPlaylistId`)
+                        // produced `PlaylistInfo { playlist_id: "" }`. Opening
+                        // them left the nav stack with an empty playlist id,
+                        // and every downstream action ("Remove from playlist",
+                        // tracks fetch, etc.) failed with a misleading "no
+                        // playlist context" toast. Drop the card here — the
+                        // surrounding `filter_map` simply skips it, same as
+                        // `dict_to_playlist_info` does for the sibling branch.
+                        if playlist_id.is_empty() {
+                            return None;
+                        }
                         Some(HomeSectionItem::Playlist(PlaylistInfo::new(
                             playlist_id,
                             &album.title,

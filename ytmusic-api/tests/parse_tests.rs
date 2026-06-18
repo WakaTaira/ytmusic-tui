@@ -566,6 +566,70 @@ mod test_home_parse {
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].title, "Good Section");
     }
+
+    /// Issue #29: an album-like card with `audioPlaylistId: ""` (empty string,
+    /// not absent) previously slipped through as `PlaylistInfo { playlist_id: "" }`
+    /// because `Option::unwrap_or(&album.browse_id)` only falls back on `None`,
+    /// not on `Some("")`. Opening such a card seeded the nav stack with an
+    /// empty `playlist_id` and broke every downstream action with a misleading
+    /// "no playlist context" toast.
+    #[test]
+    fn test_drops_album_like_card_with_empty_audio_playlist_id() {
+        let section = json!({
+            "title": "Mixed for you",
+            "contents": [
+                // Malformed: real browseId but audioPlaylistId is an empty string.
+                {
+                    "browseId": "MPREb_real_album",
+                    "audioPlaylistId": "",
+                    "title": "Broken card",
+                    "artists": [{ "name": "Artist X" }],
+                },
+                // Valid sibling: same branch, audioPlaylistId absent so the
+                // browseId fallback supplies a non-empty playlist id.
+                {
+                    "browseId": "MPREb_good_album",
+                    "title": "Good card",
+                    "artists": [{ "name": "Artist Y" }],
+                },
+            ],
+        });
+
+        let sections = parse_home_sections(&[section]);
+        assert_eq!(sections.len(), 1);
+        let items = &sections[0].items;
+        assert_eq!(items.len(), 1, "malformed card dropped, valid sibling kept");
+        match &items[0] {
+            HomeSectionItem::Playlist(p) => {
+                assert_eq!(p.playlist_id, "MPREb_good_album");
+                assert!(!p.playlist_id.is_empty(), "no empty id ever escapes");
+            }
+            other => panic!("expected Playlist, got {other:?}"),
+        }
+    }
+
+    /// Defensive companion to the above: even when the only card in a section
+    /// is malformed, the section is still emitted with an empty `items` vec
+    /// (the existing parity invariant — only the broken item is dropped, not
+    /// the whole section).
+    #[test]
+    fn test_section_with_only_malformed_album_card_yields_empty_items() {
+        let section = json!({
+            "title": "Mystery section",
+            "contents": [
+                {
+                    "browseId": "MPREb_solo",
+                    "audioPlaylistId": "",
+                    "title": "Lone broken card",
+                    "artists": [{ "name": "?" }],
+                },
+            ],
+        });
+
+        let sections = parse_home_sections(&[section]);
+        assert_eq!(sections.len(), 1, "section kept even when all items drop");
+        assert!(sections[0].items.is_empty());
+    }
 }
 
 // ---------------------------------------------------------------------------

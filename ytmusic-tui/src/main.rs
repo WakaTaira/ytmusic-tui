@@ -2006,7 +2006,22 @@ impl AppModel {
     /// Switch to the playlist view, drilling into `info` and pushing the nav
     /// stack (home → playlist) so Esc can pop back. The level-1 library list is
     /// fetched eagerly too, so a subsequent Esc-to-level-1 has data to show.
+    ///
+    /// Defensive line (issue #29): a `PlaylistInfo` with an empty `playlist_id`
+    /// must not be opened — pushing it onto the nav stack would seed the
+    /// "playlist" page with an empty context, breaking every downstream action
+    /// (remove-from-playlist, save-to-library, track fetch) silently. The
+    /// upstream parser (`parse_home_sections` album-like branch) was the known
+    /// leak; this guard surfaces any future regression as a real toast instead
+    /// of a misleading "no playlist context" later.
     fn open_playlist(&mut self, info: ytmusic_api::PlaylistInfo, runtime: &RuntimeHandle) {
+        if info.playlist_id.is_empty() {
+            self.push_toast(
+                "Cannot open playlist: missing id (likely a malformed home section)",
+                Severity::Warning,
+            );
+            return;
+        }
         // Leaving the search view via a result: drop input focus so the flag
         // isn't left stale (inert behind is_input_active, but keep it honest).
         self.close_filter();
@@ -3599,6 +3614,83 @@ mod tests {
             vec![Track::new("v1", "First", "A", "Al", 100.0, "")],
         );
         model
+    }
+
+    #[test]
+    fn open_playlist_rejects_empty_id_with_warning_toast() {
+        // Issue #29: an empty `playlist_id` reaching open_playlist used to push
+        // an empty-context "playlist" page onto the nav stack and silently fail
+        // every downstream action — "Remove from playlist" surfaced a
+        // misleading "no playlist context" toast much later. The guard rejects
+        // the open and surfaces a visible warning instead.
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+        let history_len_before = model.nav.history().len();
+        let view_before = model.view;
+
+        let bad = PlaylistInfo::new("", "Mystery", "", 0, "");
+        model.open_playlist(bad, &runtime);
+
+        assert!(
+            has_toast_containing(&model, "missing id"),
+            "expected a warning toast naming the missing id; got: {:?}",
+            latest_toast(&model)
+        );
+        assert_eq!(
+            model.nav.history().len(),
+            history_len_before,
+            "open_playlist must not push when the id is empty"
+        );
+        assert_eq!(
+            model.view, view_before,
+            "open_playlist must not switch views when rejecting"
+        );
+        // No fetch dispatched for the bogus playlist.
+        while let Ok(cmd) = rx.try_recv() {
+            assert!(
+                !matches!(cmd, AppCommand::FetchPlaylistTracks { .. }),
+                "FetchPlaylistTracks must not be sent for an empty-id playlist"
+            );
+            assert!(
+                !matches!(cmd, AppCommand::FetchLibraryPlaylists),
+                "FetchLibraryPlaylists must not be sent either"
+            );
+        }
+    }
+
+    #[test]
+    fn open_playlist_with_real_id_pushes_nav_and_dispatches_fetch() {
+        // Regression companion: a non-empty id keeps the original behaviour
+        // (push nav, switch view, fire FetchLibraryPlaylists + FetchPlaylistTracks).
+        let (runtime, mut rx) = RuntimeHandle::stub();
+        let mut model = AppModel::new(Theme::default());
+
+        let info = PlaylistInfo::new("PLreal42", "Real list", "", 0, "");
+        model.open_playlist(info, &runtime);
+
+        assert_eq!(model.view, View::Playlist);
+        assert!(
+            !model.nav.history().is_empty(),
+            "open_playlist must push when the id is non-empty"
+        );
+
+        let mut saw_fetch_tracks = false;
+        let mut saw_fetch_library = false;
+        while let Ok(cmd) = rx.try_recv() {
+            match cmd {
+                AppCommand::FetchPlaylistTracks { playlist_id, .. } => {
+                    assert_eq!(playlist_id, "PLreal42");
+                    saw_fetch_tracks = true;
+                }
+                AppCommand::FetchLibraryPlaylists => saw_fetch_library = true,
+                _ => {}
+            }
+        }
+        assert!(saw_fetch_tracks, "FetchPlaylistTracks must be dispatched");
+        assert!(
+            saw_fetch_library,
+            "FetchLibraryPlaylists must be dispatched"
+        );
     }
 
     #[test]
