@@ -79,44 +79,68 @@ the bottom of every view.
 # Install system dependencies (Arch Linux)
 sudo pacman -S mpv yt-dlp
 
-# Build from source
+# Install from crates.io
+cargo install ytmusic-tui
+```
+
+Or build from source:
+
+```bash
 git clone https://github.com/WakaTaira/ytmusic-tui.git
 cd ytmusic-tui
 cargo build --release
-
-# The binary is at:
-#   target/release/ytmusic-tui
-# Install it wherever you like, e.g.:
 cp target/release/ytmusic-tui ~/.local/bin/
 ```
 
 ### Authenticate with YouTube Music
 
-Authentication is cookie-based. You need a `browser.json` file in ytmusicapi
-format at `~/.config/ytmusic-tui/browser.json`. There are two ways to create it:
+Authentication is cookie-based — `ytmusic-tui` reads cookies from your browser
+and writes them to `~/.config/ytmusic-tui/browser.json`.
 
-**Option A — ytmusicapi CLI (requires Python)**
+**Easiest: auto-extract from your signed-in browser**
 
 ```bash
-pip install ytmusicapi
-ytmusicapi browser --file ~/.config/ytmusic-tui/browser.json
+ytmusic-tui auth --from-browser firefox
 ```
 
-The command guides you through copying the request headers from
-music.youtube.com in your browser's DevTools.
+Supported browsers (via [rookie](https://crates.io/crates/rookie)):
+`firefox`, `librewolf`, `chrome`, `chromium`, `brave`, `edge`, `vivaldi`,
+`opera`, `opera_gx`, `arc`, `safari` (macOS only).
 
-**Option B — manual header paste**
+You must already be signed in to [music.youtube.com](https://music.youtube.com)
+in that browser. The command validates the extracted session against the live
+API **before** writing `browser.json`, so a failed extraction never clobbers
+an existing file.
+
+> **Zen Browser:** rookie 0.5.6 does not detect Zen's cookie store yet —
+> Zen keeps cookies at `~/.config/zen/<profile>/cookies.sqlite` rather than
+> Firefox's path. Use the manual paste fallback below until [issue #25](https://github.com/WakaTaira/ytmusic-tui/issues/25)
+> ships a Zen-aware loader.
+
+**Fallback: paste request headers**
+
+```bash
+ytmusic-tui auth
+```
 
 1. Open [music.youtube.com](https://music.youtube.com) and sign in.
 2. Open DevTools → Network → reload the page → pick any `browse` request.
 3. Right-click the request → Copy → Copy as cURL.
-4. Run `ytmusicapi browser` and paste the headers when prompted.
+4. Paste the headers when prompted.
 
-Cookies expire after a while. If your library suddenly shows up empty, run
-`ytmusicapi browser` again (or re-export your headers).
+The command parses the headers (case-insensitive, CRLF-safe), validates that
+`SAPISID` is present, and writes `~/.config/ytmusic-tui/browser.json` at
+mode `0600`.
 
-> **Note:** OAuth is broken upstream (ytmusicapi issue #813). Browser cookie
-> auth is the only working method.
+Cookies expire after a while. If your library suddenly shows up empty,
+re-run either command above.
+
+> **OAuth?** Broken upstream (ytmusicapi issue #813). Browser cookie auth is
+> the only working method right now.
+
+> **Legacy:** the previous `ytmusicapi browser` Python flow still works (the
+> `browser.json` format is identical), but is no longer required — you don't
+> need Python in the install path anymore.
 
 ## Usage
 
